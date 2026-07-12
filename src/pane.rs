@@ -83,6 +83,7 @@ const DIM: &str = "\x1b[2m";
 const BOLD_CYAN: &str = "\x1b[1;36m";
 const BOLD_YELLOW: &str = "\x1b[1;33m";
 const BOLD_WHITE: &str = "\x1b[1;37m";
+const BOLD_GREEN: &str = "\x1b[1;32m";
 
 fn sgr(code: &str, s: &str) -> String {
     format!("{code}{s}{RESET}")
@@ -110,10 +111,21 @@ fn help_text() -> String {
     let mid = format!("\u{2502}{}\u{2502}", sgr(BOLD_CYAN, title));
     let bottom = format!("\u{2570}{}\u{256f}", "\u{2500}".repeat(box_width));
 
+    let getting_started = format!(
+        "  {header}\r\n\r\n  \
+         Press {key} (or click the {plus} button, bottom-right) to spawn\r\n  \
+         a pane. A folder picker opens \u{2014} {pick} to work in, and\r\n  \
+         claude launches right there. Cancel just reuses your last pick.",
+        header = sgr(BOLD_GREEN, "\u{25b6} GETTING STARTED"),
+        key = sgr(BOLD_WHITE, "Super+Alt+Return"),
+        plus = sgr(BOLD_WHITE, "+"),
+        pick = sgr(BOLD_GREEN, "choose the project folder"),
+    );
+
     let panes = section(
         "PANES",
         &[
-            ("Return", "spawn a new claude pane (pick its project folder)"),
+            ("Return", "spawn a new claude pane"),
             ("Shift+Return", "promote focused pane to master (zoom)"),
             ("j  /  k", "focus next / previous pane"),
             ("w", "close the focused pane"),
@@ -141,6 +153,7 @@ fn help_text() -> String {
 
     format!(
         "{top}\r\n{mid}\r\n{bottom}\r\n\r\n\
+         {getting_started}\r\n\r\n\
          {modifier}\r\n\r\n\
          {panes}\r\n{layout}\r\n{help}\r\n{mouse}\r\n\
          {tip}\r\n",
