@@ -15,6 +15,14 @@ PKG_HINT="  Arch/CachyOS:   sudo pacman -S gtk4 vte4
   Fedora:         sudo dnf install gtk4-devel vte291-gtk4-devel
   Debian/Ubuntu:  sudo apt install libgtk-4-dev libvte-2.91-gtk4-dev"
 
+if ! command -v pkg-config >/dev/null 2>&1; then
+    echo "error: pkg-config is not installed." >&2
+    echo "       Arch/CachyOS:   sudo pacman -S pkgconf" >&2
+    echo "       Fedora:         sudo dnf install pkg-config" >&2
+    echo "       Debian/Ubuntu:  sudo apt install pkg-config" >&2
+    exit 1
+fi
+
 if ! pkg-config --atleast-version=4.12 gtk4 2>/dev/null; then
     echo "error: GTK4 >= 4.12 development files not found (pkg-config gtk4)." >&2
     echo "       Install your distro's GTK4 dev package and try again, e.g.:" >&2
