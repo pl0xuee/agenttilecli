@@ -6,20 +6,23 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 BIN_NAME="agenttilecli"
 APP_ID="dev.agenttilecli.AgentTileCli"
 
-if ! command -v cargo >/dev/null 2>&1; then
+have() { command -v "$1" >/dev/null 2>&1; }
+
+if ! have cargo; then
     echo "error: cargo (Rust) is not installed. Install it from https://rustup.rs and try again." >&2
     exit 1
 fi
 
-PKG_HINT="  Arch/CachyOS:   sudo pacman -S gtk4 vte4
-  Fedora:         sudo dnf install gtk4-devel vte291-gtk4-devel
-  Debian/Ubuntu:  sudo apt install libgtk-4-dev libvte-2.91-gtk4-dev"
+# Covers pkg-config itself plus the GTK4/VTE4 dev packages below, since every
+# distro bundles them in one install command anyway.
+PKG_HINT="  Arch/CachyOS:   sudo pacman -S pkgconf gtk4 vte4
+  Fedora:         sudo dnf install pkg-config gtk4-devel vte291-gtk4-devel
+  Debian/Ubuntu:  sudo apt install pkg-config libgtk-4-dev libvte-2.91-gtk4-dev"
 
-if ! command -v pkg-config >/dev/null 2>&1; then
+if ! have pkg-config; then
     echo "error: pkg-config is not installed." >&2
-    echo "       Arch/CachyOS:   sudo pacman -S pkgconf" >&2
-    echo "       Fedora:         sudo dnf install pkg-config" >&2
-    echo "       Debian/Ubuntu:  sudo apt install pkg-config" >&2
+    echo "       Install it (along with GTK4/VTE4, needed next) and try again, e.g.:" >&2
+    echo "$PKG_HINT" >&2
     exit 1
 fi
 
@@ -68,7 +71,7 @@ StartupNotify=true
 StartupWMClass=$APP_ID
 EOF
 
-if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+if have gtk-update-icon-cache; then
     # -t forces a rebuild even though ~/.local/share/icons/hicolor has no
     # index.theme of its own (it's just a user override tree, not a full
     # theme). Without -t, gtk-update-icon-cache silently no-ops here, which
@@ -78,15 +81,15 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     # ignore icons that aren't listed, even if the file is on disk.
     gtk-update-icon-cache -q -f -t "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
 fi
-if command -v update-desktop-database >/dev/null 2>&1; then
+if have update-desktop-database; then
     update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
 fi
 # KDE Plasma keeps its own application menu index separate from the above;
 # without this, a freshly installed .desktop file may not show up in the
 # menu (or fail to launch via a bare command name) until next login.
-if command -v kbuildsycoca6 >/dev/null 2>&1; then
+if have kbuildsycoca6; then
     kbuildsycoca6 >/dev/null 2>&1 || true
-elif command -v kbuildsycoca5 >/dev/null 2>&1; then
+elif have kbuildsycoca5; then
     kbuildsycoca5 >/dev/null 2>&1 || true
 fi
 
@@ -100,21 +103,29 @@ esac
 # "command not found" and exit. Offer to grab it via Anthropic's official
 # native installer so a fresh machine can go from clone to a working pane in
 # one run of this script.
-if ! command -v claude >/dev/null 2>&1; then
+CLAUDE_INSTALL_HINT="curl -fsSL https://claude.ai/install.sh | bash"
+install_claude() {
+    curl -fsSL https://claude.ai/install.sh | bash
+}
+
+if ! have claude; then
     echo
     echo "The 'claude' CLI isn't installed (each pane runs it by default)."
-    if ! command -v curl >/dev/null 2>&1; then
-        echo "Install curl first, then run: curl -fsSL https://claude.ai/install.sh | bash"
+    if ! have curl; then
+        echo "Install curl first, then run: $CLAUDE_INSTALL_HINT"
     elif [ -t 0 ]; then
-        read -r -p "Install it now via the official native installer? [Y/n] " reply
+        # `read` returning non-zero (e.g. Ctrl-D/EOF at the prompt) must not
+        # trip `set -e` and abort the whole script after the build/install
+        # above already succeeded — treat that the same as declining.
+        read -r -p "Install it now via the official native installer? [Y/n] " reply || reply="n"
         case "$reply" in
             [nN]*)
-                echo "Skipped. Install later with: curl -fsSL https://claude.ai/install.sh | bash" ;;
+                echo "Skipped. Install later with: $CLAUDE_INSTALL_HINT" ;;
             *)
-                curl -fsSL https://claude.ai/install.sh | bash \
-                    || echo "warning: claude install failed; install manually later with the command above." >&2 ;;
+                install_claude \
+                    || echo "warning: claude install failed; install manually later with: $CLAUDE_INSTALL_HINT" >&2 ;;
         esac
     else
-        echo "Install later with: curl -fsSL https://claude.ai/install.sh | bash"
+        echo "Install later with: $CLAUDE_INSTALL_HINT"
     fi
 fi
