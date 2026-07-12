@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::os::fd::AsRawFd;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -7,14 +8,27 @@ use gtk4::{gdk, Frame};
 use vte4::{prelude::*, PtyFlags, Terminal};
 
 /// How often to re-check a pane's current directory. Cheap (a single
-/// readlink per pane) so a short interval is fine.
+/// syscall pair per pane) so a short interval is fine.
 const CWD_POLL_INTERVAL: Duration = Duration::from_millis(1000);
 
-/// The current working directory of `pid`, read straight from procfs so it
-/// reflects reality regardless of whether the shell has any OSC7/"report my
-/// cwd" integration configured.
-fn process_cwd(pid: libc::pid_t) -> Option<String> {
-    let link = std::fs::read_link(format!("/proc/{pid}/cwd")).ok()?;
+/// The working directory of whichever process currently holds the
+/// foreground process group of `terminal`'s PTY - the same technique real
+/// terminal emulators use to track "current directory" for tab titles.
+///
+/// This is deliberately *not* the pid `spawn_async` handed back: that's
+/// only the immediate child VTE forked (`$SHELL -lc claude`), and most
+/// shells fork claude as a genuine subprocess rather than exec-replacing
+/// themselves into it - so that pid's cwd is the shell's launch directory
+/// forever, never claude's, and never whatever claude itself is running.
+/// Reading the PTY's foreground group instead tracks whatever is actually
+/// active in the pane at any moment.
+fn foreground_cwd(terminal: &Terminal) -> Option<String> {
+    let pty = terminal.pty()?;
+    let pgrp = unsafe { libc::tcgetpgrp(pty.fd().as_raw_fd()) };
+    if pgrp <= 0 {
+        return None;
+    }
+    let link = std::fs::read_link(format!("/proc/{pgrp}/cwd")).ok()?;
     Some(folder_name(&link.to_string_lossy()))
 }
 
@@ -219,19 +233,19 @@ impl Pane {
         );
 
         // Poll rather than rely on shell-side OSC7 "report my cwd" hooks
-        // (not every shell config sources those) - /proc/<pid>/cwd reflects
-        // reality regardless. Stops itself once the label is destroyed
-        // (pane closed), since it only holds a weak reference to it.
-        let pid_watch = pid.clone();
+        // (not every shell config sources those) - reading the PTY's
+        // foreground process group reflects reality regardless. Stops
+        // itself once the label is destroyed (pane closed), since it only
+        // holds weak references.
         let label_weak = dir_label.downgrade();
+        let terminal_weak = terminal.downgrade();
         gtk4::glib::source::timeout_add_local(CWD_POLL_INTERVAL, move || {
-            let Some(label) = label_weak.upgrade() else {
+            let (Some(label), Some(terminal)) = (label_weak.upgrade(), terminal_weak.upgrade())
+            else {
                 return gtk4::glib::ControlFlow::Break;
             };
-            if let Some(pid) = pid_watch.get() {
-                if let Some(name) = process_cwd(pid) {
-                    label.set_label(&name);
-                }
+            if let Some(name) = foreground_cwd(&terminal) {
+                label.set_label(&name);
             }
             gtk4::glib::ControlFlow::Continue
         });
