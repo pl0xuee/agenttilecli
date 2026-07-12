@@ -15,6 +15,10 @@ you want to nudge it.
 - **Mouse support** — click any pane to focus it, drag any seam between
   panes to resize, click the ✕ in a pane's corner to close it, or click the
   floating **+** button to spawn a new one.
+- **Per-project panes** — spawning a pane asks which project folder to open
+  it in via a native folder picker, pre-filled with your last choice
+  (Cancel just reuses it). Each pane's corner shows the folder name it's
+  running in.
 - **Built-in help pane** — a static cheatsheet of every keybinding, toggle it
   any time with `Super+Alt+/`.
 

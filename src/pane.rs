@@ -113,7 +113,7 @@ fn help_text() -> String {
     let panes = section(
         "PANES",
         &[
-            ("Return", "spawn a new claude pane"),
+            ("Return", "spawn a new claude pane (pick its project folder)"),
             ("Shift+Return", "promote focused pane to master (zoom)"),
             ("j  /  k", "focus next / previous pane"),
             ("w", "close the focused pane"),
@@ -150,8 +150,12 @@ fn help_text() -> String {
             "  tip: panes auto re-tile on spawn/close/promote. grid mode resets\r\n  \
              to equal sizes whenever a pane opens or closes; master-stack's\r\n  \
              divider position persists across pane changes instead. drag any\r\n  \
-             seam anytime to nudge sizes. this pane has no process behind it;\r\n  \
-             close it like any other with Super+Alt+w."
+             seam anytime to nudge sizes. the folder picker remembers your\r\n  \
+             last choice - press Escape/Cancel to reuse it without picking\r\n  \
+             again. the corner label tracks the pane's real directory, so it\r\n  \
+             won't follow claude's own /cd command (that's purely internal\r\n  \
+             to claude, invisible outside its process). this pane has no\r\n  \
+             process behind it; close it like any other with Super+Alt+w."
         ),
     )
 }

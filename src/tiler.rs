@@ -1,6 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use gtk4::gio::prelude::*;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use gtk4::{
@@ -223,6 +224,12 @@ impl Tiler {
             .expect("Tiler always has a layout manager")
             .downcast::<TilerLayout>()
             .expect("Tiler's layout manager is always a TilerLayout")
+    }
+
+    /// The top-level window, used only to parent the folder-picker dialog
+    /// (so it's placed/modal relative to the app instead of floating free).
+    fn parent_window(&self) -> Option<gtk4::Window> {
+        self.root().and_then(|r| r.downcast::<gtk4::Window>().ok())
     }
 
     /// The x-coordinate (in this widget's own space) of the master/stack
@@ -470,9 +477,39 @@ impl Tiler {
         }
     }
 
+    /// Asks (via a folder picker) which project to open, then spawns a pane
+    /// there. The dialog opens pre-filled with the last directory used (or
+    /// the app's own launch directory, the very first time); cancelling it
+    /// just reuses that same directory rather than blocking the spawn.
     pub fn spawn_pane(&self) {
-        let cwd = self.imp().cwd.borrow().clone();
-        let pane = Rc::new(Pane::new(&cwd));
+        let last_dir = self.imp().cwd.borrow().clone();
+
+        let dialog = gtk4::FileDialog::builder()
+            .title("Open project in a new pane")
+            .accept_label("Open")
+            .modal(true)
+            .initial_folder(&gtk4::gio::File::for_path(&last_dir))
+            .build();
+
+        let this = self.clone();
+        let parent = self.parent_window();
+        dialog.select_folder(
+            parent.as_ref(),
+            None::<&gtk4::gio::Cancellable>,
+            move |result| {
+                let dir = result
+                    .ok()
+                    .and_then(|file| file.path())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or(last_dir);
+                this.imp().cwd.replace(dir.clone());
+                this.spawn_pane_in(&dir);
+            },
+        );
+    }
+
+    fn spawn_pane_in(&self, cwd: &str) {
+        let pane = Rc::new(Pane::new(cwd));
 
         let this_weak = self.downgrade();
         let pane_weak = Rc::downgrade(&pane);
