@@ -95,7 +95,7 @@ mod layout_imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for TilerLayout {
-        const NAME: &'static str = "AitileTilerLayout";
+        const NAME: &'static str = "AgentTileCliTilerLayout";
         type Type = super::TilerLayout;
         type ParentType = LayoutManager;
     }
@@ -183,7 +183,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for Tiler {
-        const NAME: &'static str = "AitileTiler";
+        const NAME: &'static str = "AgentTileCliTiler";
         type Type = super::Tiler;
         type ParentType = Widget;
     }

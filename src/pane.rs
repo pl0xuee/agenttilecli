@@ -65,7 +65,7 @@ fn section(title: &str, rows: &[(&str, &str)]) -> String {
 }
 
 fn help_text() -> String {
-    let title = " aitile \u{2014} dynamic tiling window manager for AI CLI sessions ";
+    let title = " AgentTileCLI \u{2014} dynamic tiling window manager for AI CLI sessions ";
     let box_width = title.chars().count();
     let top = format!("\u{256d}{}\u{256e}", "\u{2500}".repeat(box_width));
     let mid = format!("\u{2502}{}\u{2502}", sgr(BOLD_CYAN, title));

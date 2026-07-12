@@ -1,5 +1,5 @@
 [package]
-name = "aitile"
+name = "agenttilecli"
 version = "0.1.0"
 edition = "2024"
 

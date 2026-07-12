@@ -3,6 +3,8 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
+BIN_NAME="agenttilecli"
+
 if ! command -v cargo >/dev/null 2>&1; then
     echo "error: cargo (Rust) is not installed. Install it from https://rustup.rs and try again." >&2
     exit 1
@@ -25,22 +27,27 @@ cargo build --release
 
 BIN_DIR="$HOME/.local/bin"
 APPS_DIR="$HOME/.local/share/applications"
-mkdir -p "$BIN_DIR" "$APPS_DIR"
+ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
+mkdir -p "$BIN_DIR" "$APPS_DIR" "$ICON_DIR"
 
-install -m 755 target/release/aitile "$BIN_DIR/aitile"
+install -m 755 "target/release/$BIN_NAME" "$BIN_DIR/$BIN_NAME"
+install -m 644 assets/icon.svg "$ICON_DIR/$BIN_NAME.svg"
 
-cat > "$APPS_DIR/aitile.desktop" <<EOF
+cat > "$APPS_DIR/$BIN_NAME.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=aitile
+Name=AgentTileCLI
 Comment=Dynamic tiling window manager for AI CLI sessions
-Exec=$BIN_DIR/aitile
-Icon=utilities-terminal
+Exec=$BIN_DIR/$BIN_NAME
+Icon=$BIN_NAME
 Terminal=false
 Categories=Development;TerminalEmulator;
 StartupNotify=true
 EOF
 
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
+fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
 fi
@@ -53,8 +60,8 @@ elif command -v kbuildsycoca5 >/dev/null 2>&1; then
     kbuildsycoca5 >/dev/null 2>&1 || true
 fi
 
-echo "Installed to $BIN_DIR/aitile"
+echo "Installed to $BIN_DIR/$BIN_NAME"
 case ":$PATH:" in
-    *":$BIN_DIR:"*) echo "Run it with: aitile" ;;
-    *) echo "Note: $BIN_DIR is not on your PATH. Add it to your shell profile, or run $BIN_DIR/aitile directly." ;;
+    *":$BIN_DIR:"*) echo "Run it with: $BIN_NAME" ;;
+    *) echo "Note: $BIN_DIR is not on your PATH. Add it to your shell profile, or run $BIN_DIR/$BIN_NAME directly." ;;
 esac

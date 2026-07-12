@@ -1,4 +1,4 @@
-# aitile
+# AgentTileCLI
 
 A native Linux dynamic tiling window manager for AI CLI sessions. Panes are
 real terminals (VTE) that auto re-tile as you spawn, close, or promote them —
@@ -42,24 +42,26 @@ your desktop environment's own `Super+key` shortcuts.
   distro's package manager) to build from source.
 - By default, each pane runs the `claude` CLI in your login shell. If you
   don't have it installed, panes will just show your shell's "command not
-  found" and exit — aitile still works fine as a general terminal tiler.
+  found" and exit — AgentTileCLI still works fine as a general terminal tiler.
 
 ## Install
 
 ```sh
-git clone https://github.com/pl0xuee/aitile.git
-cd aitile
+git clone https://github.com/pl0xuee/agenttilecli.git
+cd agenttilecli
 ./install.sh
 ```
 
-This builds a release binary and installs it to `~/.local/bin/aitile`
-(make sure that's on your `PATH`), plus adds a desktop entry so it shows up
-in your application launcher.
+This builds a release binary and installs it to `~/.local/bin/agenttilecli`
+(make sure that's on your `PATH`), plus adds an icon and a desktop entry so
+it shows up in your application launcher.
 
 To update later, just `git pull && ./install.sh` again.
 
 ## Uninstall
 
 ```sh
-rm ~/.local/bin/aitile ~/.local/share/applications/aitile.desktop
+rm ~/.local/bin/agenttilecli \
+   ~/.local/share/applications/agenttilecli.desktop \
+   ~/.local/share/icons/hicolor/scalable/apps/agenttilecli.svg
 ```

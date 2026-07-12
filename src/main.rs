@@ -8,7 +8,7 @@ use gtk4::{gdk, glib, Application, ApplicationWindow, CssProvider};
 
 use tiler::Tiler;
 
-const APP_ID: &str = "dev.aitile.Aitile";
+const APP_ID: &str = "dev.agenttilecli.AgentTileCli";
 
 fn main() -> glib::ExitCode {
     let app = Application::builder().application_id(APP_ID).build();
@@ -28,6 +28,8 @@ fn load_css() {
 }
 
 fn build_window(app: &Application) {
+    gtk4::Window::set_default_icon_name("agenttilecli");
+
     let cwd = std::env::current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "/".to_string());
@@ -36,7 +38,7 @@ fn build_window(app: &Application) {
 
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("aitile")
+        .title("AgentTileCLI")
         .default_width(1280)
         .default_height(800)
         .child(&tiler)
@@ -46,9 +48,9 @@ fn build_window(app: &Application) {
     tiler.set_title_callback(move |title| {
         if let Some(window) = window_weak.upgrade() {
             let title = if title.is_empty() {
-                "aitile".to_string()
+                "AgentTileCLI".to_string()
             } else {
-                format!("aitile — {title}")
+                format!("AgentTileCLI — {title}")
             };
             window.set_title(Some(&title));
         }
