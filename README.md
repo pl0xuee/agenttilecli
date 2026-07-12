@@ -65,9 +65,15 @@ your desktop environment's own `Super+key` shortcuts.
   | Arch / CachyOS / Manjaro | `sudo pacman -S rust` |
   | Fedora | `sudo dnf install rust cargo` |
   | Debian / Ubuntu (trixie/24.10+ or newer) | `sudo apt install rustc cargo` |
-- By default, each pane runs the `claude` CLI in your login shell. If you
-  don't have it installed, panes will just show your shell's "command not
-  found" and exit — AgentTileCLI still works fine as a general terminal tiler.
+- By default, each pane runs the `claude` CLI in your login shell.
+  `install.sh` offers to install it for you via Anthropic's official native
+  installer if it isn't already on your `PATH`. Without it, panes just show
+  your shell's "command not found" and exit — AgentTileCLI still works fine
+  as a general terminal tiler. To install (or update) it yourself:
+
+  ```sh
+  curl -fsSL https://claude.ai/install.sh | bash
+  ```
 
 ## Install
 

@@ -95,3 +95,26 @@ case ":$PATH:" in
     *":$BIN_DIR:"*) echo "Run it with: $BIN_NAME" ;;
     *) echo "Note: $BIN_DIR is not on your PATH. Add it to your shell profile, or run $BIN_DIR/$BIN_NAME directly." ;;
 esac
+
+# Each pane runs `claude` by default; without it panes just show the shell's
+# "command not found" and exit. Offer to grab it via Anthropic's official
+# native installer so a fresh machine can go from clone to a working pane in
+# one run of this script.
+if ! command -v claude >/dev/null 2>&1; then
+    echo
+    echo "The 'claude' CLI isn't installed (each pane runs it by default)."
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "Install curl first, then run: curl -fsSL https://claude.ai/install.sh | bash"
+    elif [ -t 0 ]; then
+        read -r -p "Install it now via the official native installer? [Y/n] " reply
+        case "$reply" in
+            [nN]*)
+                echo "Skipped. Install later with: curl -fsSL https://claude.ai/install.sh | bash" ;;
+            *)
+                curl -fsSL https://claude.ai/install.sh | bash \
+                    || echo "warning: claude install failed; install manually later with the command above." >&2 ;;
+        esac
+    else
+        echo "Install later with: curl -fsSL https://claude.ai/install.sh | bash"
+    fi
+fi
