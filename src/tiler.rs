@@ -446,6 +446,13 @@ impl Tiler {
                 Handle::Master => return,
             };
             let combined = state.px_a + state.px_b;
+            // Below this, there's no room to give both sides at least
+            // MIN_PANE_PX; `clamp` panics if its min bound exceeds its max,
+            // which is exactly what `combined - MIN_PANE_PX < MIN_PANE_PX`
+            // would do here. Just don't resize rather than crash.
+            if combined < 2.0 * MIN_PANE_PX {
+                return;
+            }
             let new_a = (state.px_a + delta).clamp(MIN_PANE_PX, combined - MIN_PANE_PX);
             let new_b = combined - new_a;
             let sum = state.ratio_a + state.ratio_b;
