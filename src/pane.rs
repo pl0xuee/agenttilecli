@@ -158,7 +158,7 @@ fn help_text() -> String {
         "  {header}\r\n\r\n  \
          Press {key} (or click {plus}, bottom-right) to open a new\r\n  \
          project \u{2014} a folder picker opens, {pick} to work in, and\r\n  \
-         claude launches right there (Cancel reuses your last pick). The\r\n  \
+         claude launches right there (Cancel opens nothing). The\r\n  \
          {agent} button beside it spawns another agent in that same\r\n  \
          project, no picker.",
         header = sgr(BOLD_GREEN, "\u{25b6} GETTING STARTED"),
@@ -221,11 +221,11 @@ fn help_text() -> String {
             "  tip: panes auto re-tile on spawn/close/promote \u{2014} grid resets to\r\n  \
              equal sizes each time; master-stack keeps its divider position.\r\n  \
              drag any seam anytime to nudge sizes by hand. the folder picker\r\n  \
-             remembers your last pick \u{2014} press Escape/Cancel to reuse it\r\n  \
-             without choosing again. the corner label tracks each pane's real\r\n  \
-             directory, not claude's own /cd (that's internal to claude only).\r\n  \
-             this help pane has no process behind it \u{2014} close it like any\r\n  \
-             other with Super+Alt+w."
+             opens pre-filled with your last pick, but Escape/Cancel backs\r\n  \
+             out without spawning anything \u{2014} use new-agent for that instead.\r\n  \
+             the corner label tracks each pane's real directory, not claude's\r\n  \
+             own /cd (that's internal to claude only). this help pane has no\r\n  \
+             process behind it \u{2014} close it like any other with Super+Alt+w."
         ),
     )
 }

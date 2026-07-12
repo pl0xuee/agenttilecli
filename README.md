@@ -19,7 +19,7 @@ you want to nudge it.
   two floating buttons (bottom-right) to spawn new ones.
 - **Per-project panes** — the floating **+** button asks which project
   folder to open via a native folder picker, pre-filled with your last
-  choice (Cancel just reuses it). The button beside it spawns another agent
+  choice (Cancel opens nothing). The button beside it spawns another agent
   in that same project directly, no picker. Each pane's corner shows the
   folder name it's running in.
 - **Built-in help pane** — a static cheatsheet of every keybinding, toggle it

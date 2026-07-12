@@ -490,8 +490,9 @@ impl Tiler {
 
     /// Asks (via a folder picker) which project to open, then spawns a pane
     /// there. The dialog opens pre-filled with the last directory used (or
-    /// the app's own launch directory, the very first time); cancelling it
-    /// just reuses that same directory rather than blocking the spawn.
+    /// the app's own launch directory, the very first time). Cancelling it
+    /// spawns nothing - `spawn_pane_here` is the dedicated way to add a pane
+    /// without picking a folder.
     pub fn spawn_pane(&self) {
         let last_dir = self.imp().cwd.borrow().clone();
 
@@ -508,11 +509,10 @@ impl Tiler {
             parent.as_ref(),
             None::<&gtk4::gio::Cancellable>,
             move |result| {
-                let dir = result
-                    .ok()
-                    .and_then(|file| file.path())
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .unwrap_or(last_dir);
+                let Some(dir) = result.ok().and_then(|file| file.path()) else {
+                    return;
+                };
+                let dir = dir.to_string_lossy().into_owned();
                 this.imp().cwd.replace(dir.clone());
                 this.spawn_pane_in(&dir);
             },
