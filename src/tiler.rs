@@ -28,10 +28,16 @@ const FONT_SCALE_MAX: f64 = 3.0;
 const PANE_WIDTH_PX: i32 = 640;
 const PANE_HEIGHT_PX: i32 = 480;
 
-/// Room left around the edge of the current monitor (taskbar, window
-/// decorations, breathing room) when capping how far `grow_window_for` will
-/// grow the window.
-const MONITOR_MARGIN_PX: i32 = 100;
+/// Room left around the edge of the current monitor when capping how far
+/// `grow_window_for` will grow the window. Deliberately generous: Wayland
+/// gives an app no way to ask where its own window sits on the monitor
+/// (unlike X11), so clamping to "monitor size minus a small margin" is only
+/// airtight if the window happens to sit right at the monitor's corner.
+/// This is a best-effort buffer against ending up partway off-screen when
+/// it doesn't, not a hard guarantee - a bigger margin means more slack
+/// against that, at the cost of capping growth a bit earlier than the
+/// monitor could technically fit.
+const MONITOR_MARGIN_PX: i32 = 300;
 
 /// Which draggable seam the pointer is over.
 #[derive(Clone, Copy, Debug)]
