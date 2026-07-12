@@ -43,8 +43,19 @@ your desktop environment's own `Super+key` shortcuts.
 
 ## Requirements
 
-- Linux with GTK4 and VTE4 installed (the GTK4-flavored VTE terminal widget,
-  package name is usually `vte4` or `vte3-gtk4` depending on distro).
+- Linux with GTK4 (>= 4.12) and the GTK4-flavored VTE terminal widget
+  (>= 0.65) installed, including their `pkg-config`/dev files:
+
+  | Distro | Install command |
+  |---|---|
+  | Arch / CachyOS / Manjaro | `sudo pacman -S gtk4 vte4` |
+  | Fedora | `sudo dnf install gtk4-devel vte291-gtk4-devel` |
+  | Debian / Ubuntu (trixie/24.10+ or newer) | `sudo apt install libgtk-4-dev libvte-2.91-gtk4-dev` |
+
+  Debian's GTK4-flavored VTE package didn't land until fairly recently, so
+  older releases (e.g. Debian 12 "bookworm", which also ships a GTK4 below
+  the 4.12 floor above) won't have it — use a newer release, backports, or
+  build VTE from source.
 - [Rust](https://www.rust-lang.org/tools/install) (via `rustup` or your
   distro's package manager) to build from source.
 - By default, each pane runs the `claude` CLI in your login shell. If you

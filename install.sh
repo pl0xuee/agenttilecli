@@ -11,15 +11,23 @@ if ! command -v cargo >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! pkg-config --exists gtk4 2>/dev/null; then
-    echo "error: GTK4 development files not found (pkg-config gtk4)." >&2
-    echo "       Install your distro's gtk4 package (dev headers) and try again." >&2
+PKG_HINT="  Arch/CachyOS:   sudo pacman -S gtk4 vte4
+  Fedora:         sudo dnf install gtk4-devel vte291-gtk4-devel
+  Debian/Ubuntu:  sudo apt install libgtk-4-dev libvte-2.91-gtk4-dev"
+
+if ! pkg-config --atleast-version=4.12 gtk4 2>/dev/null; then
+    echo "error: GTK4 >= 4.12 development files not found (pkg-config gtk4)." >&2
+    echo "       Install your distro's GTK4 dev package and try again, e.g.:" >&2
+    echo "$PKG_HINT" >&2
     exit 1
 fi
 
-if ! pkg-config --exists vte-2.91-gtk4 2>/dev/null; then
-    echo "error: VTE4 (the GTK4-flavored VTE terminal widget) not found (pkg-config vte-2.91-gtk4)." >&2
-    echo "       Install your distro's vte4 package (sometimes named vte3-gtk4) and try again." >&2
+if ! pkg-config --atleast-version=0.65 vte-2.91-gtk4 2>/dev/null; then
+    echo "error: VTE4 >= 0.65 (the GTK4-flavored VTE terminal widget) not found (pkg-config vte-2.91-gtk4)." >&2
+    echo "       Install your distro's GTK4-flavored VTE dev package and try again, e.g.:" >&2
+    echo "$PKG_HINT" >&2
+    echo "       Note: this package is fairly recent upstream, so older distro releases" >&2
+    echo "       (e.g. Debian 12 bookworm) may not carry it at all." >&2
     exit 1
 fi
 
@@ -53,7 +61,14 @@ StartupWMClass=$APP_ID
 EOF
 
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-    gtk-update-icon-cache -q "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
+    # -t forces a rebuild even though ~/.local/share/icons/hicolor has no
+    # index.theme of its own (it's just a user override tree, not a full
+    # theme). Without -t, gtk-update-icon-cache silently no-ops here, which
+    # leaves a stale icon-theme.cache around — and once that cache exists,
+    # the icon theme spec requires consumers (KDE's KIconLoader, used for
+    # pinned/closed taskbar entries and KRunner search) to trust it and
+    # ignore icons that aren't listed, even if the file is on disk.
+    gtk-update-icon-cache -q -f -t "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
