@@ -131,7 +131,7 @@ fn master_stack(n: usize, master_count: usize, master_ratio: f64, width: i32, he
 /// land in that row, so a partial last row stretches to fill the width
 /// instead of leaving dead space next to a fixed column width.
 fn grid(n: usize, width: i32, height: i32) -> Vec<Rect> {
-    let (cols, rows) = grid_shape(n);
+    let (cols, rows) = grid_shape(n, width, height);
     let row_spans = spans(height, rows);
 
     let mut rects = Vec::with_capacity(n);
@@ -151,14 +151,37 @@ fn grid(n: usize, width: i32, height: i32) -> Vec<Rect> {
     rects
 }
 
-/// The (columns, rows) shape `grid`/`grid_weighted` use for `n` panes.
-pub fn grid_shape(n: usize) -> (usize, usize) {
+/// The (columns, rows) shape `grid`/`grid_weighted` use for `n` panes,
+/// chosen so cells stay as close to square as possible for the given
+/// `width`x`height` area. This is what makes the grid orient itself to
+/// whatever shape the window currently is - a wide window favors more
+/// columns (panes side by side), a tall one favors more rows (panes
+/// stacked) - instead of always laying out the same way regardless of the
+/// window's own aspect ratio. Among shapes that are equally square, the one
+/// wasting fewer cells (i.e. a smaller partial last row/column) wins.
+pub fn grid_shape(n: usize, width: i32, height: i32) -> (usize, usize) {
     if n == 0 {
         return (0, 0);
     }
-    let cols = (n as f64).sqrt().ceil() as usize;
-    let rows = n.div_ceil(cols);
-    (cols, rows)
+    if width <= 0 || height <= 0 {
+        let cols = (n as f64).sqrt().ceil() as usize;
+        return (cols, n.div_ceil(cols));
+    }
+
+    let mut best = (1, n);
+    let mut best_score = f64::MAX;
+    for cols in 1..=n {
+        let rows = n.div_ceil(cols);
+        let cell_ratio =
+            (width as f64 / cols as f64) / (height as f64 / rows as f64);
+        let waste = (cols * rows - n) as f64;
+        let score = cell_ratio.ln().abs() + waste * 0.05;
+        if score < best_score {
+            best_score = score;
+            best = (cols, rows);
+        }
+    }
+    best
 }
 
 /// How many panes land in each row of the grid (the last row may be partial).
@@ -287,7 +310,7 @@ mod tests {
 
     #[test]
     fn grid_weighted_equal_ratios_matches_grid() {
-        let (cols, rows) = grid_shape(3);
+        let (cols, rows) = grid_shape(3, 800, 600);
         let counts = row_item_counts(3, cols, rows);
         let row_ratios = vec![1.0; rows];
         let col_ratios: Vec<Vec<f64>> = counts.iter().map(|&c| vec![1.0; c]).collect();
@@ -303,5 +326,13 @@ mod tests {
         let rects = grid_weighted(2, 800, 600, &[1.0], &[vec![3.0, 1.0]]);
         assert_eq!(rects.len(), 2);
         assert!(rects[0].width > rects[1].width * 2);
+    }
+
+    #[test]
+    fn grid_shape_flips_orientation_with_window_shape() {
+        // Wide window: 2 panes side by side.
+        assert_eq!(grid_shape(2, 1200, 400), (2, 1));
+        // Same 2 panes, tall window: stacked instead.
+        assert_eq!(grid_shape(2, 400, 1200), (1, 2));
     }
 }

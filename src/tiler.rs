@@ -82,11 +82,15 @@ mod layout_imp {
         /// Adjustable Grid-mode weights: one per row, and one per column
         /// within each row (rows can have different item counts because a
         /// partial last row exists). Regenerated to all-equal whenever the
-        /// pane count changes underneath them, since the whole grid shape
-        /// (rows/cols) is recomputed from `n` at that point anyway.
+        /// pane count changes underneath them, or whenever the resolved
+        /// (cols, rows) shape itself flips - e.g. the window being resized
+        /// from wide to tall re-orients the grid from side-by-side to
+        /// stacked - since the whole grid shape is recomputed from `n` and
+        /// the available area at that point anyway.
         pub row_ratios: RefCell<Vec<f64>>,
         pub col_ratios: RefCell<Vec<Vec<f64>>>,
         pub grid_shape_n: Cell<usize>,
+        pub grid_shape_dims: Cell<(usize, usize)>,
     }
 
     impl Default for TilerLayout {
@@ -99,22 +103,27 @@ mod layout_imp {
                 row_ratios: RefCell::new(Vec::new()),
                 col_ratios: RefCell::new(Vec::new()),
                 grid_shape_n: Cell::new(usize::MAX),
+                grid_shape_dims: Cell::new((0, 0)),
             }
         }
     }
 
     impl TilerLayout {
         /// Regenerate all-equal Grid ratios if `n` doesn't match what the
-        /// current ratios were built for.
-        fn ensure_grid_ratios(&self, n: usize) {
-            if self.grid_shape_n.get() == n {
+        /// current ratios were built for, or if the ideal (cols, rows) shape
+        /// for `n` panes in a `width`x`height` area has flipped since (the
+        /// window changed enough to favor the other orientation).
+        fn ensure_grid_ratios(&self, n: usize, width: i32, height: i32) {
+            let shape = layout::grid_shape(n, width, height);
+            if self.grid_shape_n.get() == n && self.grid_shape_dims.get() == shape {
                 return;
             }
-            let (cols, rows) = layout::grid_shape(n);
+            let (cols, rows) = shape;
             let counts = layout::row_item_counts(n, cols, rows);
             *self.row_ratios.borrow_mut() = vec![1.0; rows];
             *self.col_ratios.borrow_mut() = counts.iter().map(|&c| vec![1.0; c]).collect();
             self.grid_shape_n.set(n);
+            self.grid_shape_dims.set(shape);
         }
     }
 
@@ -141,7 +150,7 @@ mod layout_imp {
             }
 
             let rects = if self.mode.get() == Mode::Grid {
-                self.ensure_grid_ratios(n);
+                self.ensure_grid_ratios(n, width, height);
                 layout::grid_weighted(
                     n,
                     width,
@@ -263,18 +272,20 @@ impl Tiler {
     }
 
     /// Grows the window (if needed) to comfortably fit `pane_count` panes
-    /// arranged in the same square-ish grid `layout::grid_shape` uses for
-    /// Grid mode, capped to whichever monitor the window is currently on so
-    /// it can't grow off-screen. Never shrinks it, and - per
-    /// `set_default_size`'s own docs - behaves exactly like a user resize,
-    /// so the user can freely resize smaller (or larger, even past the
-    /// monitor) again afterward; this isn't a lasting constraint, just a
-    /// one-off nudge when a pane needs more room.
+    /// arranged in the same grid `layout::grid_shape` uses for Grid mode
+    /// (oriented to the window's current shape, same as Grid mode itself),
+    /// capped to whichever monitor the window is currently on so it can't
+    /// grow off-screen. Never shrinks it, and - per `set_default_size`'s own
+    /// docs - behaves exactly like a user resize, so the user can freely
+    /// resize smaller (or larger, even past the monitor) again afterward;
+    /// this isn't a lasting constraint, just a one-off nudge when a pane
+    /// needs more room.
     fn grow_window_for(&self, pane_count: usize) {
         let Some(window) = self.parent_window() else {
             return;
         };
-        let (cols, rows) = layout::grid_shape(pane_count);
+        let (cols, rows) =
+            layout::grid_shape(pane_count, window.default_width(), window.default_height());
         let mut ideal_width = cols as i32 * PANE_WIDTH_PX;
         let mut ideal_height = rows as i32 * PANE_HEIGHT_PX;
 
