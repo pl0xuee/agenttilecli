@@ -92,7 +92,7 @@ fn sgr(code: &str, s: &str) -> String {
 /// A `key   description` row, aligned to a fixed key-column width so every
 /// row's description lines up regardless of key length.
 fn row(keys: &str, desc: &str) -> String {
-    format!("  {}  {}", sgr(BOLD_WHITE, &format!("{keys:<16}")), desc)
+    format!("  {}  {}", sgr(BOLD_WHITE, &format!("{keys:<14}")), desc)
 }
 
 fn section(title: &str, rows: &[(&str, &str)]) -> String {
@@ -102,6 +102,49 @@ fn section(title: &str, rows: &[(&str, &str)]) -> String {
         s.push_str("\r\n");
     }
     s
+}
+
+/// On-screen character count of a line that may contain ANSI SGR color
+/// codes (`\x1b[...m`), which have zero display width. Lets `side_by_side`
+/// pad columns to line up regardless of the color codes baked into them.
+fn visible_len(s: &str) -> usize {
+    let mut len = 0;
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            for esc in chars.by_ref() {
+                if esc == 'm' {
+                    break;
+                }
+            }
+        } else {
+            len += 1;
+        }
+    }
+    len
+}
+
+/// Lays two multi-line blocks side by side as one column pair, padding every
+/// left-block line to the widest line in that block (plus `gap` spaces) so
+/// the right block starts in a straight column regardless of left content.
+/// Shorter block is padded with blank rows to match the taller one's height.
+fn side_by_side(left: &str, right: &str, gap: usize) -> String {
+    let left_lines: Vec<&str> = left.trim_end_matches("\r\n").split("\r\n").collect();
+    let right_lines: Vec<&str> = right.trim_end_matches("\r\n").split("\r\n").collect();
+    let col_width = left_lines.iter().map(|l| visible_len(l)).max().unwrap_or(0);
+    let rows = left_lines.len().max(right_lines.len());
+    let mut out = String::new();
+    for i in 0..rows {
+        let l = left_lines.get(i).copied().unwrap_or("");
+        let r = right_lines.get(i).copied().unwrap_or("");
+        out.push_str(l);
+        if !r.is_empty() {
+            out.push_str(&" ".repeat(col_width - visible_len(l) + gap));
+            out.push_str(r);
+        }
+        out.push_str("\r\n");
+    }
+    out
 }
 
 fn help_text() -> String {
@@ -126,7 +169,7 @@ fn help_text() -> String {
         "PANES",
         &[
             ("Return", "spawn a new claude pane"),
-            ("Shift+Return", "promote focused pane to master (zoom)"),
+            ("Shift+Return", "promote to master (zoom)"),
             ("j  /  k", "focus next / previous pane"),
             ("w", "close the focused pane"),
         ],
@@ -134,10 +177,10 @@ fn help_text() -> String {
     let layout = section(
         "LAYOUT",
         &[
-            ("h  /  l", "shrink / grow the master column"),
+            ("h  /  l", "shrink / grow master column"),
             ("i  /  d", "more / fewer master panes"),
-            ("m", "toggle monocle (focused pane fullscreen)"),
-            ("Tab", "cycle layout mode: grid \u{2192} master-stack \u{2192} monocle"),
+            ("m", "toggle monocle (fullscreen)"),
+            ("Tab", "cycle grid \u{2192} master-stack \u{2192} monocle"),
         ],
     );
     let text_size = section(
@@ -152,30 +195,33 @@ fn help_text() -> String {
         "MOUSE",
         &[
             ("click pane", "focus it"),
-            ("drag a seam", "resize the panes on either side"),
+            ("drag a seam", "resize panes on either side"),
             ("click \u{2715}", "close that pane"),
-            ("click +", "spawn a new pane (bottom-right button)"),
+            ("click +", "spawn a new pane"),
         ],
     );
+
+    let keys_row = side_by_side(&panes, &layout, 4);
+    let misc_col = format!("{text_size}\r\n{help}");
+    let misc_row = side_by_side(&misc_col, &mouse, 4);
 
     format!(
         "{top}\r\n{mid}\r\n{bottom}\r\n\r\n\
          {getting_started}\r\n\r\n\
          {modifier}\r\n\r\n\
-         {panes}\r\n{layout}\r\n{text_size}\r\n{help}\r\n{mouse}\r\n\
+         {keys_row}\r\n{misc_row}\r\n\
          {tip}\r\n",
         modifier = sgr(DIM, "  every keybinding above is held together with Super+Alt"),
         tip = sgr(
             DIM,
-            "  tip: panes auto re-tile on spawn/close/promote. grid mode resets\r\n  \
-             to equal sizes whenever a pane opens or closes; master-stack's\r\n  \
-             divider position persists across pane changes instead. drag any\r\n  \
-             seam anytime to nudge sizes. the folder picker remembers your\r\n  \
-             last choice - press Escape/Cancel to reuse it without picking\r\n  \
-             again. the corner label tracks the pane's real directory, so it\r\n  \
-             won't follow claude's own /cd command (that's purely internal\r\n  \
-             to claude, invisible outside its process). this pane has no\r\n  \
-             process behind it; close it like any other with Super+Alt+w."
+            "  tip: panes auto re-tile on spawn/close/promote \u{2014} grid resets to\r\n  \
+             equal sizes each time; master-stack keeps its divider position.\r\n  \
+             drag any seam anytime to nudge sizes by hand. the folder picker\r\n  \
+             remembers your last pick \u{2014} press Escape/Cancel to reuse it\r\n  \
+             without choosing again. the corner label tracks each pane's real\r\n  \
+             directory, not claude's own /cd (that's internal to claude only).\r\n  \
+             this help pane has no process behind it \u{2014} close it like any\r\n  \
+             other with Super+Alt+w."
         ),
     )
 }
