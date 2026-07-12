@@ -43,22 +43,28 @@ your desktop environment's own `Super+key` shortcuts.
 
 ## Requirements
 
-- Linux with `pkg-config`, GTK4 (>= 4.12), and the GTK4-flavored VTE
-  terminal widget (>= 0.65) installed, including their dev files:
+- `git`, `pkg-config`, GTK4 (>= 4.12), and the GTK4-flavored VTE terminal
+  widget (>= 0.65), including their dev files:
 
   | Distro | Install command |
   |---|---|
-  | Arch / CachyOS / Manjaro | `sudo pacman -S pkgconf gtk4 vte4` |
-  | Fedora | `sudo dnf install pkg-config gtk4-devel vte291-gtk4-devel` |
-  | Debian / Ubuntu (trixie/24.10+ or newer) | `sudo apt install pkg-config libgtk-4-dev libvte-2.91-gtk4-dev` |
+  | Arch / CachyOS / Manjaro | `sudo pacman -S git pkgconf gtk4 vte4` |
+  | Fedora | `sudo dnf install git pkg-config gtk4-devel vte291-gtk4-devel` |
+  | Debian / Ubuntu (trixie/24.10+ or newer) | `sudo apt install git pkg-config libgtk-4-dev libvte-2.91-gtk4-dev` |
 
   Debian's GTK4-flavored VTE package didn't land until fairly recently, so
   older releases (e.g. Debian 12 "bookworm", which also ships a GTK4 below
   the 4.12 floor above) won't have it — use a newer release, backports, or
   build VTE from source.
-- [Rust](https://www.rust-lang.org/tools/install) 1.85 or newer (needed for
-  the 2024 edition), via `rustup` or your distro's package manager — already
-  met by current Debian, Fedora, and Arch packages.
+- Rust 1.85 or newer (needed for the 2024 edition) — already met by current
+  Debian, Fedora, and Arch packages:
+
+  | Distro | Install command |
+  |---|---|
+  | Any (rustup, recommended) | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+  | Arch / CachyOS / Manjaro | `sudo pacman -S rust` |
+  | Fedora | `sudo dnf install rust cargo` |
+  | Debian / Ubuntu (trixie/24.10+ or newer) | `sudo apt install rustc cargo` |
 - By default, each pane runs the `claude` CLI in your login shell. If you
   don't have it installed, panes will just show your shell's "command not
   found" and exit — AgentTileCLI still works fine as a general terminal tiler.
