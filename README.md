@@ -13,7 +13,8 @@ you want to nudge it.
   with a persistent adjustable ratio.
 - **Monocle mode** — fullscreen the focused pane.
 - **Mouse support** — click any pane to focus it, drag any seam between
-  panes to resize, click the ✕ in a pane's corner to close it.
+  panes to resize, click the ✕ in a pane's corner to close it, or click the
+  floating **+** button to spawn a new one.
 - **Built-in help pane** — a static cheatsheet of every keybinding, toggle it
   any time with `Super+Alt+/`.
 

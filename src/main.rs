@@ -36,12 +36,32 @@ fn build_window(app: &Application) {
 
     let tiler = Tiler::new(cwd);
 
+    let add_button = gtk4::Button::builder()
+        .icon_name("list-add-symbolic")
+        .css_classes(["circular", "add-pane"])
+        .halign(gtk4::Align::End)
+        .valign(gtk4::Align::End)
+        .margin_end(20)
+        .margin_bottom(20)
+        .can_focus(false)
+        .tooltip_text("Spawn a new pane (Super+Alt+Return)")
+        .build();
+    add_button.connect_clicked(glib::clone!(
+        #[strong]
+        tiler,
+        move |_| tiler.spawn_pane()
+    ));
+
+    let overlay = gtk4::Overlay::new();
+    overlay.set_child(Some(&tiler));
+    overlay.add_overlay(&add_button);
+
     let window = ApplicationWindow::builder()
         .application(app)
         .title("AgentTileCLI")
         .default_width(1280)
         .default_height(800)
-        .child(&tiler)
+        .child(&overlay)
         .build();
 
     let window_weak = window.downgrade();

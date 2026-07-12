@@ -1,9 +1,34 @@
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gtk4::prelude::*;
 use gtk4::{gdk, Frame};
 use vte4::{prelude::*, PtyFlags, Terminal};
+
+/// How often to re-check a pane's current directory. Cheap (a single
+/// readlink per pane) so a short interval is fine.
+const CWD_POLL_INTERVAL: Duration = Duration::from_millis(1000);
+
+/// The current working directory of `pid`, read straight from procfs so it
+/// reflects reality regardless of whether the shell has any OSC7/"report my
+/// cwd" integration configured.
+fn process_cwd(pid: libc::pid_t) -> Option<String> {
+    let link = std::fs::read_link(format!("/proc/{pid}/cwd")).ok()?;
+    Some(folder_name(&link.to_string_lossy()))
+}
+
+/// The last path component of `path` ("/" if the path itself is root), with
+/// the kernel's " (deleted)" marker (present when the directory has been
+/// removed out from under the process) stripped first so it never leaks
+/// into the displayed name.
+fn folder_name(path: &str) -> String {
+    let path = path.strip_suffix(" (deleted)").unwrap_or(path);
+    std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
 
 /// Modern dark "gunmetal" theme, applied to every terminal's own palette
 /// (independent of the CSS around it, since VTE paints its own background/
@@ -90,18 +115,29 @@ fn help_text() -> String {
         ],
     );
     let help = section("HELP", &[("/", "toggle this help pane")]);
+    let mouse = section(
+        "MOUSE",
+        &[
+            ("click pane", "focus it"),
+            ("drag a seam", "resize the panes on either side"),
+            ("click \u{2715}", "close that pane"),
+            ("click +", "spawn a new pane (bottom-right button)"),
+        ],
+    );
 
     format!(
         "{top}\r\n{mid}\r\n{bottom}\r\n\r\n\
          {modifier}\r\n\r\n\
-         {panes}\r\n{layout}\r\n{help}\r\n\
+         {panes}\r\n{layout}\r\n{help}\r\n{mouse}\r\n\
          {tip}\r\n",
-        modifier = sgr(DIM, "  every binding above is held together with Super+Alt"),
+        modifier = sgr(DIM, "  every keybinding above is held together with Super+Alt"),
         tip = sgr(
             DIM,
-            "  tip: panes always auto re-tile on spawn/close/promote \u{2014} there's no\r\n  \
-             manual resizing. this pane has no process behind it; close it like\r\n  \
-             any other pane with Super+Alt+w."
+            "  tip: panes auto re-tile on spawn/close/promote. grid mode resets\r\n  \
+             to equal sizes whenever a pane opens or closes; master-stack's\r\n  \
+             divider position persists across pane changes instead. drag any\r\n  \
+             seam anytime to nudge sizes. this pane has no process behind it;\r\n  \
+             close it like any other with Super+Alt+w."
         ),
     )
 }
@@ -119,7 +155,12 @@ pub struct Pane {
 }
 
 impl Pane {
-    fn bare() -> (Frame, Terminal, gtk4::Button) {
+    /// Builds the shared frame/terminal/overlay/close-button scaffold every
+    /// pane needs. Returns the `Overlay` (rather than baking in every
+    /// possible overlay child) so callers add only the extra chrome they
+    /// actually need - e.g. `new()` adds a directory label but `help()`
+    /// doesn't, instead of `help()` having to receive and discard one.
+    fn bare() -> (Frame, Terminal, gtk4::Overlay, gtk4::Button) {
         let terminal = Terminal::new();
         terminal.set_hexpand(true);
         terminal.set_vexpand(true);
@@ -142,12 +183,21 @@ impl Pane {
         frame.set_overflow(gtk4::Overflow::Hidden);
         frame.set_child(Some(&overlay));
 
-        (frame, terminal, close_button)
+        (frame, terminal, overlay, close_button)
     }
 
     pub fn new(cwd: &str) -> Self {
-        let (frame, terminal, close_button) = Self::bare();
+        let (frame, terminal, overlay, close_button) = Self::bare();
         let pid = Rc::new(Cell::new(None));
+
+        let dir_label = gtk4::Label::builder()
+            .css_classes(["pane-dir"])
+            .halign(gtk4::Align::Start)
+            .valign(gtk4::Align::Start)
+            .can_target(false)
+            .label(folder_name(cwd))
+            .build();
+        overlay.add_overlay(&dir_label);
 
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let argv = [shell.as_str(), "-lc", "claude"];
@@ -168,6 +218,24 @@ impl Pane {
             },
         );
 
+        // Poll rather than rely on shell-side OSC7 "report my cwd" hooks
+        // (not every shell config sources those) - /proc/<pid>/cwd reflects
+        // reality regardless. Stops itself once the label is destroyed
+        // (pane closed), since it only holds a weak reference to it.
+        let pid_watch = pid.clone();
+        let label_weak = dir_label.downgrade();
+        gtk4::glib::source::timeout_add_local(CWD_POLL_INTERVAL, move || {
+            let Some(label) = label_weak.upgrade() else {
+                return gtk4::glib::ControlFlow::Break;
+            };
+            if let Some(pid) = pid_watch.get() {
+                if let Some(name) = process_cwd(pid) {
+                    label.set_label(&name);
+                }
+            }
+            gtk4::glib::ControlFlow::Continue
+        });
+
         Pane {
             frame,
             terminal,
@@ -179,7 +247,7 @@ impl Pane {
 
     /// A static cheatsheet pane: no PTY, no child process, just fed text.
     pub fn help() -> Self {
-        let (frame, terminal, close_button) = Self::bare();
+        let (frame, terminal, _overlay, close_button) = Self::bare();
         terminal.feed(help_text().as_bytes());
         Pane {
             frame,
@@ -201,8 +269,14 @@ impl Pane {
     /// Politely ask the child (shell + claude) to exit, mirroring how a real
     /// terminal emulator closes a tab. Actual removal from the layout happens
     /// via the `child-exited` signal the caller wires up separately.
+    ///
+    /// Clears the recorded pid immediately (rather than waiting for
+    /// `child-exited`) so the cwd-polling loop stops touching it right away
+    /// - otherwise a pid the OS recycles for an unrelated process in the
+    /// gap before `child-exited` fires could get its cwd read and briefly
+    /// misattributed to this (closing) pane.
     pub fn hangup(&self) {
-        if let Some(pid) = self.pid.get() {
+        if let Some(pid) = self.pid.take() {
             unsafe {
                 libc::kill(pid, libc::SIGHUP);
             }
