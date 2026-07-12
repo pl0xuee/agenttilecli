@@ -28,6 +28,11 @@ const FONT_SCALE_MAX: f64 = 3.0;
 const PANE_WIDTH_PX: i32 = 640;
 const PANE_HEIGHT_PX: i32 = 480;
 
+/// Room left around the edge of the current monitor (taskbar, window
+/// decorations, breathing room) when capping how far `grow_window_for` will
+/// grow the window.
+const MONITOR_MARGIN_PX: i32 = 100;
+
 /// Which draggable seam the pointer is over.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Handle {
@@ -253,17 +258,30 @@ impl Tiler {
 
     /// Grows the window (if needed) to comfortably fit `pane_count` panes
     /// arranged in the same square-ish grid `layout::grid_shape` uses for
-    /// Grid mode. Never shrinks it, and - per `set_default_size`'s own
-    /// docs - behaves exactly like a user resize, so the user can freely
-    /// resize smaller (or larger) again afterward; this isn't a lasting
-    /// constraint, just a one-off nudge when a pane needs more room.
+    /// Grid mode, capped to whichever monitor the window is currently on so
+    /// it can't grow off-screen. Never shrinks it, and - per
+    /// `set_default_size`'s own docs - behaves exactly like a user resize,
+    /// so the user can freely resize smaller (or larger, even past the
+    /// monitor) again afterward; this isn't a lasting constraint, just a
+    /// one-off nudge when a pane needs more room.
     fn grow_window_for(&self, pane_count: usize) {
         let Some(window) = self.parent_window() else {
             return;
         };
         let (cols, rows) = layout::grid_shape(pane_count);
-        let ideal_width = cols as i32 * PANE_WIDTH_PX;
-        let ideal_height = rows as i32 * PANE_HEIGHT_PX;
+        let mut ideal_width = cols as i32 * PANE_WIDTH_PX;
+        let mut ideal_height = rows as i32 * PANE_HEIGHT_PX;
+
+        let display = gtk4::prelude::WidgetExt::display(&window);
+        let monitor = window
+            .surface()
+            .and_then(|surface| display.monitor_at_surface(&surface));
+        if let Some(monitor) = monitor {
+            let geometry = monitor.geometry();
+            ideal_width = ideal_width.min(geometry.width() - MONITOR_MARGIN_PX);
+            ideal_height = ideal_height.min(geometry.height() - MONITOR_MARGIN_PX);
+        }
+
         let width = window.default_width().max(ideal_width);
         let height = window.default_height().max(ideal_height);
         window.set_default_size(width, height);
