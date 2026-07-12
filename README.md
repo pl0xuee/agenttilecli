@@ -5,6 +5,8 @@ real terminals (VTE) that auto re-tile as you spawn, close, or promote them —
 no manual resizing, though you can also drag any divider with the mouse if
 you want to nudge it.
 
+![AgentTileCLI showing the built-in help pane next to a freshly spawned pane](assets/screenshot.png)
+
 ## Features
 
 - **Grid mode by default** — every pane gets an equal-size cell; the grid
