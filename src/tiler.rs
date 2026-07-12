@@ -15,6 +15,12 @@ const RESIZE_HANDLE_PX: f64 = 10.0;
 /// Never let a mouse-drag squeeze a pane below this many pixels.
 const MIN_PANE_PX: f64 = 40.0;
 
+/// How much each font-size keybinding press changes VTE's `font-scale`
+/// (a multiplier on the terminal's base font size, independent of layout).
+const FONT_SCALE_STEP: f64 = 0.1;
+const FONT_SCALE_MIN: f64 = 0.5;
+const FONT_SCALE_MAX: f64 = 3.0;
+
 /// Which draggable seam the pointer is over.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Handle {
@@ -180,6 +186,10 @@ mod imp {
         pub drag_start_ratio: Cell<f64>,
         pub drag_start_width: Cell<i32>,
         pub(crate) grid_drag: RefCell<Option<GridDragState>>,
+        /// VTE `font-scale` applied to every pane, including ones spawned
+        /// after a resize. Set to 1.0 in `Tiler::new`, since `Cell<f64>`'s
+        /// `Default` is 0.0 (invisible text), not the unscaled size.
+        pub font_scale: Cell<f64>,
     }
 
     #[glib::object_subclass]
@@ -215,6 +225,7 @@ impl Tiler {
     pub fn new(cwd: String) -> Self {
         let this: Self = glib::Object::new();
         *this.imp().cwd.borrow_mut() = cwd;
+        this.imp().font_scale.set(1.0);
         this.setup_resize();
         this
     }
@@ -557,6 +568,7 @@ impl Tiler {
 
     fn attach_pane(&self, pane: Rc<Pane>) {
         pane.frame.set_parent(self);
+        pane.terminal.set_font_scale(self.imp().font_scale.get());
 
         // Click-to-focus: fires in the Capture phase so it always sees the
         // press, but never claims it, so the terminal underneath still gets
@@ -685,6 +697,29 @@ impl Tiler {
         let c = (lm.imp().master_count.get().max(2)) - 1;
         lm.imp().master_count.set(c);
         self.queue_allocate();
+    }
+
+    /// Apply `scale` to every current pane's terminal (new panes pick up
+    /// whatever `font_scale` holds at attach time, in `attach_pane`).
+    fn set_font_scale(&self, scale: f64) {
+        self.imp().font_scale.set(scale);
+        for pane in self.imp().panes.borrow().iter() {
+            pane.terminal.set_font_scale(scale);
+        }
+    }
+
+    pub fn inc_font_scale(&self) {
+        let scale = (self.imp().font_scale.get() + FONT_SCALE_STEP).min(FONT_SCALE_MAX);
+        self.set_font_scale(scale);
+    }
+
+    pub fn dec_font_scale(&self) {
+        let scale = (self.imp().font_scale.get() - FONT_SCALE_STEP).max(FONT_SCALE_MIN);
+        self.set_font_scale(scale);
+    }
+
+    pub fn reset_font_scale(&self) {
+        self.set_font_scale(1.0);
     }
 
     pub fn cycle_mode(&self) {

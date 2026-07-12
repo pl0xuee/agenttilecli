@@ -39,6 +39,9 @@ pub fn install(window: &impl IsA<gtk4::Widget>, tiler: &Tiler) {
             gdk::Key::Tab => tiler.cycle_mode(),
             gdk::Key::w => tiler.close_focused(),
             gdk::Key::slash => tiler.toggle_help(),
+            gdk::Key::equal | gdk::Key::plus => tiler.inc_font_scale(),
+            gdk::Key::minus => tiler.dec_font_scale(),
+            gdk::Key::_0 => tiler.reset_font_scale(),
             _ => return glib::Propagation::Proceed,
         }
 

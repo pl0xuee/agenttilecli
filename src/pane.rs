@@ -140,6 +140,13 @@ fn help_text() -> String {
             ("Tab", "cycle layout mode: grid \u{2192} master-stack \u{2192} monocle"),
         ],
     );
+    let text_size = section(
+        "TEXT SIZE",
+        &[
+            ("=  /  -", "enlarge / shrink terminal text"),
+            ("0", "reset text size"),
+        ],
+    );
     let help = section("HELP", &[("/", "toggle this help pane")]);
     let mouse = section(
         "MOUSE",
@@ -155,7 +162,7 @@ fn help_text() -> String {
         "{top}\r\n{mid}\r\n{bottom}\r\n\r\n\
          {getting_started}\r\n\r\n\
          {modifier}\r\n\r\n\
-         {panes}\r\n{layout}\r\n{help}\r\n{mouse}\r\n\
+         {panes}\r\n{layout}\r\n{text_size}\r\n{help}\r\n{mouse}\r\n\
          {tip}\r\n",
         modifier = sgr(DIM, "  every keybinding above is held together with Super+Alt"),
         tip = sgr(

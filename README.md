@@ -23,6 +23,8 @@ you want to nudge it.
   running in.
 - **Built-in help pane** — a static cheatsheet of every keybinding, toggle it
   any time with `Super+Alt+/`.
+- **Adjustable text size** — enlarge or shrink every pane's terminal text
+  together, independent of pane layout.
 
 ## Keybindings
 
@@ -39,6 +41,8 @@ your desktop environment's own `Super+key` shortcuts.
 | `i` / `d` | more / fewer master panes (MasterStack mode) |
 | `m` | toggle monocle (focused pane fullscreen) |
 | `Tab` | cycle layout mode: grid → master-stack → monocle |
+| `=` / `-` | enlarge / shrink terminal text (all panes) |
+| `0` | reset terminal text size |
 | `/` | toggle the help pane |
 
 ## Requirements
