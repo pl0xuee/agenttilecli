@@ -97,7 +97,7 @@ fn build_window(app: &Application) {
 
     keybindings::install(&window, &tiler);
 
-    tiler.spawn_pane();
+    tiler.spawn_pane_here();
     tiler.toggle_help();
     window.present();
 }
