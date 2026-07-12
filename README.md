@@ -15,12 +15,13 @@ you want to nudge it.
   with a persistent adjustable ratio.
 - **Monocle mode** — fullscreen the focused pane.
 - **Mouse support** — click any pane to focus it, drag any seam between
-  panes to resize, click the ✕ in a pane's corner to close it, or click the
-  floating **+** button to spawn a new one.
-- **Per-project panes** — spawning a pane asks which project folder to open
-  it in via a native folder picker, pre-filled with your last choice
-  (Cancel just reuses it). Each pane's corner shows the folder name it's
-  running in.
+  panes to resize, click the ✕ in a pane's corner to close it, or use the
+  two floating buttons (bottom-right) to spawn new ones.
+- **Per-project panes** — the floating **+** button asks which project
+  folder to open via a native folder picker, pre-filled with your last
+  choice (Cancel just reuses it). The button beside it spawns another agent
+  in that same project directly, no picker. Each pane's corner shows the
+  folder name it's running in.
 - **Built-in help pane** — a static cheatsheet of every keybinding, toggle it
   any time with `Super+Alt+/`.
 - **Adjustable text size** — enlarge or shrink every pane's terminal text

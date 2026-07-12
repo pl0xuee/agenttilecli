@@ -156,13 +156,16 @@ fn help_text() -> String {
 
     let getting_started = format!(
         "  {header}\r\n\r\n  \
-         Press {key} (or click the {plus} button, bottom-right) to spawn\r\n  \
-         a pane. A folder picker opens \u{2014} {pick} to work in, and\r\n  \
-         claude launches right there. Cancel just reuses your last pick.",
+         Press {key} (or click {plus}, bottom-right) to open a new\r\n  \
+         project \u{2014} a folder picker opens, {pick} to work in, and\r\n  \
+         claude launches right there (Cancel reuses your last pick). The\r\n  \
+         {agent} button beside it spawns another agent in that same\r\n  \
+         project, no picker.",
         header = sgr(BOLD_GREEN, "\u{25b6} GETTING STARTED"),
         key = sgr(BOLD_WHITE, "Super+Alt+Return"),
         plus = sgr(BOLD_WHITE, "+"),
         pick = sgr(BOLD_GREEN, "choose the project folder"),
+        agent = sgr(BOLD_WHITE, "new-agent"),
     );
 
     let panes = section(
@@ -197,7 +200,8 @@ fn help_text() -> String {
             ("click pane", "focus it"),
             ("drag a seam", "resize panes on either side"),
             ("click \u{2715}", "close that pane"),
-            ("click +", "spawn a new pane"),
+            ("click +", "open a new project in a new pane"),
+            ("new-agent btn", "spawn another agent in this project"),
         ],
     );
 

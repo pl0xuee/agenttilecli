@@ -36,15 +36,23 @@ fn build_window(app: &Application) {
 
     let tiler = Tiler::new(cwd);
 
+    let new_agent_button = gtk4::Button::builder()
+        .icon_name("tab-new-symbolic")
+        .css_classes(["circular", "add-pane"])
+        .can_focus(false)
+        .tooltip_text("Spawn a new agent in the current project")
+        .build();
+    new_agent_button.connect_clicked(glib::clone!(
+        #[strong]
+        tiler,
+        move |_| tiler.spawn_pane_here()
+    ));
+
     let add_button = gtk4::Button::builder()
         .icon_name("list-add-symbolic")
         .css_classes(["circular", "add-pane"])
-        .halign(gtk4::Align::End)
-        .valign(gtk4::Align::End)
-        .margin_end(20)
-        .margin_bottom(20)
         .can_focus(false)
-        .tooltip_text("Spawn a new pane (Super+Alt+Return)")
+        .tooltip_text("Open a new project in a new pane (Super+Alt+Return)")
         .build();
     add_button.connect_clicked(glib::clone!(
         #[strong]
@@ -52,9 +60,20 @@ fn build_window(app: &Application) {
         move |_| tiler.spawn_pane()
     ));
 
+    let corner_buttons = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(10)
+        .halign(gtk4::Align::End)
+        .valign(gtk4::Align::End)
+        .margin_end(20)
+        .margin_bottom(20)
+        .build();
+    corner_buttons.append(&new_agent_button);
+    corner_buttons.append(&add_button);
+
     let overlay = gtk4::Overlay::new();
     overlay.set_child(Some(&tiler));
-    overlay.add_overlay(&add_button);
+    overlay.add_overlay(&corner_buttons);
 
     let window = ApplicationWindow::builder()
         .application(app)

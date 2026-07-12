@@ -519,6 +519,14 @@ impl Tiler {
         );
     }
 
+    /// Spawns a pane in the current project (whatever directory the last
+    /// `spawn_pane` folder pick landed on, or the app's launch directory if
+    /// none has happened yet) - no dialog, unlike `spawn_pane`.
+    pub fn spawn_pane_here(&self) {
+        let cwd = self.imp().cwd.borrow().clone();
+        self.spawn_pane_in(&cwd);
+    }
+
     fn spawn_pane_in(&self, cwd: &str) {
         let pane = Rc::new(Pane::new(cwd));
 
