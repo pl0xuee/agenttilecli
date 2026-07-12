@@ -10,8 +10,26 @@ use tiler::Tiler;
 
 const APP_ID: &str = "dev.agenttilecli.AgentTileCli";
 
+/// The GTK application id - APP_ID for builds off `master`, with a
+/// branch-specific suffix otherwise. GApplication is single-instance per id
+/// (activating a second launch just wakes the first), so without this a dev
+/// build launched alongside an already-running master build wouldn't open
+/// its own window - it'd just poke the master instance over D-Bus.
+fn app_id() -> String {
+    const BRANCH: &str = env!("AGENTTILECLI_GIT_BRANCH");
+    if BRANCH.is_empty() || BRANCH == "master" {
+        APP_ID.to_string()
+    } else {
+        let suffix: String = BRANCH
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        format!("{APP_ID}.{suffix}")
+    }
+}
+
 fn main() -> glib::ExitCode {
-    let app = Application::builder().application_id(APP_ID).build();
+    let app = Application::builder().application_id(app_id()).build();
     app.connect_startup(|_| load_css());
     app.connect_activate(build_window);
     app.run()
