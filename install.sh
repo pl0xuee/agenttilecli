@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 BIN_NAME="agenttilecli"
+APP_ID="dev.agenttilecli.AgentTileCli"
 
 if ! command -v cargo >/dev/null 2>&1; then
     echo "error: cargo (Rust) is not installed. Install it from https://rustup.rs and try again." >&2
@@ -33,7 +34,12 @@ mkdir -p "$BIN_DIR" "$APPS_DIR" "$ICON_DIR"
 install -m 755 "target/release/$BIN_NAME" "$BIN_DIR/$BIN_NAME"
 install -m 644 assets/icon.svg "$ICON_DIR/$BIN_NAME.svg"
 
-cat > "$APPS_DIR/$BIN_NAME.desktop" <<EOF
+# The desktop file's id must match the GTK application id (APP_ID) so that
+# Wayland compositors (KWin, GNOME Shell) can resolve a persistent taskbar
+# icon by app_id. A mismatched id means the icon only shows while the
+# window is actually open and vanishes once it's closed.
+rm -f "$APPS_DIR/$BIN_NAME.desktop"
+cat > "$APPS_DIR/$APP_ID.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=AgentTileCLI
@@ -43,6 +49,7 @@ Icon=$BIN_NAME
 Terminal=false
 Categories=Development;TerminalEmulator;
 StartupNotify=true
+StartupWMClass=$APP_ID
 EOF
 
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
