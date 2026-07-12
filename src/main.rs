@@ -17,6 +17,18 @@ fn main() -> glib::ExitCode {
     app.run()
 }
 
+/// The window title's base text - "AgentTileCLI", with a "[branch]"
+/// suffix when built from anything other than `master` so dev builds
+/// are easy to tell apart from release ones at a glance.
+fn base_title() -> String {
+    const BRANCH: &str = env!("AGENTTILECLI_GIT_BRANCH");
+    if BRANCH.is_empty() || BRANCH == "master" {
+        "AgentTileCLI".to_string()
+    } else {
+        format!("AgentTileCLI [{BRANCH}]")
+    }
+}
+
 fn load_css() {
     let provider = CssProvider::new();
     provider.load_from_string(include_str!("style.css"));
@@ -82,7 +94,7 @@ fn build_window(app: &Application) {
     // room; the user can resize freely at any point, smaller or larger.
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("AgentTileCLI")
+        .title(base_title())
         .default_width(1080)
         .default_height(760)
         .child(&overlay)
@@ -92,9 +104,9 @@ fn build_window(app: &Application) {
     tiler.set_title_callback(move |title| {
         if let Some(window) = window_weak.upgrade() {
             let title = if title.is_empty() {
-                "AgentTileCLI".to_string()
+                base_title()
             } else {
-                format!("AgentTileCLI — {title}")
+                format!("{} — {title}", base_title())
             };
             window.set_title(Some(&title));
         }
