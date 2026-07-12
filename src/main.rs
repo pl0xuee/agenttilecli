@@ -75,11 +75,16 @@ fn build_window(app: &Application) {
     overlay.set_child(Some(&tiler));
     overlay.add_overlay(&corner_buttons);
 
+    // Sized to comfortably fit the help pane (its widest line is 105
+    // columns, across 36 lines) without wrapping or clipping - not an
+    // arbitrary default. `Tiler::grow_window_for` takes it from here as
+    // panes are added, growing this only when a pane actually needs more
+    // room; the user can resize freely at any point, smaller or larger.
     let window = ApplicationWindow::builder()
         .application(app)
         .title("AgentTileCLI")
-        .default_width(1280)
-        .default_height(800)
+        .default_width(1080)
+        .default_height(760)
         .child(&overlay)
         .build();
 

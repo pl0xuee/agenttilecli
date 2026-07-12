@@ -21,6 +21,13 @@ const FONT_SCALE_STEP: f64 = 0.1;
 const FONT_SCALE_MIN: f64 = 0.5;
 const FONT_SCALE_MAX: f64 = 3.0;
 
+/// A comfortable single pane's width/height at the default font, used to
+/// size the window for however many panes are currently open (see
+/// `grow_window_for`) - arranged in the same square-ish grid
+/// `layout::grid_shape` uses for Grid mode itself.
+const PANE_WIDTH_PX: i32 = 640;
+const PANE_HEIGHT_PX: i32 = 480;
+
 /// Which draggable seam the pointer is over.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Handle {
@@ -237,10 +244,29 @@ impl Tiler {
             .expect("Tiler's layout manager is always a TilerLayout")
     }
 
-    /// The top-level window, used only to parent the folder-picker dialog
-    /// (so it's placed/modal relative to the app instead of floating free).
+    /// The top-level window - used to parent the folder-picker dialog (so
+    /// it's placed/modal relative to the app instead of floating free), and
+    /// to resize the window itself in `grow_window_for`.
     fn parent_window(&self) -> Option<gtk4::Window> {
         self.root().and_then(|r| r.downcast::<gtk4::Window>().ok())
+    }
+
+    /// Grows the window (if needed) to comfortably fit `pane_count` panes
+    /// arranged in the same square-ish grid `layout::grid_shape` uses for
+    /// Grid mode. Never shrinks it, and - per `set_default_size`'s own
+    /// docs - behaves exactly like a user resize, so the user can freely
+    /// resize smaller (or larger) again afterward; this isn't a lasting
+    /// constraint, just a one-off nudge when a pane needs more room.
+    fn grow_window_for(&self, pane_count: usize) {
+        let Some(window) = self.parent_window() else {
+            return;
+        };
+        let (cols, rows) = layout::grid_shape(pane_count);
+        let ideal_width = cols as i32 * PANE_WIDTH_PX;
+        let ideal_height = rows as i32 * PANE_HEIGHT_PX;
+        let width = window.default_width().max(ideal_width);
+        let height = window.default_height().max(ideal_height);
+        window.set_default_size(width, height);
     }
 
     /// The x-coordinate (in this widget's own space) of the master/stack
@@ -610,7 +636,9 @@ impl Tiler {
         });
 
         self.imp().panes.borrow_mut().push(pane);
-        self.set_focus(self.imp().panes.borrow().len() - 1);
+        let pane_count = self.imp().panes.borrow().len();
+        self.set_focus(pane_count - 1);
+        self.grow_window_for(pane_count);
     }
 
     fn remove_pane(&self, pane: &Rc<Pane>) {
