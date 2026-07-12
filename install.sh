@@ -37,12 +37,20 @@ Comment=Dynamic tiling window manager for AI CLI sessions
 Exec=$BIN_DIR/aitile
 Icon=utilities-terminal
 Terminal=false
-Categories=Development;System;Utility;
+Categories=Development;TerminalEmulator;
 StartupNotify=true
 EOF
 
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
+fi
+# KDE Plasma keeps its own application menu index separate from the above;
+# without this, a freshly installed .desktop file may not show up in the
+# menu (or fail to launch via a bare command name) until next login.
+if command -v kbuildsycoca6 >/dev/null 2>&1; then
+    kbuildsycoca6 >/dev/null 2>&1 || true
+elif command -v kbuildsycoca5 >/dev/null 2>&1; then
+    kbuildsycoca5 >/dev/null 2>&1 || true
 fi
 
 echo "Installed to $BIN_DIR/aitile"
