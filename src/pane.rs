@@ -54,25 +54,25 @@ fn rgba(hex: &str) -> gdk::RGBA {
 }
 
 fn apply_theme(terminal: &Terminal) {
-    let foreground = rgba("#e6e6e6");
-    let background = rgba("#1a1d22");
+    let foreground = rgba("#d8dee3");
+    let background = rgba("#1b2024");
     let palette = [
-        rgba("#1a1d22"), // black
-        rgba("#e06c75"), // red
-        rgba("#98c379"), // green
-        rgba("#e5c07b"), // yellow
-        rgba("#61afef"), // blue
-        rgba("#c678dd"), // magenta
-        rgba("#56b6c2"), // cyan
-        rgba("#d6d9dd"), // white
-        rgba("#5c6370"), // bright black
-        rgba("#e06c75"), // bright red
-        rgba("#98c379"), // bright green
-        rgba("#e5c07b"), // bright yellow
-        rgba("#61afef"), // bright blue
-        rgba("#c678dd"), // bright magenta
-        rgba("#56b6c2"), // bright cyan
-        rgba("#ffffff"), // bright white
+        rgba("#1b2024"), // black
+        rgba("#d16969"), // red
+        rgba("#8fbf7f"), // green
+        rgba("#d7ba7d"), // yellow
+        rgba("#6ab0de"), // blue
+        rgba("#b98fce"), // magenta
+        rgba("#5fb3b3"), // cyan
+        rgba("#d6dade"), // white
+        rgba("#5a6570"), // bright black
+        rgba("#e0807f"), // bright red
+        rgba("#a3d494"), // bright green
+        rgba("#e6cd94"), // bright yellow
+        rgba("#82c0e8"), // bright blue
+        rgba("#cba6dd"), // bright magenta
+        rgba("#79c6c6"), // bright cyan
+        rgba("#eef1f3"), // bright white
     ];
     let palette_refs: Vec<&gdk::RGBA> = palette.iter().collect();
     terminal.set_colors(Some(&foreground), Some(&background), &palette_refs);
