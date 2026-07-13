@@ -15,18 +15,25 @@ you want to nudge it.
   click a row to switch groups, and background groups keep their agents
   running while hidden. Closing a group's row (✕) hangs up every agent in
   it; the floating **+** button (or `Super+Alt+Return`) opens a new project
-  as a new group via a native folder picker.
-- **Grid mode by default** — every pane gets an equal-size cell; the grid
-  shape (rows/columns) recomputes automatically as you open/close panes.
+  as a new group via a native folder picker, then asks how many agents to
+  start it with (1–4).
+- **Grid mode by default** — every pane gets an equal-size cell, whatever the
+  pane count: the grid shape (rows/columns) recomputes as you open/close
+  panes, orienting itself to the window's own aspect ratio, and a partial
+  last row keeps its panes the same size as every other row rather than
+  stretching them to fill the gap.
+- **Stays the size you set it** — adding panes never resizes the window;
+  they tile smaller within whatever size you've given it.
 - **dwm-style master-stack mode** — one larger master pane + a stack column,
   with a persistent adjustable ratio.
 - **Monocle mode** — fullscreen the focused pane.
 - **Mouse support** — click any pane to focus it, drag any seam between
-  panes to resize, click the ✕ in a pane's corner to close it, or use the
-  two floating buttons (bottom-right) to spawn new agents/groups.
-- **Per-project panes** — the **new-agent** button beside the **+** spawns
-  another agent in the current group's project directly, no picker. Each
-  pane's corner shows the folder name it's running in.
+  panes to resize, click the ✕ in a pane's corner to close it, the hamburger
+  (top-left) to toggle the sidebar, or the **new-agent** button
+  (bottom-right) to spawn another pane.
+- **Per-project panes** — the **new-agent** button spawns another agent in
+  the current group's project directly, no picker. Each pane's corner shows
+  the folder name it's running in.
 - **Built-in help pane** — a static cheatsheet of every keybinding, toggle it
   any time with `Super+Alt+/`.
 - **Adjustable text size** — enlarge or shrink every pane's terminal text
@@ -105,6 +112,6 @@ To update later, just `git pull && ./install.sh` again.
 
 ```sh
 rm ~/.local/bin/agenttilecli \
-   ~/.local/share/applications/agenttilecli.desktop \
+   ~/.local/share/applications/dev.agenttilecli.AgentTileCli.desktop \
    ~/.local/share/icons/hicolor/scalable/apps/agenttilecli.svg
 ```
