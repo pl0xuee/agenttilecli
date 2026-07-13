@@ -247,11 +247,15 @@ fn help_text() -> String {
             ("click \u{2715}", "close that pane"),
             ("click \u{2630}", "toggle the project sidebar"),
             ("sidebar +", "open a new project as a new group"),
-            ("new-agent btn", "spawn another agent in this group"),
             ("sidebar row", "switch to that group"),
+            ("sidebar \u{21bb}", "check GitHub for a newer version"),
+            ("new-agent btn", "spawn another agent in this group"),
         ],
     );
-    let help = section("HELP", &[("/", "toggle this help pane")]);
+    let help = section(
+        "HELP",
+        &[("/", "toggle this help pane"), ("u", "check for updates")],
+    );
 
     // Built as three full-height columns fed through one `side_by_side`
     // chain, rather than as separate side-by-side *rows* stacked up: a row
@@ -338,7 +342,16 @@ impl Pane {
         (frame, terminal, overlay, close_button)
     }
 
+    /// The usual pane: `claude`, running in `cwd`.
     pub fn new(cwd: &str) -> Self {
+        Self::command(cwd, "claude")
+    }
+
+    /// A pane running `command` instead of `claude` (via the same login
+    /// shell, so it resolves against the same PATH) - used by the update
+    /// button, which runs the pull-and-rebuild script in a pane so its
+    /// output is visible rather than hidden behind a spinner.
+    pub fn command(cwd: &str, command: &str) -> Self {
         let (frame, terminal, overlay, close_button) = Self::bare();
         let pid = Rc::new(Cell::new(None));
 
@@ -352,7 +365,7 @@ impl Pane {
         overlay.add_overlay(&dir_label);
 
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-        let argv = [shell.as_str(), "-lc", "claude"];
+        let argv = [shell.as_str(), "-lc", command];
         let pid_slot = pid.clone();
         terminal.spawn_async(
             PtyFlags::DEFAULT,
@@ -429,8 +442,21 @@ impl Pane {
     /// misattributed to this (closing) pane.
     pub fn hangup(&self) {
         if let Some(pid) = self.pid.take() {
+            // The child's whole process group, not just the child. VTE starts
+            // it as a session leader, so its pid doubles as the group id, and
+            // the processes that actually matter are its descendants: closing
+            // the update pane has to stop the `cargo build` underneath the
+            // update script, which would otherwise run to completion and
+            // replace the installed binary long after the user shut the pane
+            // to call the whole thing off.
+            //
+            // Falls back to signalling the child alone if there turns out to
+            // be no such group - better a leaked grandchild than a pane whose
+            // shell never gets told to go away.
             unsafe {
-                libc::kill(pid, libc::SIGHUP);
+                if libc::killpg(pid, libc::SIGHUP) != 0 {
+                    libc::kill(pid, libc::SIGHUP);
+                }
             }
         }
     }

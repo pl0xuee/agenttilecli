@@ -162,3 +162,48 @@ row.sidebar-row:hover .sidebar-row-close {
   color: #ffffff;
   background-color: #d16969;
 }
+
+/* Mirrors .sidebar-header's divider, on the other edge - the footer closes
+   the sidebar off the same way the header opens it. */
+.sidebar-footer {
+  padding: 0.5em;
+  border-top: 1px solid #262d33;
+}
+
+.sidebar-footer-button {
+  padding: 0.55em 0.7em;
+  border-radius: 0.65em;
+  color: #9aa4ac;
+  font-size: 0.95em;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+
+.sidebar-footer-button:hover {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-footer-icon {
+  color: #6c7680;
+}
+
+.sidebar-footer-button:hover .sidebar-footer-icon {
+  color: #6ab0de;
+}
+
+/* Left on the button once a check has actually found something, so dismissing
+   the dialog with "Not now" doesn't also dismiss the fact. Same green the help
+   pane uses for its "getting started" steps. */
+.sidebar-footer-button.update-available,
+.sidebar-footer-button.update-available .sidebar-footer-icon {
+  color: #8fbf7f;
+}
+
+.sidebar-footer-button.update-available:hover {
+  color: #1b2024;
+  background-color: #8fbf7f;
+}
+
+.sidebar-footer-button.update-available:hover .sidebar-footer-icon {
+  color: #1b2024;
+}

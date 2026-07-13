@@ -34,6 +34,12 @@ you want to nudge it.
 - **Per-project panes** — the **new-agent** button spawns another agent in
   the current group's project directly, no picker. Each pane's corner shows
   the folder name it's running in.
+- **One-click updates** — **Check for updates**, at the bottom of the sidebar
+  (or `Super+Alt+u`), checks `origin/master` for a newer version, shows you
+  what's new, and can pull and reinstall it for you in a pane so you can watch
+  the build. It only touches your clone if it's a clean checkout of `master` —
+  a dev branch, local commits, or uncommitted changes get reported, never
+  overwritten.
 - **Built-in help pane** — a static cheatsheet of every keybinding, toggle it
   any time with `Super+Alt+/`.
 - **Adjustable text size** — enlarge or shrink every pane's terminal text
@@ -59,6 +65,7 @@ your desktop environment's own `Super+key` shortcuts.
 | `=` / `-` | enlarge / shrink terminal text (all panes) |
 | `0` | reset terminal text size |
 | `/` | toggle the help pane |
+| `u` | check for updates |
 
 ## Requirements
 
@@ -106,7 +113,13 @@ This builds a release binary and installs it to `~/.local/bin/agenttilecli`
 (make sure that's on your `PATH`), plus adds an icon and a desktop entry so
 it shows up in your application launcher.
 
-To update later, just `git pull && ./install.sh` again.
+To update later, open the sidebar (the hamburger, top-left) and click **Check
+for updates** at the bottom of it — or press `Super+Alt+u`. It checks
+`origin/master`, shows you what's new, and runs the pull and reinstall in a
+pane. Or do it by hand: `git pull && ./install.sh`.
+
+Keep the clone around either way: the update button pulls and rebuilds *it*,
+so deleting it means updating by re-cloning instead.
 
 ## Uninstall
 

@@ -1,11 +1,16 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use gtk4::gio;
 use gtk4::prelude::*;
+use gtk4::{gio, glib};
 
 use crate::pane::folder_name;
 use crate::tiler::Tiler;
+use crate::update;
+
+/// The update button's resting label - restored after a check finishes,
+/// having been swapped for a "Checking..." one while it ran.
+const UPDATE_LABEL: &str = "Check for updates";
 
 /// How much each font-size keybinding press changes the UI's text scale - a
 /// multiplier applied both to every pane's VTE `font-scale` and, via a
@@ -16,6 +21,21 @@ use crate::tiler::Tiler;
 const FONT_SCALE_STEP: f64 = 0.1;
 const FONT_SCALE_MIN: f64 = 0.5;
 const FONT_SCALE_MAX: f64 = 3.0;
+
+/// What a finished check says about whether an update exists - or `None` when
+/// it says nothing at all, because the check couldn't be *made*.
+///
+/// That third case is the whole reason this isn't a bool: a check that failed
+/// (no network, GitHub down) hasn't discovered that a previously-found update
+/// went away. Clearing the button on it would throw away a true answer and
+/// replace it with no answer, so `Failed` leaves the last one standing.
+fn update_available(status: &update::Status) -> Option<bool> {
+    match status {
+        update::Status::UpToDate => Some(false),
+        update::Status::Available(_) => Some(true),
+        update::Status::Failed(_) => None,
+    }
+}
 
 #[derive(Clone)]
 struct GroupEntry {
@@ -51,6 +71,22 @@ struct GroupsInner {
     /// reloaded in place on every scale change rather than recreated, so it
     /// keeps sitting at the priority it was added to the display with.
     css_provider: gtk4::CssProvider,
+    /// The sidebar's "check for updates" button - kept here so a check in
+    /// flight can desensitize it (one at a time), and so a check that finds
+    /// something can leave it highlighted afterward.
+    update_button: gtk4::Button,
+    /// That button's caption, which doubles as the check's only progress
+    /// indicator ("Checking...") and its only lasting result ("Update
+    /// available") - so it's swapped, not static.
+    update_label: gtk4::Label,
+    /// What the last *conclusive* check found - the single source of truth
+    /// behind `refresh_update_button`, so the button's caption and its green
+    /// highlight are always painted from the same fact and can't drift apart.
+    update_available: Cell<bool>,
+    /// Whether an update check is already running, so a second one can't be
+    /// started on top of it (the keybinding doesn't go through the button,
+    /// so the button's own sensitivity can't be what enforces this).
+    update_in_flight: Cell<bool>,
 }
 
 /// A hamburger-toggled sidebar of project groups, each holding its own
@@ -106,12 +142,58 @@ impl Groups {
             .child(&sidebar_list)
             .build();
 
+        // The update control lives here, in the sidebar's footer, rather than
+        // floating over the panes: checking GitHub for a new release is a
+        // rare, app-level housekeeping action, and a permanent button in the
+        // corner of the workspace gives it far more prominence than it earns.
+        // Tucked behind the hamburger it's still one click away, and it sits
+        // with the other app-level control (the sidebar's "+") instead of
+        // competing with the per-project new-agent button.
+        //
+        // `view-refresh` rather than the more on-the-nose
+        // `software-update-available`: the latter isn't in Breeze (KDE's
+        // default, and so a very common GTK icon theme on the desktops this
+        // app is built for), where it renders as a broken-image glyph. This
+        // one is in both Breeze and Adwaita.
+        let update_icon = gtk4::Image::from_icon_name("view-refresh-symbolic");
+        update_icon.add_css_class("sidebar-footer-icon");
+        // Deliberately not `hexpand`: a hexpanding child here would propagate
+        // computed-hexpand up through the sidebar and make the Revealer claim
+        // width against the Stack even while collapsed (see the Revealer's own
+        // `hexpand(false)`). The icon and label pack from the start of the row
+        // anyway, so there's nothing to gain by it.
+        let update_label = gtk4::Label::builder()
+            .label(UPDATE_LABEL)
+            .halign(gtk4::Align::Start)
+            .build();
+        let update_content = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(10)
+            .build();
+        update_content.append(&update_icon);
+        update_content.append(&update_label);
+
+        let update_button = gtk4::Button::builder()
+            .css_classes(["flat", "sidebar-footer-button"])
+            .can_focus(false)
+            .child(&update_content)
+            .tooltip_text("Check GitHub for a newer version (Super+Alt+u)")
+            .build();
+        let footer = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .css_classes(["sidebar-footer"])
+            .build();
+        footer.append(&update_button);
+
         let sidebar_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .css_classes(["sidebar"])
             .build();
         sidebar_box.append(&header);
+        // `scrolled` is the only vexpand child, so the footer is pushed to
+        // the bottom of the sidebar however few groups the list holds.
         sidebar_box.append(&scrolled);
+        sidebar_box.append(&footer);
 
         // `hexpand` explicitly pinned `false`: without it, the row label's
         // own `hexpand(true)` below (needed to push each row's close button
@@ -182,6 +264,10 @@ impl Groups {
             window_title_cb: Rc::new(RefCell::new(None)),
             font_scale: Cell::new(1.0),
             css_provider,
+            update_button: update_button.clone(),
+            update_label,
+            update_available: Cell::new(false),
+            update_in_flight: Cell::new(false),
         }));
 
         // A row click (or arrow-key navigation within the sidebar) switches
@@ -200,7 +286,10 @@ impl Groups {
         });
 
         this.0.stack.connect_visible_child_notify(|stack| {
-            if let Some(tiler) = stack.visible_child().and_then(|w| w.downcast::<Tiler>().ok()) {
+            if let Some(tiler) = stack
+                .visible_child()
+                .and_then(|w| w.downcast::<Tiler>().ok())
+            {
                 tiler.on_shown();
             }
         });
@@ -217,6 +306,9 @@ impl Groups {
                 tiler.spawn_pane_here();
             }
         });
+
+        let this_clone = this.clone();
+        update_button.connect_clicked(move |_| this_clone.check_for_updates());
 
         // The initial group is the one that opens straight to the help pane
         // (see `add_group_named`'s doc comment) - labeled and iconed to
@@ -284,6 +376,179 @@ impl Groups {
         self.set_font_scale(1.0);
     }
 
+    /// Checks `origin/master` for a newer release and reports back: you're
+    /// up to date, here's what's new (with an offer to install it), or here's
+    /// why the check couldn't be made.
+    ///
+    /// The git work runs on Gio's blocking-IO pool rather than the main loop:
+    /// it fetches over the network, and a UI frozen for however long GitHub
+    /// takes to answer - or for however long it takes to *not* answer, on a
+    /// flaky connection - isn't something to inflict on someone who clicked
+    /// a button out of idle curiosity.
+    pub fn check_for_updates(&self) {
+        // The button desensitizes itself below, but the keybinding path
+        // doesn't go through the button at all - so the guard, not the
+        // button, is what actually stops two overlapping checks.
+        if self.0.update_in_flight.get() {
+            return;
+        }
+        self.0.update_in_flight.set(true);
+        self.0.update_button.set_sensitive(false);
+        self.0.update_label.set_label("Checking\u{2026}");
+
+        let this = self.clone();
+        glib::spawn_future_local(async move {
+            let status = gio::spawn_blocking(update::check).await;
+
+            this.0.update_in_flight.set(false);
+            this.0.update_button.set_sensitive(true);
+
+            match status {
+                Ok(status) => this.show_update_status(status),
+                // `check` has no panicking path, but a button stuck on
+                // "Checking..." forever is the one outcome worse than a
+                // dialog saying so.
+                Err(_) => {
+                    this.refresh_update_button();
+                    this.alert(
+                        "Couldn't check for updates",
+                        "The update check crashed unexpectedly.",
+                    );
+                }
+            }
+        });
+    }
+
+    /// Repaints the button from `update_available` - the one place its caption
+    /// and its green highlight are set, so the two can never disagree (a green
+    /// button captioned "Check for updates" says nothing to anyone).
+    ///
+    /// Also what clears the "Checking..." caption once a check finishes,
+    /// whatever it found.
+    fn refresh_update_button(&self) {
+        if self.0.update_available.get() {
+            // Left saying so, in green, after the dialog closes - so "not now"
+            // doesn't also mean "and never mention it again". It's the only
+            // trace an available update leaves once the dialog is gone.
+            self.0.update_button.add_css_class("update-available");
+            self.0.update_label.set_label("Update available");
+        } else {
+            self.0.update_button.remove_css_class("update-available");
+            self.0.update_label.set_label(UPDATE_LABEL);
+        }
+    }
+
+    fn show_update_status(&self, status: update::Status) {
+        if let Some(available) = update_available(&status) {
+            self.0.update_available.set(available);
+        }
+        self.refresh_update_button();
+
+        match status {
+            update::Status::UpToDate => self.alert(
+                "You're up to date",
+                &format!(
+                    "AgentTileCLI {} already has everything on origin/master.",
+                    update::version(),
+                ),
+            ),
+            update::Status::Failed(reason) => self.alert("Couldn't check for updates", &reason),
+            update::Status::Available(update) => self.offer_update(update),
+        }
+    }
+
+    /// The "here's what's new" dialog. Installing runs the pull and rebuild
+    /// in a *pane* rather than behind a spinner: it's a `cargo build` of a
+    /// GTK app, it takes a while, and watching it is both more reassuring
+    /// and more useful than a frozen dialog if it goes wrong.
+    fn offer_update(&self, update: update::Update) {
+        let repo = update::repo_dir();
+        let plural = if update.commits == 1 {
+            "commit"
+        } else {
+            "commits"
+        };
+        let mut detail = format!(
+            "origin/master is {} {plural} ahead of this build ({}):\n",
+            update.commits,
+            update::version(),
+        );
+        for subject in &update.subjects {
+            detail.push_str(&format!("\n  \u{2022} {subject}"));
+        }
+        if update.commits > update.subjects.len() {
+            let rest = update.commits - update.subjects.len();
+            detail.push_str(&format!("\n  \u{2022} \u{2026}and {rest} more"));
+        }
+
+        if let Some(reason) = &update.blocked {
+            detail.push_str(&format!(
+                "\n\nThis build's checkout can't be updated for you, because {reason}:\n\n\
+                 {repo}\n\n\
+                 Sort that out and update it by hand - nothing there has been touched.",
+            ));
+            self.alert("Update available", &detail);
+            return;
+        }
+
+        detail.push_str(&format!(
+            "\n\nUpdating fast-forwards {repo} to origin/master and re-runs ./install.sh, \
+             in a new pane so you can watch it. Relaunch AgentTileCLI afterward to run the \
+             new version.",
+        ));
+
+        let dialog = gtk4::AlertDialog::builder()
+            .message("Update available")
+            .detail(&detail)
+            .buttons(["Not now", "Update"])
+            .cancel_button(0)
+            .default_button(1)
+            .build();
+
+        let this = self.clone();
+        dialog.choose(
+            self.window().as_ref(),
+            None::<&gio::Cancellable>,
+            move |result| {
+                // Anything but the Update button (including Escape and a
+                // dismissed dialog, which report `Err`) leaves the checkout
+                // exactly as it is.
+                if !matches!(result, Ok(1)) {
+                    return;
+                }
+                match update::command() {
+                    Ok(command) => {
+                        if let Some(tiler) = this.active_tiler() {
+                            tiler.spawn_command_pane(update::repo_dir(), &command);
+                        }
+                    }
+                    Err(reason) => this.alert("Couldn't start the update", &reason),
+                }
+            },
+        );
+    }
+
+    /// A one-button informational dialog, parented on the app window.
+    fn alert(&self, message: &str, detail: &str) {
+        gtk4::AlertDialog::builder()
+            .message(message)
+            .detail(detail)
+            .buttons(["OK"])
+            .cancel_button(0)
+            .default_button(0)
+            .build()
+            .show(self.window().as_ref());
+    }
+
+    /// The window this sidebar is in, to parent modal dialogs on - `None`
+    /// only before the widget tree has been rooted in one.
+    fn window(&self) -> Option<gtk4::Window> {
+        self.0
+            .root
+            .root()
+            .and_then(|r| r.downcast::<gtk4::Window>().ok())
+    }
+
     /// Asks (via a folder picker) which project to open, then how many
     /// agents to start it with, then creates a new group for it and
     /// switches to it. The folder picker opens pre-filled with the last
@@ -300,11 +565,7 @@ impl Groups {
             .build();
 
         let this = self.clone();
-        let parent = self
-            .0
-            .root
-            .root()
-            .and_then(|r| r.downcast::<gtk4::Window>().ok());
+        let parent = self.window();
         let parent_for_count = parent.clone();
         dialog.select_folder(parent.as_ref(), None::<&gio::Cancellable>, move |result| {
             let Some(dir) = result.ok().and_then(|file| file.path()) else {
@@ -539,5 +800,97 @@ mod tests {
         assert_eq!(groups.0.entries.borrow().len(), 1);
         groups.remove_group("0");
         assert_eq!(groups.0.entries.borrow().len(), 1);
+    }
+
+    /// Clicking the update button must hand the (network-bound) check off to
+    /// another thread and lock out a second one - not run it on the main loop.
+    ///
+    /// The check itself is deliberately never allowed to *finish* here: this
+    /// test doesn't iterate the main loop, so the future stays parked at its
+    /// first await and no dialog is ever shown. What's under test is the
+    /// wiring up to that point; `update`'s own tests cover what the check
+    /// then decides.
+    #[test]
+    fn the_update_button_locks_out_a_second_check_while_one_is_running() {
+        if gtk4::init().is_err() {
+            eprintln!("skipping: no display available for gtk4::init()");
+            return;
+        }
+
+        let groups = Groups::new("/tmp");
+        assert!(groups.0.update_button.is_sensitive());
+        assert!(!groups.0.update_in_flight.get());
+
+        groups.0.update_button.emit_clicked();
+        assert!(
+            groups.0.update_in_flight.get(),
+            "check runs off the main loop"
+        );
+        assert!(!groups.0.update_button.is_sensitive());
+
+        // The keybinding path bypasses the button, so it's the flag - not the
+        // button's sensitivity - that has to hold the line here.
+        groups.check_for_updates();
+        assert!(groups.0.update_in_flight.get());
+    }
+
+    /// A check that couldn't be *made* must not be read as "no update": it
+    /// says nothing either way, and clearing the button on it would throw
+    /// away a true answer the last check had already found.
+    #[test]
+    fn a_failed_check_says_nothing_about_whether_an_update_exists() {
+        use update::{Status, Update};
+
+        let available = || {
+            Status::Available(Update {
+                commits: 1,
+                subjects: vec!["a shiny new feature".to_string()],
+                blocked: None,
+            })
+        };
+
+        assert_eq!(update_available(&available()), Some(true));
+        assert_eq!(update_available(&Status::UpToDate), Some(false));
+        assert_eq!(
+            update_available(&Status::Failed("no network".to_string())),
+            None,
+            "a failed check leaves the last answer standing",
+        );
+    }
+
+    /// The button's caption and its green highlight are painted from one fact,
+    /// so they can't drift apart - a green button captioned "Check for
+    /// updates" (or a plain one captioned "Update available") tells the user
+    /// nothing.
+    #[test]
+    fn the_update_buttons_caption_and_highlight_always_agree() {
+        if gtk4::init().is_err() {
+            eprintln!("skipping: no display available for gtk4::init()");
+            return;
+        }
+
+        let groups = Groups::new("/tmp");
+        let green = || groups.0.update_button.has_css_class("update-available");
+        let caption = || groups.0.update_label.label().to_string();
+
+        groups.refresh_update_button();
+        assert!(!green());
+        assert_eq!(caption(), UPDATE_LABEL);
+
+        groups.0.update_available.set(true);
+        groups.refresh_update_button();
+        assert!(green());
+        assert_eq!(caption(), "Update available");
+
+        // The state a *failed* check leaves behind: the flag is untouched, so
+        // repainting must restore the found update rather than clear it.
+        groups.refresh_update_button();
+        assert!(green());
+        assert_eq!(caption(), "Update available");
+
+        groups.0.update_available.set(false);
+        groups.refresh_update_button();
+        assert!(!green());
+        assert_eq!(caption(), UPDATE_LABEL);
     }
 }

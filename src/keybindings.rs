@@ -60,6 +60,10 @@ pub fn install(window: &impl IsA<gtk4::Widget>, groups: &Groups) {
                 groups.reset_font_scale();
                 return glib::Propagation::Stop;
             }
+            gdk::Key::u => {
+                groups.check_for_updates();
+                return glib::Propagation::Stop;
+            }
             _ => {}
         }
 

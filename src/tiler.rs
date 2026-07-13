@@ -521,7 +521,21 @@ impl Tiler {
     }
 
     fn spawn_pane_in(&self, cwd: &str) {
-        let pane = Rc::new(Pane::new(cwd));
+        self.attach_process_pane(Pane::new(cwd));
+    }
+
+    /// Spawns a pane running `command` rather than `claude` - the update
+    /// button's pull-and-rebuild script (see `crate::update::command`), which
+    /// gets a pane of its own so the user can watch it work.
+    pub fn spawn_command_pane(&self, cwd: &str, command: &str) {
+        self.attach_process_pane(Pane::command(cwd, command));
+    }
+
+    /// Wires up the signals every pane with a child process needs (close on
+    /// exit, re-title on the child's title change) and attaches it. The help
+    /// pane skips this - it has no process behind it to exit or re-title.
+    fn attach_process_pane(&self, pane: Pane) {
+        let pane = Rc::new(pane);
 
         let this_weak = self.downgrade();
         let pane_weak = Rc::downgrade(&pane);

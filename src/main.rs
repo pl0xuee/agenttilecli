@@ -3,6 +3,7 @@ mod keybindings;
 mod layout;
 mod pane;
 mod tiler;
+mod update;
 
 use gtk4::prelude::*;
 use gtk4::{gdk, glib, Application, ApplicationWindow, CssProvider};
