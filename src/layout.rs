@@ -126,20 +126,23 @@ fn master_stack(n: usize, master_count: usize, master_ratio: f64, width: i32, he
     rects
 }
 
-/// Even grid: every pane gets an equal-size cell. Rows are split evenly by
-/// height; within each row, width is split evenly among only the panes that
-/// land in that row, so a partial last row stretches to fill the width
-/// instead of leaving dead space next to a fixed column width.
+/// Even grid: every pane gets an equal-size cell, sized from the full
+/// `cols`x`rows` shape rather than from how many panes happen to land in
+/// each row - so cell size stays identical for every pane no matter how
+/// many panes there are. A partial last row simply leaves its unused cells'
+/// worth of space empty at the end instead of stretching its panes wider to
+/// fill it (which would make them a different size than every other pane).
 fn grid(n: usize, width: i32, height: i32) -> Vec<Rect> {
-    let (cols, rows) = grid_shape(n, width, height);
+    let (cols, rows) = grid_shape(n, width, height, None);
     let row_spans = spans(height, rows);
+    let col_spans = spans(width, cols);
 
     let mut rects = Vec::with_capacity(n);
     let mut remaining = n;
     for (y, h) in row_spans {
         let items_in_row = remaining.min(cols);
         remaining -= items_in_row;
-        for (x, w) in spans(width, items_in_row) {
+        for &(x, w) in col_spans.iter().take(items_in_row) {
             rects.push(shrink(Rect {
                 x,
                 y,
@@ -151,15 +154,42 @@ fn grid(n: usize, width: i32, height: i32) -> Vec<Rect> {
     rects
 }
 
+/// How strongly `grid_shape` favors keeping `prev_cols`' column count over
+/// switching to a merely-somewhat-squarer alternative. Without this, adding
+/// or closing a single pane can pick a completely different column count
+/// from scratch (the scoring landscape shifts with `n`), which reshuffles
+/// *every* pane's position and size even though only one pane actually
+/// changed - the existing ones jump around for no reason a user watching
+/// the screen can see. The bias only damps that churn for small changes; a
+/// real aspect-ratio flip (see `grid_shape_flips_orientation_with_window_shape`)
+/// still produces a score gap far bigger than this and reorients anyway. It
+/// also never applies if keeping `prev_cols` would waste more empty cells
+/// than picking fresh would (see `grid_shape`'s `reference_waste`) - since
+/// `grid`/`grid_weighted` size every cell identically now, that waste is
+/// visibly empty space, not just a rounding nicety worth damping churn for.
+const GRID_STABILITY_BIAS: f64 = 1.0;
+
+/// How strongly `grid_shape` penalizes empty cells (a partial last row/
+/// column) relative to squareness. Weighted well above the typical
+/// aspect-ratio penalty (`cell_ratio.ln().abs()`, usually well under 1 for
+/// any reasonably-shaped window) so a shape that actually packs every pane
+/// in wins over a squarer one that leaves cells empty, unless the packed
+/// shape's cells would come out badly elongated to do it.
+const WASTE_WEIGHT: f64 = 0.5;
+
 /// The (columns, rows) shape `grid`/`grid_weighted` use for `n` panes,
 /// chosen so cells stay as close to square as possible for the given
-/// `width`x`height` area. This is what makes the grid orient itself to
+/// `width`x`height` area while leaving as few cells empty as it reasonably
+/// can (see `WASTE_WEIGHT`). This is what makes the grid orient itself to
 /// whatever shape the window currently is - a wide window favors more
 /// columns (panes side by side), a tall one favors more rows (panes
 /// stacked) - instead of always laying out the same way regardless of the
-/// window's own aspect ratio. Among shapes that are equally square, the one
-/// wasting fewer cells (i.e. a smaller partial last row/column) wins.
-pub fn grid_shape(n: usize, width: i32, height: i32) -> (usize, usize) {
+/// window's own aspect ratio.
+///
+/// `prev_cols`, when given, is the column count the grid was already using
+/// (see `GRID_STABILITY_BIAS`) - pass `None` when there's no prior layout to
+/// stay consistent with (e.g. the very first pane).
+pub fn grid_shape(n: usize, width: i32, height: i32, prev_cols: Option<usize>) -> (usize, usize) {
     if n == 0 {
         return (0, 0);
     }
@@ -168,32 +198,38 @@ pub fn grid_shape(n: usize, width: i32, height: i32) -> (usize, usize) {
         return (cols, n.div_ceil(cols));
     }
 
+    let candidates: Vec<(usize, usize, usize, f64)> = (1..=n)
+        .map(|cols| {
+            let rows = n.div_ceil(cols);
+            let cell_ratio = (width as f64 / cols as f64) / (height as f64 / rows as f64);
+            let waste = cols * rows - n;
+            let score = cell_ratio.ln().abs() + waste as f64 * WASTE_WEIGHT;
+            (cols, rows, waste, score)
+        })
+        .collect();
+
+    // The waste a from-scratch pick (ignoring `prev_cols` entirely) would
+    // settle for - the ceiling `prev_cols` must stay at or under to still
+    // get the stability bias below.
+    let reference_waste = candidates
+        .iter()
+        .min_by(|a, b| a.3.total_cmp(&b.3))
+        .map(|&(_, _, waste, _)| waste)
+        .unwrap_or(0);
+
     let mut best = (1, n);
     let mut best_score = f64::MAX;
-    for cols in 1..=n {
-        let rows = n.div_ceil(cols);
-        let cell_ratio =
-            (width as f64 / cols as f64) / (height as f64 / rows as f64);
-        let waste = (cols * rows - n) as f64;
-        let score = cell_ratio.ln().abs() + waste * 0.05;
+    for (cols, rows, waste, score) in candidates {
+        let mut score = score;
+        if prev_cols == Some(cols) && waste <= reference_waste {
+            score -= GRID_STABILITY_BIAS;
+        }
         if score < best_score {
             best_score = score;
             best = (cols, rows);
         }
     }
     best
-}
-
-/// How many panes land in each row of the grid (the last row may be partial).
-pub fn row_item_counts(n: usize, cols: usize, rows: usize) -> Vec<usize> {
-    let mut remaining = n;
-    (0..rows)
-        .map(|_| {
-            let c = remaining.min(cols);
-            remaining -= c;
-            c
-        })
-        .collect()
 }
 
 /// Split `total` into spans proportional to `ratios` (which need not sum to
@@ -310,14 +346,37 @@ mod tests {
 
     #[test]
     fn grid_weighted_equal_ratios_matches_grid() {
-        let (cols, rows) = grid_shape(3, 800, 600);
-        let counts = row_item_counts(3, cols, rows);
+        let (cols, rows) = grid_shape(3, 800, 600, None);
         let row_ratios = vec![1.0; rows];
-        let col_ratios: Vec<Vec<f64>> = counts.iter().map(|&c| vec![1.0; c]).collect();
+        // Every row gets `cols` ratios (not just however many panes actually
+        // land in it) - matching how `grid` itself now sizes a partial
+        // row's cells the same as every other row's, rather than
+        // stretching them to fill the leftover width.
+        let col_ratios: Vec<Vec<f64>> = vec![vec![1.0; cols]; rows];
 
+        // Padding every row out to `cols` ratios means `grid_weighted` (which
+        // doesn't know `n`, just the ratios it's handed) also returns
+        // `rows * cols` rects - the trailing ones for a partial row are
+        // exactly what `grid` itself leaves out via `n`, so only the first
+        // `n` need to match (the real, tiler.rs.allocate()'s own `zip`
+        // against actual children drops the rest the same way).
         let weighted = grid_weighted(3, 800, 600, &row_ratios, &col_ratios);
         let plain = compute(3, 0, Mode::Grid, 1, 0.55, 800, 600);
-        assert_eq!(weighted, plain);
+        assert_eq!(&weighted[..3], &plain[..]);
+    }
+
+    #[test]
+    fn grid_cells_are_uniform_size_regardless_of_pane_count() {
+        // 3 panes in a squarish area picks a 2x2 shape with a partial last
+        // row (2 panes, then 1) - all three panes must still end up exactly
+        // the same size as each other, not the lone third pane stretched to
+        // fill the row's full width.
+        let rects = compute(3, 0, Mode::Grid, 1, 0.55, 800, 600);
+        assert_eq!(rects.len(), 3);
+        for r in &rects[1..] {
+            assert_eq!(r.width, rects[0].width);
+            assert_eq!(r.height, rects[0].height);
+        }
     }
 
     #[test]
@@ -331,8 +390,40 @@ mod tests {
     #[test]
     fn grid_shape_flips_orientation_with_window_shape() {
         // Wide window: 2 panes side by side.
-        assert_eq!(grid_shape(2, 1200, 400), (2, 1));
+        assert_eq!(grid_shape(2, 1200, 400, None), (2, 1));
         // Same 2 panes, tall window: stacked instead.
-        assert_eq!(grid_shape(2, 400, 1200), (1, 2));
+        assert_eq!(grid_shape(2, 400, 1200, None), (1, 2));
+    }
+
+    #[test]
+    fn grid_shape_stays_put_for_a_marginally_squarer_alternative() {
+        // 4 panes at 2 cols is already in use; 5 panes in the same
+        // roughly-square area scores only marginally better at 3 cols, so
+        // the existing 2-column arrangement should win rather than
+        // reshuffling every pane's position for a small squareness gain.
+        assert_eq!(grid_shape(5, 900, 900, Some(2)), (2, 3));
+        // A 16:10-ish window (the app's own default size) growing from 4
+        // panes (2 cols) to 5: 3 cols scores a bit better here, but not by
+        // enough to justify reshuffling every existing pane.
+        assert_eq!(grid_shape(5, 1280, 854, Some(2)), (2, 3));
+        // But a real aspect-ratio flip still overrides the bias.
+        assert_eq!(grid_shape(5, 2000, 300, Some(2)), (5, 1));
+    }
+
+    #[test]
+    fn grid_shape_reorients_rather_than_accumulating_empty_cells() {
+        // Growing one pane at a time from 4 to 9 in a 16:10-ish window
+        // (mirroring how `Tiler` feeds its own previous column count back
+        // in on every spawn) used to get stuck at 4 cols once picked for 7
+        // panes: at 9 panes that's a 4x3 shape with 3 empty cells, even
+        // though a fully-packed 3x3 shape (0 empty cells) was right there.
+        // The stability bias must not keep a shape that wastes more cells
+        // than a fresh pick would.
+        let mut cols = None;
+        for n in 4..=9 {
+            cols = Some(grid_shape(n, 1470, 890, cols).0);
+        }
+        let (cols, rows) = grid_shape(9, 1470, 890, cols);
+        assert_eq!(cols * rows, 9, "expected a fully-packed shape for 9 panes, got {cols}x{rows}");
     }
 }

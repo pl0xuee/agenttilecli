@@ -36,7 +36,7 @@ fn foreground_cwd(terminal: &Terminal) -> Option<String> {
 /// the kernel's " (deleted)" marker (present when the directory has been
 /// removed out from under the process) stripped first so it never leaks
 /// into the displayed name.
-fn folder_name(path: &str) -> String {
+pub(crate) fn folder_name(path: &str) -> String {
     let path = path.strip_suffix(" (deleted)").unwrap_or(path);
     std::path::Path::new(path)
         .file_name()
@@ -156,22 +156,32 @@ fn help_text() -> String {
 
     let getting_started = format!(
         "  {header}\r\n\r\n  \
-         Press {key} (or click {plus}, bottom-right) to open a new\r\n  \
-         project \u{2014} a folder picker opens, {pick} to work in, and\r\n  \
-         claude launches right there (Cancel opens nothing). The\r\n  \
-         {agent} button beside it spawns another agent in that same\r\n  \
-         project, no picker.",
+         Press {key} (or open the sidebar - {hamburger}, top-left - and\r\n  \
+         click {plus}) to open a new project as a new group \u{2014} a folder\r\n  \
+         picker opens, {pick} to work in, then {count}\r\n  \
+         and that many claude agents launch right there (Cancel either\r\n  \
+         one and nothing spawns). {agent} spawns another agent in the\r\n  \
+         current group, no picker.",
         header = sgr(BOLD_GREEN, "\u{25b6} GETTING STARTED"),
         key = sgr(BOLD_WHITE, "Super+Alt+Return"),
+        hamburger = sgr(BOLD_WHITE, "\u{2630}"),
         plus = sgr(BOLD_WHITE, "+"),
         pick = sgr(BOLD_GREEN, "choose the project folder"),
+        count = sgr(BOLD_GREEN, "how many agents to start with"),
         agent = sgr(BOLD_WHITE, "new-agent"),
     );
 
+    let groups = section(
+        "GROUPS",
+        &[
+            ("Return", "new project as a new group"),
+            ("g", "toggle the project sidebar"),
+            ("[  /  ]", "previous / next group"),
+        ],
+    );
     let panes = section(
         "PANES",
         &[
-            ("Return", "spawn a new claude pane"),
             ("Shift+Return", "promote to master (zoom)"),
             ("j  /  k", "focus next / previous pane"),
             ("w", "close the focused pane"),
@@ -189,7 +199,7 @@ fn help_text() -> String {
     let text_size = section(
         "TEXT SIZE",
         &[
-            ("=  /  -", "enlarge / shrink terminal text"),
+            ("=  /  -", "enlarge / shrink text (whole app)"),
             ("0", "reset text size"),
         ],
     );
@@ -200,14 +210,16 @@ fn help_text() -> String {
             ("click pane", "focus it"),
             ("drag a seam", "resize panes on either side"),
             ("click \u{2715}", "close that pane"),
-            ("click +", "open a new project in a new pane"),
-            ("new-agent btn", "spawn another agent in this project"),
+            ("click \u{2630}", "toggle the project sidebar"),
+            ("sidebar +", "open a new project as a new group"),
+            ("new-agent btn", "spawn another agent in this group"),
+            ("sidebar row", "switch to that group"),
         ],
     );
 
-    let keys_row = side_by_side(&panes, &layout, 4);
+    let keys_row = side_by_side(&side_by_side(&panes, &layout, 8), &groups, 8);
     let misc_col = format!("{text_size}\r\n{help}");
-    let misc_row = side_by_side(&misc_col, &mouse, 4);
+    let misc_row = side_by_side(&misc_col, &mouse, 8);
 
     format!(
         "{top}\r\n{mid}\r\n{bottom}\r\n\r\n\
@@ -224,8 +236,11 @@ fn help_text() -> String {
              opens pre-filled with your last pick, but Escape/Cancel backs\r\n  \
              out without spawning anything \u{2014} use new-agent for that instead.\r\n  \
              the corner label tracks each pane's real directory, not claude's\r\n  \
-             own /cd (that's internal to claude only). this help pane has no\r\n  \
-             process behind it \u{2014} close it like any other with Super+Alt+w."
+             own /cd (that's internal to claude only). each project lives in\r\n  \
+             its own group \u{2014} switching groups doesn't stop the others' agents,\r\n  \
+             and closing a group (its sidebar row's \u{2715}) hangs up every agent\r\n  \
+             in it. this help pane has no process behind it \u{2014} close it like\r\n  \
+             any other with Super+Alt+w."
         ),
     )
 }

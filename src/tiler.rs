@@ -15,30 +15,6 @@ const RESIZE_HANDLE_PX: f64 = 10.0;
 /// Never let a mouse-drag squeeze a pane below this many pixels.
 const MIN_PANE_PX: f64 = 40.0;
 
-/// How much each font-size keybinding press changes VTE's `font-scale`
-/// (a multiplier on the terminal's base font size, independent of layout).
-const FONT_SCALE_STEP: f64 = 0.1;
-const FONT_SCALE_MIN: f64 = 0.5;
-const FONT_SCALE_MAX: f64 = 3.0;
-
-/// A comfortable single pane's width/height at the default font, used to
-/// size the window for however many panes are currently open (see
-/// `grow_window_for`) - arranged in the same square-ish grid
-/// `layout::grid_shape` uses for Grid mode itself.
-const PANE_WIDTH_PX: i32 = 640;
-const PANE_HEIGHT_PX: i32 = 480;
-
-/// Room left around the edge of the current monitor when capping how far
-/// `grow_window_for` will grow the window. Deliberately generous: Wayland
-/// gives an app no way to ask where its own window sits on the monitor
-/// (unlike X11), so clamping to "monitor size minus a small margin" is only
-/// airtight if the window happens to sit right at the monitor's corner.
-/// This is a best-effort buffer against ending up partway off-screen when
-/// it doesn't, not a hard guarantee - a bigger margin means more slack
-/// against that, at the cost of capping growth a bit earlier than the
-/// monitor could technically fit.
-const MONITOR_MARGIN_PX: i32 = 300;
-
 /// Which draggable seam the pointer is over.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Handle {
@@ -79,14 +55,17 @@ mod layout_imp {
         pub master_count: Cell<usize>,
         pub master_ratio: Cell<f64>,
         pub focus: Cell<usize>,
-        /// Adjustable Grid-mode weights: one per row, and one per column
-        /// within each row (rows can have different item counts because a
-        /// partial last row exists). Regenerated to all-equal whenever the
-        /// pane count changes underneath them, or whenever the resolved
-        /// (cols, rows) shape itself flips - e.g. the window being resized
-        /// from wide to tall re-orients the grid from side-by-side to
-        /// stacked - since the whole grid shape is recomputed from `n` and
-        /// the available area at that point anyway.
+        /// Adjustable Grid-mode weights: one per row, and one per column -
+        /// always `cols` of them, even for a row with fewer real panes than
+        /// that (a partial last row), so every cell across the whole grid
+        /// stays the same size regardless of pane count; a partial row's
+        /// unused trailing ratios just correspond to empty space rather
+        /// than to a pane. Regenerated to all-equal whenever the pane count
+        /// changes underneath them, or whenever the resolved (cols, rows)
+        /// shape itself flips - e.g. the window being resized from wide to
+        /// tall re-orients the grid from side-by-side to stacked - since
+        /// the whole grid shape is recomputed from `n` and the available
+        /// area at that point anyway.
         pub row_ratios: RefCell<Vec<f64>>,
         pub col_ratios: RefCell<Vec<Vec<f64>>>,
         pub grid_shape_n: Cell<usize>,
@@ -112,16 +91,21 @@ mod layout_imp {
         /// Regenerate all-equal Grid ratios if `n` doesn't match what the
         /// current ratios were built for, or if the ideal (cols, rows) shape
         /// for `n` panes in a `width`x`height` area has flipped since (the
-        /// window changed enough to favor the other orientation).
+        /// window changed enough to favor the other orientation). Passes the
+        /// currently-in-use column count into `grid_shape` so a spawn/close
+        /// only reorients the whole grid when the new shape is a clear
+        /// improvement, not just a marginally squarer one - see
+        /// `GRID_STABILITY_BIAS`.
         fn ensure_grid_ratios(&self, n: usize, width: i32, height: i32) {
-            let shape = layout::grid_shape(n, width, height);
+            let prev_cols =
+                (self.grid_shape_n.get() != usize::MAX).then(|| self.grid_shape_dims.get().0);
+            let shape = layout::grid_shape(n, width, height, prev_cols);
             if self.grid_shape_n.get() == n && self.grid_shape_dims.get() == shape {
                 return;
             }
             let (cols, rows) = shape;
-            let counts = layout::row_item_counts(n, cols, rows);
             *self.row_ratios.borrow_mut() = vec![1.0; rows];
-            *self.col_ratios.borrow_mut() = counts.iter().map(|&c| vec![1.0; c]).collect();
+            *self.col_ratios.borrow_mut() = vec![vec![1.0; cols]; rows];
             self.grid_shape_n.set(n);
             self.grid_shape_dims.set(shape);
         }
@@ -262,46 +246,6 @@ impl Tiler {
             .expect("Tiler always has a layout manager")
             .downcast::<TilerLayout>()
             .expect("Tiler's layout manager is always a TilerLayout")
-    }
-
-    /// The top-level window - used to parent the folder-picker dialog (so
-    /// it's placed/modal relative to the app instead of floating free), and
-    /// to resize the window itself in `grow_window_for`.
-    fn parent_window(&self) -> Option<gtk4::Window> {
-        self.root().and_then(|r| r.downcast::<gtk4::Window>().ok())
-    }
-
-    /// Grows the window (if needed) to comfortably fit `pane_count` panes
-    /// arranged in the same grid `layout::grid_shape` uses for Grid mode
-    /// (oriented to the window's current shape, same as Grid mode itself),
-    /// capped to whichever monitor the window is currently on so it can't
-    /// grow off-screen. Never shrinks it, and - per `set_default_size`'s own
-    /// docs - behaves exactly like a user resize, so the user can freely
-    /// resize smaller (or larger, even past the monitor) again afterward;
-    /// this isn't a lasting constraint, just a one-off nudge when a pane
-    /// needs more room.
-    fn grow_window_for(&self, pane_count: usize) {
-        let Some(window) = self.parent_window() else {
-            return;
-        };
-        let (cols, rows) =
-            layout::grid_shape(pane_count, window.default_width(), window.default_height());
-        let mut ideal_width = cols as i32 * PANE_WIDTH_PX;
-        let mut ideal_height = rows as i32 * PANE_HEIGHT_PX;
-
-        let display = gtk4::prelude::WidgetExt::display(&window);
-        let monitor = window
-            .surface()
-            .and_then(|surface| display.monitor_at_surface(&surface));
-        if let Some(monitor) = monitor {
-            let geometry = monitor.geometry();
-            ideal_width = ideal_width.min(geometry.width() - MONITOR_MARGIN_PX);
-            ideal_height = ideal_height.min(geometry.height() - MONITOR_MARGIN_PX);
-        }
-
-        let width = window.default_width().max(ideal_width);
-        let height = window.default_height().max(ideal_height);
-        window.set_default_size(width, height);
     }
 
     /// The x-coordinate (in this widget's own space) of the master/stack
@@ -556,40 +500,10 @@ impl Tiler {
         }
     }
 
-    /// Asks (via a folder picker) which project to open, then spawns a pane
-    /// there. The dialog opens pre-filled with the last directory used (or
-    /// the app's own launch directory, the very first time). Cancelling it
-    /// spawns nothing - `spawn_pane_here` is the dedicated way to add a pane
-    /// without picking a folder.
-    pub fn spawn_pane(&self) {
-        let last_dir = self.imp().cwd.borrow().clone();
-
-        let dialog = gtk4::FileDialog::builder()
-            .title("Open project in a new pane")
-            .accept_label("Open")
-            .modal(true)
-            .initial_folder(&gtk4::gio::File::for_path(&last_dir))
-            .build();
-
-        let this = self.clone();
-        let parent = self.parent_window();
-        dialog.select_folder(
-            parent.as_ref(),
-            None::<&gtk4::gio::Cancellable>,
-            move |result| {
-                let Some(dir) = result.ok().and_then(|file| file.path()) else {
-                    return;
-                };
-                let dir = dir.to_string_lossy().into_owned();
-                this.imp().cwd.replace(dir.clone());
-                this.spawn_pane_in(&dir);
-            },
-        );
-    }
-
-    /// Spawns a pane in the current project (whatever directory the last
-    /// `spawn_pane` folder pick landed on, or the app's launch directory if
-    /// none has happened yet) - no dialog, unlike `spawn_pane`.
+    /// Spawns a pane in this group's project directory (the one it was
+    /// created with) - no dialog. Opening a *different* project happens by
+    /// creating a whole new group (see `crate::groups::Groups::new_group`)
+    /// rather than mixing an unrelated project's panes into this grid.
     pub fn spawn_pane_here(&self) {
         let cwd = self.imp().cwd.borrow().clone();
         self.spawn_pane_in(&cwd);
@@ -680,7 +594,6 @@ impl Tiler {
         self.imp().panes.borrow_mut().push(pane);
         let pane_count = self.imp().panes.borrow().len();
         self.set_focus(pane_count - 1);
-        self.grow_window_for(pane_count);
     }
 
     fn remove_pane(&self, pane: &Rc<Pane>) {
@@ -701,6 +614,18 @@ impl Tiler {
         let len = self.imp().panes.borrow().len();
         let focus = self.imp().focus.get();
         self.set_focus(if len == 0 { 0 } else { focus.min(len - 1) });
+    }
+
+    /// Hangs up every real (non-help) pane in this group, without waiting
+    /// for their `child-exited` signals - used when the whole group is being
+    /// torn down (see `Groups::remove_group`), so the caller can drop this
+    /// `Tiler` right away instead of waiting on each pane individually.
+    pub fn close_all_panes(&self) {
+        for pane in self.imp().panes.borrow().iter() {
+            if !pane.is_help() {
+                pane.hangup();
+            }
+        }
     }
 
     pub fn close_focused(&self) {
@@ -778,26 +703,15 @@ impl Tiler {
     }
 
     /// Apply `scale` to every current pane's terminal (new panes pick up
-    /// whatever `font_scale` holds at attach time, in `attach_pane`).
-    fn set_font_scale(&self, scale: f64) {
+    /// whatever `font_scale` holds at attach time, in `attach_pane`). Text
+    /// size is a global setting (see `Groups::inc_font_scale`), which calls
+    /// this on every group's `Tiler` in lockstep - not just the active
+    /// one - so switching groups never shows a different zoom level.
+    pub(crate) fn set_font_scale(&self, scale: f64) {
         self.imp().font_scale.set(scale);
         for pane in self.imp().panes.borrow().iter() {
             pane.terminal.set_font_scale(scale);
         }
-    }
-
-    pub fn inc_font_scale(&self) {
-        let scale = (self.imp().font_scale.get() + FONT_SCALE_STEP).min(FONT_SCALE_MAX);
-        self.set_font_scale(scale);
-    }
-
-    pub fn dec_font_scale(&self) {
-        let scale = (self.imp().font_scale.get() - FONT_SCALE_STEP).max(FONT_SCALE_MIN);
-        self.set_font_scale(scale);
-    }
-
-    pub fn reset_font_scale(&self) {
-        self.set_font_scale(1.0);
     }
 
     pub fn cycle_mode(&self) {
@@ -826,6 +740,14 @@ impl Tiler {
             pane.terminal.grab_focus();
         }
         self.notify_title();
+    }
+
+    /// Called when this group becomes the visible one in the sidebar's
+    /// stack: re-grabs terminal focus on its current pane and re-syncs the
+    /// window title, since neither happens on its own while a `Tiler` sits
+    /// hidden in a background group.
+    pub fn on_shown(&self) {
+        self.grab_focus_on_current();
     }
 
     /// Register a callback invoked with the focused pane's foreground-process

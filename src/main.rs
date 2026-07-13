@@ -1,3 +1,4 @@
+mod groups;
 mod keybindings;
 mod layout;
 mod pane;
@@ -6,7 +7,7 @@ mod tiler;
 use gtk4::prelude::*;
 use gtk4::{gdk, glib, Application, ApplicationWindow, CssProvider};
 
-use tiler::Tiler;
+use groups::Groups;
 
 const APP_ID: &str = "dev.agenttilecli.AgentTileCli";
 
@@ -64,62 +65,26 @@ fn build_window(app: &Application) {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "/".to_string());
 
-    let tiler = Tiler::new(cwd);
+    let groups = Groups::new(&cwd);
 
-    let new_agent_button = gtk4::Button::builder()
-        .icon_name("tab-new-symbolic")
-        .css_classes(["circular", "add-pane"])
-        .can_focus(false)
-        .tooltip_text("Spawn a new agent in the current project")
-        .build();
-    new_agent_button.connect_clicked(glib::clone!(
-        #[strong]
-        tiler,
-        move |_| tiler.spawn_pane_here()
-    ));
-
-    let add_button = gtk4::Button::builder()
-        .icon_name("list-add-symbolic")
-        .css_classes(["circular", "add-pane"])
-        .can_focus(false)
-        .tooltip_text("Open a new project in a new pane (Super+Alt+Return)")
-        .build();
-    add_button.connect_clicked(glib::clone!(
-        #[strong]
-        tiler,
-        move |_| tiler.spawn_pane()
-    ));
-
-    let corner_buttons = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Horizontal)
-        .spacing(10)
-        .halign(gtk4::Align::End)
-        .valign(gtk4::Align::End)
-        .margin_end(20)
-        .margin_bottom(20)
-        .build();
-    corner_buttons.append(&new_agent_button);
-    corner_buttons.append(&add_button);
-
-    let overlay = gtk4::Overlay::new();
-    overlay.set_child(Some(&tiler));
-    overlay.add_overlay(&corner_buttons);
-
-    // Sized to comfortably fit the help pane (its widest line is 105
-    // columns, across 36 lines) without wrapping or clipping - not an
-    // arbitrary default. `Tiler::grow_window_for` takes it from here as
-    // panes are added, growing this only when a pane actually needs more
-    // room; the user can resize freely at any point, smaller or larger.
+    // A clean 16:10 aspect ratio (1488 / 930 = 1.6 exactly). At this size the
+    // default monospace font gives the help pane roughly 183x47 cells to
+    // work with; its help_text() is laid out three-wide to actually use that
+    // space (widest line 157 columns, across 41 lines) rather than leaving
+    // most of the window blank. This is just the starting size - the app
+    // never resizes itself afterward (adding panes tiles them smaller
+    // within whatever size the window already is instead), so the user's
+    // own resize is the last word on how big it gets.
     let window = ApplicationWindow::builder()
         .application(app)
         .title(base_title())
-        .default_width(1080)
-        .default_height(760)
-        .child(&overlay)
+        .default_width(1488)
+        .default_height(930)
+        .child(groups.widget())
         .build();
 
     let window_weak = window.downgrade();
-    tiler.set_title_callback(move |title| {
+    groups.set_title_callback(move |title| {
         if let Some(window) = window_weak.upgrade() {
             let title = if title.is_empty() {
                 base_title()
@@ -130,8 +95,10 @@ fn build_window(app: &Application) {
         }
     });
 
-    keybindings::install(&window, &tiler);
+    keybindings::install(&window, &groups);
 
-    tiler.toggle_help();
+    if let Some(tiler) = groups.active_tiler() {
+        tiler.toggle_help();
+    }
     window.present();
 }

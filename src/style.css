@@ -2,22 +2,31 @@ window {
   background-color: #121517;
 }
 
+/* Sizes below are in `em`, relative to `window`'s own font-size - which
+   Groups::set_font_scale rewrites (via a separate, higher-priority dynamic
+   provider) every time the text-size keybinding fires. That's what makes
+   the sidebar, floating buttons, and pane chrome all scale together with
+   pane text, without this stylesheet needing to know the current scale
+   itself. Border widths are the deliberate exception, kept at a flat 1px
+   so hairlines stay crisp instead of going blurry or vanishing at small
+   scales. */
+
 .pane {
   background-color: #1b2024;
   border: 1px solid #333c43;
-  border-radius: 10px;
+  border-radius: 0.75em;
   transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
 }
 
 .pane.focused {
   border-color: #6ab0de;
-  box-shadow: 0 0 0 1px rgba(106, 176, 222, 0.35), 0 0 14px 1px rgba(106, 176, 222, 0.25);
+  box-shadow: 0 0 0 1px rgba(106, 176, 222, 0.35), 0 0 1.05em 1px rgba(106, 176, 222, 0.25);
 }
 
 .pane-close {
-  margin: 6px;
-  min-width: 22px;
-  min-height: 22px;
+  margin: 0.45em;
+  min-width: 1.65em;
+  min-height: 1.65em;
   color: #9aa4ac;
   background-color: rgba(27, 32, 36, 0.7);
   opacity: 0.75;
@@ -31,8 +40,8 @@ window {
 }
 
 .add-pane {
-  min-width: 32px;
-  min-height: 32px;
+  min-width: 2.4em;
+  min-height: 2.4em;
   color: #9aa4ac;
   background-color: rgba(27, 32, 36, 0.7);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
@@ -46,12 +55,110 @@ window {
   background-color: #6ab0de;
 }
 
+.floating-bottom-right {
+  margin: 0 1.5em 1.5em 0;
+}
+
+.floating-top-left {
+  margin: 1.5em 0 0 1.5em;
+}
+
 .pane-dir {
-  margin: 6px;
-  padding: 2px 8px;
+  margin: 0.45em;
+  padding: 0.15em 0.6em;
   font-size: 0.85em;
   color: #9aa4ac;
   background-color: rgba(27, 32, 36, 0.7);
-  border-radius: 8px;
+  border-radius: 0.6em;
   opacity: 0.85;
+}
+
+.sidebar {
+  min-width: 16.5em;
+  background-color: #16191c;
+  border-right: 1px solid #262d33;
+}
+
+.sidebar-header {
+  padding: 0.85em 0.6em 0.85em 1.1em;
+  border-bottom: 1px solid #262d33;
+}
+
+.sidebar-header-label {
+  font-weight: bold;
+  font-size: 0.9em;
+  color: #9aa4ac;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sidebar-header button {
+  min-width: 1.9em;
+  min-height: 1.9em;
+  color: #9aa4ac;
+  transition: color 120ms ease-out, background-color 120ms ease-out;
+}
+
+.sidebar-header button:hover {
+  color: #ffffff;
+  background-color: #6ab0de;
+}
+
+.sidebar-list {
+  background-color: transparent;
+  padding: 0.4em;
+}
+
+row.sidebar-row {
+  padding: 0.55em 0.7em;
+  margin: 0.1em 0;
+  border-radius: 0.65em;
+  color: #aab1b8;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+
+row.sidebar-row:hover {
+  background-color: rgba(255, 255, 255, 0.045);
+  color: #dfe3e6;
+}
+
+row.sidebar-row:selected {
+  background-color: rgba(106, 176, 222, 0.16);
+  color: #ffffff;
+}
+
+row.sidebar-row:selected:hover {
+  background-color: rgba(106, 176, 222, 0.22);
+}
+
+.sidebar-row-icon {
+  color: #6c7680;
+  opacity: 0.9;
+  transition: color 120ms ease-out;
+}
+
+row.sidebar-row:selected .sidebar-row-icon {
+  color: #6ab0de;
+}
+
+.sidebar-row-label {
+  font-size: 0.95em;
+}
+
+.sidebar-row-close {
+  min-width: 1.5em;
+  min-height: 1.5em;
+  color: #9aa4ac;
+  opacity: 0;
+  transition: opacity 120ms ease-out, color 120ms ease-out, background-color 120ms ease-out;
+}
+
+row.sidebar-row:hover .sidebar-row-close {
+  opacity: 0.7;
+}
+
+.sidebar-row-close:hover {
+  opacity: 1;
+  color: #ffffff;
+  background-color: #d16969;
 }

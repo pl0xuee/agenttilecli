@@ -1,7 +1,7 @@
 use gtk4::prelude::*;
 use gtk4::{gdk, glib, EventControllerKey, PropagationPhase};
 
-use crate::tiler::Tiler;
+use crate::groups::Groups;
 
 /// dwm-style global bindings, all under Super+Alt so they never collide with
 /// whatever the shell/claude/readline inside a pane wants to do with a bare
@@ -9,11 +9,11 @@ use crate::tiler::Tiler;
 /// own global Super+key shortcuts (e.g. KDE's Super+L lock screen). Installed
 /// in the Capture phase on the window so they intercept before the focused
 /// terminal ever sees the keypress.
-pub fn install(window: &impl IsA<gtk4::Widget>, tiler: &Tiler) {
+pub fn install(window: &impl IsA<gtk4::Widget>, groups: &Groups) {
     let controller = EventControllerKey::new();
     controller.set_propagation_phase(PropagationPhase::Capture);
 
-    let tiler = tiler.clone();
+    let groups = groups.clone();
     controller.connect_key_pressed(move |_, keyval, _keycode, state| {
         let required = gdk::ModifierType::SUPER_MASK | gdk::ModifierType::ALT_MASK;
         if !state.contains(required) {
@@ -26,9 +26,49 @@ pub fn install(window: &impl IsA<gtk4::Widget>, tiler: &Tiler) {
         // between plain and Shift-modified bindings.
         let keyval = keyval.to_lower();
 
+        // Group-level actions: these don't need (and shouldn't require) a
+        // pane to be focused in the active group.
+        match keyval {
+            gdk::Key::Return if !shift => {
+                groups.new_group();
+                return glib::Propagation::Stop;
+            }
+            gdk::Key::g => {
+                groups.toggle_sidebar();
+                return glib::Propagation::Stop;
+            }
+            gdk::Key::bracketleft => {
+                groups.cycle_group(-1);
+                return glib::Propagation::Stop;
+            }
+            gdk::Key::bracketright => {
+                groups.cycle_group(1);
+                return glib::Propagation::Stop;
+            }
+            // Text size is a global setting across every group's panes and
+            // the app's own chrome (see `Groups::set_font_scale`), not just
+            // the active group's - so it belongs here too.
+            gdk::Key::equal | gdk::Key::plus => {
+                groups.inc_font_scale();
+                return glib::Propagation::Stop;
+            }
+            gdk::Key::minus => {
+                groups.dec_font_scale();
+                return glib::Propagation::Stop;
+            }
+            gdk::Key::_0 => {
+                groups.reset_font_scale();
+                return glib::Propagation::Stop;
+            }
+            _ => {}
+        }
+
+        let Some(tiler) = groups.active_tiler() else {
+            return glib::Propagation::Proceed;
+        };
+
         match keyval {
             gdk::Key::Return if shift => tiler.promote_focused_to_master(),
-            gdk::Key::Return => tiler.spawn_pane(),
             gdk::Key::j => tiler.focus_next(),
             gdk::Key::k => tiler.focus_prev(),
             gdk::Key::h => tiler.dec_master_ratio(),
@@ -39,9 +79,6 @@ pub fn install(window: &impl IsA<gtk4::Widget>, tiler: &Tiler) {
             gdk::Key::Tab => tiler.cycle_mode(),
             gdk::Key::w => tiler.close_focused(),
             gdk::Key::slash => tiler.toggle_help(),
-            gdk::Key::equal | gdk::Key::plus => tiler.inc_font_scale(),
-            gdk::Key::minus => tiler.dec_font_scale(),
-            gdk::Key::_0 => tiler.reset_font_scale(),
             _ => return glib::Propagation::Proceed,
         }
 
