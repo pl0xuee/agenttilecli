@@ -319,11 +319,16 @@ impl Groups {
             // (grid, master-stack, monocle) without the picker itself
             // needing scroll or validation. More agents can always be added
             // afterward with `new-agent`.
+            //
+            // Index 0 is Cancel (and is registered as `cancel_button`, so
+            // Escape / closing the dialog reports it too) - so button index
+            // *is* the agent count for every non-cancel choice.
             let count_dialog = gtk4::AlertDialog::builder()
                 .message("How many agents?")
                 .detail(folder_name(&dir))
-                .buttons(["1", "2", "3", "4"])
-                .default_button(0)
+                .buttons(["Cancel", "1", "2", "3", "4"])
+                .cancel_button(0)
+                .default_button(1)
                 .build();
 
             let this = this.clone();
@@ -332,9 +337,13 @@ impl Groups {
                 parent_for_count.as_ref(),
                 None::<&gio::Cancellable>,
                 move |result| {
-                    let count = match result {
-                        Ok(index @ 0..=3) => index + 1,
-                        _ => 1,
+                    // Cancelling (button 0, Escape, or the dialog being
+                    // dismissed - which reports `Err`) creates nothing at
+                    // all, rather than falling back to a group nobody asked
+                    // for: backing out here should leave the app exactly as
+                    // it was before the folder picker opened.
+                    let Ok(count @ 1..=4) = result else {
+                        return;
                     };
                     let tiler = this.add_group(&dir);
                     for _ in 0..count {

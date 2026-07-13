@@ -289,6 +289,16 @@ impl Tiler {
         }
         let row_spans = layout::weighted_spans(self.height(), &row_ratios);
 
+        // Every row carries a full `cols` worth of ratios (so all cells stay
+        // the same size - see `TilerLayout::col_ratios`), but a partial last
+        // row has real panes in only the first few of them. Only seams
+        // *between two real panes* are draggable: without this, the trailing
+        // empty cells of a partial row would offer phantom seams over blank
+        // space, and dragging one would resize the row's real panes away from
+        // the uniform cell size every other row keeps.
+        let n = self.imp().panes.borrow().len();
+        let cols = lm.imp().grid_shape_dims.get().0;
+
         // Column seams take priority: only reachable within their own row's
         // vertical extent, whereas row seams span the full width.
         for (row_i, &(ry, rh)) in row_spans.iter().enumerate() {
@@ -299,8 +309,9 @@ impl Tiler {
             let Some(ratios) = col_ratios.get(row_i) else {
                 continue;
             };
+            let panes_in_row = n.saturating_sub(row_i * cols).min(cols);
             let col_spans = layout::weighted_spans(self.width(), ratios);
-            for j in 0..col_spans.len().saturating_sub(1) {
+            for j in 0..panes_in_row.saturating_sub(1) {
                 let boundary = col_spans[j + 1].0;
                 if (x - boundary as f64).abs() <= RESIZE_HANDLE_PX {
                     return Some(Handle::GridCol(row_i, j));

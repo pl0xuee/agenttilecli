@@ -198,29 +198,34 @@ pub fn grid_shape(n: usize, width: i32, height: i32, prev_cols: Option<usize>) -
         return (cols, n.div_ceil(cols));
     }
 
-    let candidates: Vec<(usize, usize, usize, f64)> = (1..=n)
-        .map(|cols| {
-            let rows = n.div_ceil(cols);
-            let cell_ratio = (width as f64 / cols as f64) / (height as f64 / rows as f64);
-            let waste = cols * rows - n;
-            let score = cell_ratio.ln().abs() + waste as f64 * WASTE_WEIGHT;
-            (cols, rows, waste, score)
-        })
-        .collect();
+    let score_of = |cols: usize| {
+        let rows = n.div_ceil(cols);
+        let cell_ratio = (width as f64 / cols as f64) / (height as f64 / rows as f64);
+        let waste = cols * rows - n;
+        (rows, waste, cell_ratio.ln().abs() + waste as f64 * WASTE_WEIGHT)
+    };
 
-    // The waste a from-scratch pick (ignoring `prev_cols` entirely) would
-    // settle for - the ceiling `prev_cols` must stay at or under to still
-    // get the stability bias below.
-    let reference_waste = candidates
-        .iter()
-        .min_by(|a, b| a.3.total_cmp(&b.3))
-        .map(|&(_, _, waste, _)| waste)
-        .unwrap_or(0);
+    // First pass: the shape a from-scratch pick (ignoring `prev_cols`
+    // entirely) would settle for. Its waste is the ceiling `prev_cols` has to
+    // stay at or under to still earn the stability bias in the second pass -
+    // keeping a shape that strands *more* cells empty than picking fresh
+    // would isn't worth avoiding a reshuffle for.
+    let mut reference_waste = usize::MAX;
+    let mut best_score = f64::MAX;
+    for cols in 1..=n {
+        let (_, waste, score) = score_of(cols);
+        if score < best_score {
+            best_score = score;
+            reference_waste = waste;
+        }
+    }
 
+    // Second pass: same scores, but `prev_cols` gets the stability bias if it
+    // isn't wasting more cells than the fresh pick above would.
     let mut best = (1, n);
     let mut best_score = f64::MAX;
-    for (cols, rows, waste, score) in candidates {
-        let mut score = score;
+    for cols in 1..=n {
+        let (rows, waste, mut score) = score_of(cols);
         if prev_cols == Some(cols) && waste <= reference_waste {
             score -= GRID_STABILITY_BIAS;
         }
