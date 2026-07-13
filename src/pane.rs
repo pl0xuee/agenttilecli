@@ -147,6 +147,30 @@ fn side_by_side(left: &str, right: &str, gap: usize) -> String {
     out
 }
 
+/// A numbered "1. do the thing" step, indented to sit under its heading.
+fn step(n: usize, text: &str) -> String {
+    format!("  {} {}", sgr(BOLD_GREEN, &format!("{n}.")), text)
+}
+
+/// Blank-pads `block` out to `height` lines. Used to make the first section
+/// in every help column the same height, so the second section in each
+/// column starts on the same row across all three - otherwise each column's
+/// second heading lands at a different y and the page reads as ragged.
+fn pad_to(block: &str, height: usize) -> String {
+    let lines = block.trim_end_matches("\r\n").split("\r\n").count();
+    let mut out = block.trim_end_matches("\r\n").to_string();
+    for _ in lines..height {
+        out.push_str("\r\n");
+    }
+    out
+}
+
+/// A dim "· fact" bullet, one self-contained fact per line - short enough to
+/// scan rather than hard-wrapped into a paragraph nobody reads.
+fn bullet(text: &str) -> String {
+    sgr(DIM, &format!("  \u{b7} {text}"))
+}
+
 fn help_text() -> String {
     let title = " AgentTileCLI \u{2014} dynamic tiling window manager for AI CLI sessions ";
     let box_width = title.chars().count();
@@ -154,37 +178,48 @@ fn help_text() -> String {
     let mid = format!("\u{2502}{}\u{2502}", sgr(BOLD_CYAN, title));
     let bottom = format!("\u{2570}{}\u{256f}", "\u{2500}".repeat(box_width));
 
+    // Numbered steps rather than a wrapped paragraph: the reader wants to
+    // know what to press first, not to read prose.
     let getting_started = format!(
-        "  {header}\r\n\r\n  \
-         Press {key} (or open the sidebar - {hamburger}, top-left - and\r\n  \
-         click {plus}) to open a new project as a new group \u{2014} a folder\r\n  \
-         picker opens, {pick} to work in, then {count}\r\n  \
-         and that many claude agents launch right there (Cancel either\r\n  \
-         one and nothing spawns). {agent} spawns another agent in the\r\n  \
-         current group, no picker.",
+        "  {header}\r\n\r\n{s1}\r\n{s2}\r\n{s3}\r\n\r\n{after}",
         header = sgr(BOLD_GREEN, "\u{25b6} GETTING STARTED"),
-        key = sgr(BOLD_WHITE, "Super+Alt+Return"),
-        hamburger = sgr(BOLD_WHITE, "\u{2630}"),
-        plus = sgr(BOLD_WHITE, "+"),
-        pick = sgr(BOLD_GREEN, "choose the project folder"),
-        count = sgr(BOLD_GREEN, "how many agents to start with"),
-        agent = sgr(BOLD_WHITE, "new-agent"),
+        s1 = step(
+            1,
+            &format!(
+                "Press {key}  (or click {hamburger} top-left, then {plus} in the sidebar)",
+                key = sgr(BOLD_WHITE, "Super+Alt+Return"),
+                hamburger = sgr(BOLD_WHITE, "\u{2630}"),
+                plus = sgr(BOLD_WHITE, "+"),
+            )
+        ),
+        s2 = step(2, "Pick the project folder to work in"),
+        s3 = step(
+            3,
+            &format!(
+                "Choose how many agents to start with ({counts}) \u{2014} claude launches right there",
+                counts = sgr(BOLD_WHITE, "1-4"),
+            )
+        ),
+        after = sgr(
+            DIM,
+            "  Cancel either dialog and nothing is created. Once a project is open, the\r\n  \
+             new-agent button (bottom-right) adds another agent to it \u{2014} no picker.",
+        ),
     );
 
-    let groups = section(
-        "GROUPS",
-        &[
-            ("Return", "new project as a new group"),
-            ("g", "toggle the project sidebar"),
-            ("[  /  ]", "previous / next group"),
-        ],
-    );
     let panes = section(
         "PANES",
         &[
             ("Shift+Return", "promote to master (zoom)"),
             ("j  /  k", "focus next / previous pane"),
             ("w", "close the focused pane"),
+        ],
+    );
+    let text_size = section(
+        "TEXT SIZE",
+        &[
+            ("=  /  -", "enlarge / shrink text (whole app)"),
+            ("0", "reset text size"),
         ],
     );
     let layout = section(
@@ -196,14 +231,14 @@ fn help_text() -> String {
             ("Tab", "cycle grid \u{2192} master-stack \u{2192} monocle"),
         ],
     );
-    let text_size = section(
-        "TEXT SIZE",
+    let groups = section(
+        "GROUPS",
         &[
-            ("=  /  -", "enlarge / shrink text (whole app)"),
-            ("0", "reset text size"),
+            ("Return", "new project as a new group"),
+            ("g", "toggle the project sidebar"),
+            ("[  /  ]", "previous / next group"),
         ],
     );
-    let help = section("HELP", &[("/", "toggle this help pane")]);
     let mouse = section(
         "MOUSE",
         &[
@@ -216,32 +251,46 @@ fn help_text() -> String {
             ("sidebar row", "switch to that group"),
         ],
     );
+    let help = section("HELP", &[("/", "toggle this help pane")]);
 
-    let keys_row = side_by_side(&side_by_side(&panes, &layout, 8), &groups, 8);
-    let misc_col = format!("{text_size}\r\n{help}");
-    let misc_row = side_by_side(&misc_col, &mouse, 8);
+    // Built as three full-height columns fed through one `side_by_side`
+    // chain, rather than as separate side-by-side *rows* stacked up: a row
+    // pads only to its own widest line, so stacked rows would each land
+    // their columns at a different x. One chain over whole columns keeps
+    // every section's key/description gutters aligned down the whole page.
+    // Each column's first section is padded to a common height (see
+    // `pad_to`) so the second one starts on the same row in all three.
+    let top_height = [&panes, &layout, &mouse]
+        .iter()
+        .map(|s| s.trim_end_matches("\r\n").split("\r\n").count())
+        .max()
+        .unwrap_or(0);
+    let col_a = format!("{}\r\n\r\n{text_size}", pad_to(&panes, top_height));
+    let col_b = format!("{}\r\n\r\n{groups}", pad_to(&layout, top_height));
+    let col_c = format!("{}\r\n\r\n{help}", pad_to(&mouse, top_height));
+    let keys = side_by_side(&side_by_side(&col_a, &col_b, 6), &col_c, 6);
+
+    let tips = [
+        bullet("Panes auto re-tile on spawn/close/promote, and every grid cell is the same size."),
+        bullet("Drag any seam to size panes by hand; master-stack keeps its divider where you put it."),
+        bullet("Adding panes never resizes the window \u{2014} they tile smaller inside the size you set."),
+        bullet("A pane's corner label tracks its real directory, not claude's own /cd."),
+        bullet("Switching groups doesn't stop the others' agents; closing a group's \u{2715} hangs up every agent in it."),
+        bullet("This help pane has no process behind it \u{2014} close it like any other, with Super+Alt+w."),
+    ]
+    .join("\r\n");
 
     format!(
         "{top}\r\n{mid}\r\n{bottom}\r\n\r\n\
          {getting_started}\r\n\r\n\
          {modifier}\r\n\r\n\
-         {keys_row}\r\n{misc_row}\r\n\
-         {tip}\r\n",
-        modifier = sgr(DIM, "  every keybinding above is held together with Super+Alt"),
-        tip = sgr(
-            DIM,
-            "  tip: panes auto re-tile on spawn/close/promote \u{2014} grid resets to\r\n  \
-             equal sizes each time; master-stack keeps its divider position.\r\n  \
-             drag any seam anytime to nudge sizes by hand. the folder picker\r\n  \
-             opens pre-filled with your last pick, but Escape/Cancel backs\r\n  \
-             out without spawning anything \u{2014} use new-agent for that instead.\r\n  \
-             the corner label tracks each pane's real directory, not claude's\r\n  \
-             own /cd (that's internal to claude only). each project lives in\r\n  \
-             its own group \u{2014} switching groups doesn't stop the others' agents,\r\n  \
-             and closing a group (its sidebar row's \u{2715}) hangs up every agent\r\n  \
-             in it. this help pane has no process behind it \u{2014} close it like\r\n  \
-             any other with Super+Alt+w."
+         {keys}\r\n\
+         {tips_header}\r\n{tips}\r\n",
+        modifier = sgr(
+            BOLD_YELLOW,
+            "  \u{25b8} Every keybinding below is held together with Super+Alt",
         ),
+        tips_header = sgr(BOLD_YELLOW, "  GOOD TO KNOW"),
     )
 }
 
@@ -386,3 +435,4 @@ impl Pane {
         }
     }
 }
+
