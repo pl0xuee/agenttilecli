@@ -31,6 +31,11 @@ fn app_id() -> String {
 }
 
 fn main() -> glib::ExitCode {
+    // Before anything else, and in particular before an update can overwrite the
+    // file we're running from - which is what makes its path unreadable. See
+    // `update::remember_exe`.
+    update::remember_exe();
+
     let app = Application::builder().application_id(app_id()).build();
     app.connect_startup(|_| load_css());
     app.connect_activate(build_window);

@@ -1,4 +1,9 @@
 use std::process::Command;
+use std::sync::OnceLock;
+
+/// The file this process was launched from, as it looked at startup - which is
+/// what an update relaunches. See `remember_exe`.
+static EXE: OnceLock<Result<String, String>> = OnceLock::new();
 
 /// The checkout this binary was built from - baked in at compile time.
 /// `install.sh` builds straight out of the user's clone and copies the
@@ -306,6 +311,60 @@ pub fn repo_dir() -> &'static str {
     REPO_DIR
 }
 
+/// Records the file this process was launched from. Called once at startup,
+/// and the timing is the whole point: it has to happen *before* an update can
+/// replace that file on disk.
+///
+/// `current_exe` reads `/proc/self/exe`, and the kernel appends a literal
+/// " (deleted)" to that link once the file behind it is unlinked. `install.sh`
+/// installs the new build with `install(1)`, which unlinks the destination
+/// before writing it - that's exactly why it can overwrite a *running* binary
+/// where `cp` would fail with ETXTBSY. So by the time an update finishes,
+/// `current_exe` no longer answers "the file I was launched from"; it answers
+/// with a path that has never existed, and `exec`ing it fails with "No such
+/// file or directory" - the app shuts down for the update and never comes back.
+///
+/// Read at startup the link still points at the real file. And that path is
+/// the one `install.sh` goes on to overwrite, so it's precisely the file we
+/// want to run again.
+pub fn remember_exe() {
+    let _ = EXE.set(
+        std::env::current_exe()
+            .map(|exe| exe.to_string_lossy().into_owned())
+            .map_err(|e| e.to_string()),
+    );
+}
+
+/// The binary to relaunch into after an update - see `remember_exe`, which must
+/// have run first.
+pub fn exe() -> Result<String, String> {
+    match EXE.get() {
+        Some(exe) => exe.clone(),
+        None => Err("the running binary's path was never recorded".to_string()),
+    }
+}
+
+/// The shell command that waits for this process to be gone and then starts the
+/// new build in its place.
+///
+/// The wait is what makes it a *relaunch* rather than a second copy: GApplication
+/// is single-instance per app id (see `main::app_id`), so a new process that
+/// starts while this one still holds the name on the bus doesn't become the new
+/// app at all - it just wakes this one, the old build, and exits. The old pid
+/// disappearing is the readable proxy for the bus name being released.
+///
+/// The wait is *bounded* because `kill -0` also succeeds on a zombie - a process
+/// that has exited but whose parent hasn't reaped it. An unbounded loop would
+/// spin forever on one, leaving the user with no app at all; after ten seconds
+/// it's far better to start the new build and risk the single-instance handoff
+/// than to keep waiting for a pid that may never go away.
+pub fn relaunch_command(pid: u32, exe: &str) -> String {
+    format!(
+        "i=0; while kill -0 {pid} 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; exec {exe}",
+        exe = sh_quote(exe),
+    )
+}
+
 /// The running build, for the "you're up to date" dialog: `0.2.0 (0603294)`,
 /// or just the version when the commit isn't known.
 pub fn version() -> String {
@@ -518,6 +577,61 @@ mod tests {
             panic!("expected the check to fail");
         };
         assert!(reason.contains("no longer a git repository"));
+    }
+
+    /// The relaunch has one job: once the old process is gone, *run the new
+    /// binary*. Driven for real here - against a pid that has already exited and
+    /// a stand-in "new binary" that leaves a marker behind - because the two ways
+    /// this has broken in practice both survive any amount of reading it.
+    ///
+    /// The first was a path that `exec` couldn't find (`current_exe` hands back
+    /// "...(deleted)" once install.sh has replaced the file - see `remember_exe`).
+    /// The second is quoting: the path is interpolated into a shell command, so a
+    /// checkout under a directory with a space in it would exec the wrong file, or
+    /// nothing at all. Hence the space in the directory below - it isn't decoration.
+    #[test]
+    fn a_relaunch_waits_for_the_old_process_and_then_runs_the_new_binary() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir =
+            std::env::temp_dir().join(format!("agenttilecli relaunch {}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+
+        let marker = dir.join("relaunched");
+        let new_binary = dir.join("agenttilecli");
+        std::fs::write(
+            &new_binary,
+            format!("#!/bin/sh\ntouch {}\n", sh_quote(&marker.to_string_lossy())),
+        )
+        .expect("write");
+        std::fs::set_permissions(&new_binary, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod");
+
+        // A pid that has exited *and been reaped*: `kill -0` fails on it, so the
+        // wait falls straight through to the exec - which is precisely the state
+        // the real watcher is in the moment the app it's waiting on goes away.
+        let mut gone = Command::new("sh")
+            .arg("-c")
+            .arg("exit 0")
+            .spawn()
+            .expect("spawn");
+        gone.wait().expect("reap");
+
+        let status = Command::new("sh")
+            .arg("-c")
+            .arg(relaunch_command(gone.id(), &new_binary.to_string_lossy()))
+            .status()
+            .expect("the relaunch runs");
+
+        assert!(status.success(), "the relaunch command failed");
+        assert!(
+            marker.exists(),
+            "the relaunch never ran the new binary - an update would shut the app \
+             down and never bring it back",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

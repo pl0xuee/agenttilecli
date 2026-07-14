@@ -42,6 +42,51 @@ fn update_available(status: &update::Status) -> Option<bool> {
     }
 }
 
+/// Starts the shell that relaunches us once we're gone - and, crucially, starts
+/// it somewhere it will survive our own death.
+///
+/// Spawning it as a plain child looks like it should work (orphans are
+/// reparented to init, so nothing is left to kill it) and doesn't, because a
+/// desktop session doesn't launch a `.desktop` app as a bare process any more:
+/// it launches it as a systemd user service, `app-<app-id>@<random>.service`.
+/// Every child we fork lands in that unit's cgroup, and when our main process
+/// exits systemd stops the unit and SIGTERMs whatever is left in it. The
+/// watcher - and then the app it has just exec'd - is exactly what's left in it.
+/// The user gets the shutdown and never gets the restart.
+///
+/// So the watcher has to be started by something that isn't us. `systemd-run
+/// --user` asks the *user manager* to run it, in a transient unit of its own,
+/// out of reach of ours as ours goes down. `--collect` has that unit tidied away
+/// once the relaunched app eventually exits, rather than left behind.
+///
+/// The plain child stays as the fallback, for anywhere `systemd-run` isn't (a
+/// session that isn't systemd-managed, a build run straight from a terminal):
+/// there's no unit to be torn down there, so orphan-to-init is the whole
+/// mechanism rather than a hope.
+fn spawn_relaunch(command: &str) -> Result<(), String> {
+    let unit = format!("agenttilecli-restart-{}", std::process::id());
+    let handed_off = std::process::Command::new("systemd-run")
+        .args(["--user", "--quiet", "--collect"])
+        .arg(format!("--unit={unit}"))
+        // The app keeps the directory it was launched from (`main` seeds the
+        // first pane's cwd with it); a transient unit would otherwise start in
+        // $HOME.
+        .arg("--same-dir")
+        .args(["--", "sh", "-c", command])
+        .status();
+
+    if matches!(&handed_off, Ok(status) if status.success()) {
+        return Ok(());
+    }
+
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("couldn't start the relaunch: {e}"))
+}
+
 #[derive(Clone)]
 struct GroupEntry {
     /// The `Stack` page name for this group's `Tiler`, and the
@@ -663,45 +708,22 @@ impl Groups {
     /// is on disk, but this process is still the old one, and only a fresh
     /// exec runs the new code.
     ///
-    /// The relaunch can't simply be spawned and left to race us. GApplication
-    /// is single-instance per app id (see `main::app_id`), so a second process
-    /// starting while this one still holds the name on the bus wouldn't become
-    /// the new app at all - it would just wake *this* one, the old build, and
-    /// exit. Hence the handoff: a detached shell watches for this pid to be
-    /// gone, and only then execs the binary. It's orphaned to init the moment
-    /// we quit, so nothing is left to kill it.
+    /// The relaunch can't simply be spawned and left to race us - it has to
+    /// wait for this process to be gone first (see `update::relaunch_command`),
+    /// and it has to outlive it, which is the hard half: see `spawn_relaunch`.
     ///
-    /// `current_exe` rather than a guessed install path: whatever file this
-    /// process was launched from is the file `install.sh` has just overwritten,
-    /// so it's the one to run again.
+    /// The binary is the one this process was launched from, remembered back at
+    /// startup - whatever file that was is the file `install.sh` has just
+    /// overwritten, so it's the one to run again. Asking for it *now* would get
+    /// the wrong answer; `update::remember_exe` explains why.
     fn restart(&self) {
-        let exe = match std::env::current_exe() {
-            Ok(exe) => exe.to_string_lossy().into_owned(),
-            Err(e) => {
-                self.alert(
-                    "Update installed, but couldn't restart",
-                    &format!("Quit and relaunch AgentTileCLI to run the new version.\n\n{e}"),
-                );
-                return;
-            }
+        let exe = match update::exe() {
+            Ok(exe) => exe,
+            Err(e) => return self.cant_restart(&e),
         };
 
-        let relaunch = format!(
-            "while kill -0 {pid} 2>/dev/null; do sleep 0.1; done; exec {exe}",
-            pid = std::process::id(),
-            exe = update::sh_quote(&exe),
-        );
-
-        if let Err(e) = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(&relaunch)
-            .spawn()
-        {
-            self.alert(
-                "Update installed, but couldn't restart",
-                &format!("Quit and relaunch AgentTileCLI to run the new version.\n\n{e}"),
-            );
-            return;
+        if let Err(e) = spawn_relaunch(&update::relaunch_command(std::process::id(), &exe)) {
+            return self.cant_restart(&e);
         }
 
         // Quitting is what actually hands over: the watcher above is sitting on
@@ -709,6 +731,16 @@ impl Groups {
         if let Some(app) = self.window().and_then(|w| w.application()) {
             app.quit();
         }
+    }
+
+    /// The update installed but we can't bring the app back up - so say so, and
+    /// (pointedly) don't quit. A shutdown the user has to undo by hand is a poor
+    /// outcome, but a silent one they don't see coming is a worse one.
+    fn cant_restart(&self, reason: &str) {
+        self.alert(
+            "Update installed, but couldn't restart",
+            &format!("Quit and relaunch AgentTileCLI to run the new version.\n\n{reason}"),
+        );
     }
 
     /// A one-button informational dialog, parented on the app window.
