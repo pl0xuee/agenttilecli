@@ -17,6 +17,14 @@ you want to nudge it.
   it; the floating **+** button (or `Super+Alt+Return`) opens a new project
   as a new group via a native folder picker, then asks how many agents to
   start it with (1–4).
+- **Background agents tell you when they want you** — when an agent finishes a
+  turn, or stops to ask permission, its group's sidebar row pulses and then
+  stays quietly tinted until you open that group, so a finished agent in a
+  project you aren't watching doesn't sit there unnoticed. Panes launch
+  `claude` with `Stop` and `Notification` hooks that ring the terminal bell;
+  they're layered on per-pane via `--settings`, so your `~/.claude` config is
+  never modified and your `claude` in other terminals is unaffected. The bell
+  is visual only — nothing beeps, however many agents are running.
 - **Grid mode by default** — every pane gets an equal-size cell, whatever the
   pane count: the grid shape (rows/columns) recomputes as you open/close
   panes, orienting itself to the window's own aspect ratio, and a partial
@@ -39,7 +47,8 @@ you want to nudge it.
   what's new, and can pull and reinstall it for you in a pane so you can watch
   the build. It only touches your clone if it's a clean checkout of `master` —
   a dev branch, local commits, or uncommitted changes get reported, never
-  overwritten.
+  overwritten. The version and commit you're actually running sit right
+  beneath the button.
 - **Built-in help pane** — a static cheatsheet of every keybinding, toggle it
   any time with `Super+Alt+/`.
 - **Adjustable text size** — enlarge or shrink every pane's terminal text
