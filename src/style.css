@@ -79,42 +79,50 @@ window {
   border-right: 1px solid #262d33;
 }
 
+/* No bottom border, unlike the footer: an all-caps, letter-spaced, dimmed
+   label already reads as a section heading, and a rule under it only draws a
+   second line saying the same thing. The footer keeps its divider because it
+   has real work to do - fencing a clickable control off from the list of rows
+   above it, which no amount of typography does on its own. */
 .sidebar-header {
-  padding: 0.85em 0.6em 0.85em 1.1em;
-  border-bottom: 1px solid #262d33;
+  padding: 0.9em 0.6em 0.5em 1.1em;
 }
 
 .sidebar-header-label {
   font-weight: bold;
-  font-size: 0.9em;
-  color: #9aa4ac;
-  letter-spacing: 0.08em;
+  font-size: 0.78em;
+  color: #7c868f;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
 }
 
 .sidebar-header button {
   min-width: 1.9em;
   min-height: 1.9em;
-  color: #9aa4ac;
+  color: #7c868f;
   transition: color 120ms ease-out, background-color 120ms ease-out;
 }
 
+/* A tinted wash rather than a solid blue fill. At this size a saturated disc
+   is the loudest thing in the sidebar, which is a strange amount of noise for
+   "add a project" to make while the pointer merely passes over it. */
 .sidebar-header button:hover {
-  color: #ffffff;
-  background-color: #6ab0de;
+  color: #6ab0de;
+  background-color: rgba(106, 176, 222, 0.16);
 }
 
 .sidebar-list {
   background-color: transparent;
-  padding: 0.4em;
+  padding: 0.25em 0.4em;
 }
 
 row.sidebar-row {
-  padding: 0.55em 0.7em;
+  padding: 0.5em 0.7em;
   margin: 0.1em 0;
-  border-radius: 0.65em;
+  border-radius: 0.6em;
   color: #aab1b8;
-  transition: background-color 120ms ease-out, color 120ms ease-out;
+  transition: background-color 120ms ease-out, color 120ms ease-out,
+    box-shadow 120ms ease-out;
 }
 
 row.sidebar-row:hover {
@@ -122,9 +130,17 @@ row.sidebar-row:hover {
   color: #dfe3e6;
 }
 
+/* Tint *and* a left accent bar. The tint alone has to carry the selection on
+   colour contrast, which is exactly what the attention flash also does (in
+   amber) and what a hover does (in grey) - three states separated only by how
+   bright the same rectangle is. The bar is a different kind of mark, so the
+   open project stays obvious even mid-flash, and stays legible if the row is
+   glanced at rather than compared against its neighbours. `inset` keeps it
+   inside the row's own rounded corners instead of squaring them off. */
 row.sidebar-row:selected {
   background-color: rgba(106, 176, 222, 0.16);
   color: #ffffff;
+  box-shadow: inset 0.19em 0 0 0 #6ab0de;
 }
 
 row.sidebar-row:selected:hover {
@@ -143,6 +159,12 @@ row.sidebar-row:selected .sidebar-row-icon {
 
 .sidebar-row-label {
   font-size: 0.95em;
+}
+
+/* The selected row is the only one whose label is a statement of fact ("this
+   is what you're looking at") rather than an offer, so it gets the weight. */
+row.sidebar-row:selected .sidebar-row-label {
+  font-weight: bold;
 }
 
 .sidebar-row-close {
@@ -194,16 +216,20 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
   opacity: 1;
 }
 
-/* Mirrors .sidebar-header's divider, on the other edge - the footer closes
-   the sidebar off the same way the header opens it. */
+/* Fences the update button off from the rows above it: both are clickable
+   things in a vertical stack, and without the rule the button reads as one
+   more project - a strange one, at the bottom, that opens a dialog. */
 .sidebar-footer {
-  padding: 0.5em;
-  border-top: 1px solid #262d33;
+  padding: 0.5em 0.4em 0.35em;
+  border-top: 1px solid #21272c;
 }
 
+/* Same padding and radius as a sidebar row: it sits in the same column, at the
+   same indent, and lining the two up is what stops the footer looking bolted
+   on. */
 .sidebar-footer-button {
-  padding: 0.55em 0.7em;
-  border-radius: 0.65em;
+  padding: 0.5em 0.7em;
+  border-radius: 0.6em;
   color: #9aa4ac;
   font-size: 0.95em;
   transition: background-color 120ms ease-out, color 120ms ease-out;
@@ -251,11 +277,31 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
   background-color: #d8a657;
 }
 
+/* The list only overflows once there are more projects open than fit, so the
+   scrollbar is a rare visitor - and the theme's default arrives with its own
+   trough colour, which is a grey stripe glued to the sidebar's edge. Strip it
+   back to a slider that appears against the flat backdrop and goes away again. */
+.sidebar scrollbar {
+  background-color: transparent;
+  border: none;
+}
+
+.sidebar scrollbar slider {
+  min-width: 0.35em;
+  margin: 0.2em;
+  border-radius: 0.35em;
+  background-color: rgba(255, 255, 255, 0.11);
+}
+
+.sidebar scrollbar slider:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
 /* Sits directly under the update button, saying what it's checking. Dimmer
    and smaller than everything else in the sidebar - it's a fact to look up,
    not a control, and it should read as a footnote to the button above it. */
 .sidebar-version {
-  padding: 0.1em 0.75em 0.15em;
+  padding: 0.15em 0.7em 0.15em;
   font-size: 0.78em;
   color: #5a6570;
 }

@@ -352,10 +352,17 @@ impl Groups {
         // (see `add_group_named`'s doc comment) - labeled and iconed to
         // match, rather than after whatever folder the app happened to
         // launch from.
+        //
+        // `help-about` rather than the more obvious `dialog-information`, for
+        // the same reason the update button avoids `software-update-available`
+        // (see above): Breeze ships no `dialog-information-symbolic`, so GTK
+        // falls back to the full-colour `dialog-information`, which ignores
+        // `.sidebar-row-icon`'s colour and leaves one loud blue icon sitting
+        // among the monochrome ones. This one is symbolic in both themes.
         this.add_group_named(
             initial_cwd,
             "Getting Started".to_string(),
-            "dialog-information-symbolic",
+            "help-about-symbolic",
         );
         this
     }
