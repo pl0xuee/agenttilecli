@@ -249,10 +249,18 @@ pub(crate) fn sh_quote(s: &str) -> String {
 /// shell may well be fish, whose syntax shares almost nothing with this. The
 /// login shell only ever sees `exec sh <path>`, which is valid in all of them.
 ///
-/// The trailing `read` is what keeps the pane open after the script finishes:
-/// a pane closes itself the moment its child exits (`connect_child_exited`),
-/// which would otherwise make the result - success or failure - vanish
-/// instantly.
+/// The script's **exit code is the app's signal to restart itself**: 0 means
+/// the new binary is installed and on disk, anything else means it isn't (see
+/// `Groups::offer_update`). So the two branches end deliberately differently.
+///
+/// A *failed* update ends in a `read`, which is what holds the pane open: a
+/// pane closes itself the moment its child exits (`connect_child_exited`),
+/// which would otherwise make the reason for the failure vanish instantly, at
+/// the exact moment the user most needs to read it.
+///
+/// A *successful* one can't do that, because there'd be nobody left to press
+/// the key - the app is about to relaunch. It pauses just long enough to be
+/// read instead, and then gets out of the way.
 pub fn command() -> Result<String, String> {
     // The `cd` is inside the `if`, not a `cd ... || exit` ahead of it, so that
     // a checkout that has gone missing between the check and the click still
@@ -262,12 +270,14 @@ pub fn command() -> Result<String, String> {
     let script = format!(
         "printf '\\033[1;36m== Updating AgentTileCLI ==\\033[0m\\n\\n'\n\
          if cd {repo} && git pull --ff-only origin master && ./install.sh; then\n\
-         \tprintf '\\n\\033[1;32mUpdate complete.\\033[0m Quit and relaunch AgentTileCLI to run the new version.\\n'\n\
-         else\n\
-         \tprintf '\\n\\033[1;31mUpdate failed.\\033[0m See the output above; the installed version is unchanged.\\n'\n\
+         \tprintf '\\n\\033[1;32mUpdate complete.\\033[0m Restarting AgentTileCLI\u{2026}\\n'\n\
+         \tsleep 2\n\
+         \texit 0\n\
          fi\n\
+         printf '\\n\\033[1;31mUpdate failed.\\033[0m See the output above; the installed version is unchanged.\\n'\n\
          printf '\\nPress Enter to close this pane... '\n\
-         read -r _\n",
+         read -r _\n\
+         exit 1\n",
         repo = sh_quote(REPO_DIR),
     );
 
@@ -516,11 +526,18 @@ mod tests {
         assert_eq!(sh_quote("/tmp/it's"), "'/tmp/it'\\''s'");
     }
 
-    /// The generated script must be POSIX `sh`, and must hold the pane open
-    /// afterward - a pane whose child exits is removed, taking the output
-    /// with it.
+    /// The generated script must be POSIX `sh`, and its two endings carry
+    /// meaning the app depends on.
+    ///
+    /// A failure must hold the pane open (`read`) - a pane whose child exits is
+    /// removed, taking the reason with it - and must exit non-zero. A success
+    /// must exit *zero*, because that exit code is the whole signal the app
+    /// restarts itself on: a script that succeeded but exited non-zero would
+    /// install the new binary and then never run it, and one that failed but
+    /// exited zero would relaunch the user into the old build while telling
+    /// them the update worked.
     #[test]
-    fn update_script_is_shell_checkable_and_waits_before_exiting() {
+    fn update_script_is_shell_checkable_and_signals_its_outcome_by_exit_code() {
         let Ok(command) = command() else {
             eprintln!("skipping: couldn't write the update script");
             return;
@@ -531,7 +548,12 @@ mod tests {
         let script = std::fs::read_to_string(path).expect("script written");
         assert!(script.contains("git pull --ff-only origin master"));
         assert!(script.contains("./install.sh"));
-        assert!(script.trim_end().ends_with("read -r _"));
+
+        // Success: no `read` to answer (nobody's left to press the key), exit 0.
+        assert!(script.contains("exit 0"));
+        // Failure: hold the pane open, then exit non-zero.
+        assert!(script.contains("read -r _"));
+        assert!(script.trim_end().ends_with("exit 1"));
 
         // `sh -n` parses without executing: catches a syntax error in the
         // script above without anyone's checkout being pulled or rebuilt.

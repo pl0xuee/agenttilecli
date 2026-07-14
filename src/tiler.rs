@@ -530,15 +530,38 @@ impl Tiler {
     /// Spawns a pane running `command` rather than `claude` - the update
     /// button's pull-and-rebuild script (see `crate::update::command`), which
     /// gets a pane of its own so the user can watch it work.
-    pub fn spawn_command_pane(&self, cwd: &str, command: &str) {
-        self.attach_process_pane(Pane::command(cwd, command));
+    ///
+    /// `on_finished` is handed `true` when the command exited cleanly. The
+    /// update uses that to decide whether to relaunch the app: only a script
+    /// that actually got the new binary onto disk is worth restarting into.
+    pub fn spawn_command_pane(
+        &self,
+        cwd: &str,
+        command: &str,
+        on_finished: impl Fn(bool) + 'static,
+    ) {
+        let pane = self.attach_process_pane(Pane::command(cwd, command));
+        // A second handler on the same signal - `attach_process_pane` already
+        // connected one to take the pane down. Both run; neither cares about
+        // the other's order.
+        //
+        // Zero is success under either convention VTE might report the status
+        // in (a raw `waitpid` status or a bare exit code), since `exit 0` is 0
+        // in both, and every failure - a non-zero exit, a signal - is non-zero
+        // in both.
+        pane.terminal
+            .connect_child_exited(move |_, status| on_finished(status == 0));
     }
 
     /// Wires up the signals every pane with a child process needs (close on
     /// exit, re-title on the child's title change, flag for attention when the
     /// agent rings the bell) and attaches it. The help pane skips this - it has
     /// no process behind it to exit, re-title, or ring anything.
-    fn attach_process_pane(&self, pane: Pane) {
+    ///
+    /// Hands the attached pane back so a caller with a further interest in it
+    /// (`spawn_command_pane`, which wants to know how its child exited) can
+    /// hang its own signal handlers on the same terminal.
+    fn attach_process_pane(&self, pane: Pane) -> Rc<Pane> {
         let pane = Rc::new(pane);
 
         let this_weak = self.downgrade();
@@ -581,7 +604,8 @@ impl Tiler {
             }
         });
 
-        self.attach_pane(pane);
+        self.attach_pane(pane.clone());
+        pane
     }
 
     /// Toggle a static cheatsheet pane on/off: closes it if one is already

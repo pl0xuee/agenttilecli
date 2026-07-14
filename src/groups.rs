@@ -563,10 +563,17 @@ impl Groups {
             return;
         }
 
+        // The warning about the agents is the point of this paragraph. Updating
+        // ends in a restart, and a restart hangs up every agent in every group
+        // - which is a fine trade if you know it's coming, and an unpleasant
+        // surprise if you don't. This dialog is the last moment it can be said,
+        // so it gets said plainly, next to the button that does it.
         detail.push_str(&format!(
             "\n\nUpdating fast-forwards {repo} to origin/master and re-runs ./install.sh, \
-             in a new pane so you can watch it. Relaunch AgentTileCLI afterward to run the \
-             new version.",
+             in a new pane so you can watch it. AgentTileCLI then restarts itself into the \
+             new version - which closes every agent you have running, in every group.\n\n\
+             If the update fails, nothing is restarted and the pane stays open with the \
+             reason.",
         ));
 
         let dialog = gtk4::AlertDialog::builder()
@@ -591,13 +598,78 @@ impl Groups {
                 match update::command() {
                     Ok(command) => {
                         if let Some(tiler) = this.active_tiler() {
-                            tiler.spawn_command_pane(update::repo_dir(), &command);
+                            let this = this.clone();
+                            tiler.spawn_command_pane(
+                                update::repo_dir(),
+                                &command,
+                                // Only a clean exit means the new binary is
+                                // actually on disk (see `update::command`). A
+                                // failed update leaves its pane open with the
+                                // reason, and leaves the running app alone.
+                                move |succeeded| {
+                                    if succeeded {
+                                        this.restart();
+                                    }
+                                },
+                            );
                         }
                     }
                     Err(reason) => this.alert("Couldn't start the update", &reason),
                 }
             },
         );
+    }
+
+    /// Relaunches AgentTileCLI, which is how an update finishes: the new binary
+    /// is on disk, but this process is still the old one, and only a fresh
+    /// exec runs the new code.
+    ///
+    /// The relaunch can't simply be spawned and left to race us. GApplication
+    /// is single-instance per app id (see `main::app_id`), so a second process
+    /// starting while this one still holds the name on the bus wouldn't become
+    /// the new app at all - it would just wake *this* one, the old build, and
+    /// exit. Hence the handoff: a detached shell watches for this pid to be
+    /// gone, and only then execs the binary. It's orphaned to init the moment
+    /// we quit, so nothing is left to kill it.
+    ///
+    /// `current_exe` rather than a guessed install path: whatever file this
+    /// process was launched from is the file `install.sh` has just overwritten,
+    /// so it's the one to run again.
+    fn restart(&self) {
+        let exe = match std::env::current_exe() {
+            Ok(exe) => exe.to_string_lossy().into_owned(),
+            Err(e) => {
+                self.alert(
+                    "Update installed, but couldn't restart",
+                    &format!("Quit and relaunch AgentTileCLI to run the new version.\n\n{e}"),
+                );
+                return;
+            }
+        };
+
+        let relaunch = format!(
+            "while kill -0 {pid} 2>/dev/null; do sleep 0.1; done; exec {exe}",
+            pid = std::process::id(),
+            exe = update::sh_quote(&exe),
+        );
+
+        if let Err(e) = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&relaunch)
+            .spawn()
+        {
+            self.alert(
+                "Update installed, but couldn't restart",
+                &format!("Quit and relaunch AgentTileCLI to run the new version.\n\n{e}"),
+            );
+            return;
+        }
+
+        // Quitting is what actually hands over: the watcher above is sitting on
+        // this pid, and starts the new build the moment it's gone.
+        if let Some(app) = self.window().and_then(|w| w.application()) {
+            app.quit();
+        }
     }
 
     /// A one-button informational dialog, parented on the app window.
