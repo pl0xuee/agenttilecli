@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4::{gio, glib};
+use gtk4::{gdk, gio, glib};
 
 use crate::pane::folder_name;
 use crate::tiler::Tiler;
@@ -16,6 +16,12 @@ const UPDATE_LABEL: &str = "Check for updates";
 /// user (see `Groups::flash_row`); cleared the moment that group is shown.
 /// Styled in `style.css` - a few pulses, then a quiet tint that persists.
 const ATTENTION_CLASS: &str = "needs-attention";
+
+/// Set on the row a reorder-drag is hovering, to draw the line the dragged
+/// project would land on - above it or below it. Cleared when the pointer
+/// leaves the row, and when the drop happens.
+const DROP_ABOVE_CLASS: &str = "drop-above";
+const DROP_BELOW_CLASS: &str = "drop-below";
 
 /// How much each font-size keybinding press changes the UI's text scale - a
 /// multiplier applied both to every pane's VTE `font-scale` and, via a
@@ -40,6 +46,47 @@ fn update_available(status: &update::Status) -> Option<bool> {
         update::Status::Available(_) => Some(true),
         update::Status::Failed(_) => None,
     }
+}
+
+/// Whether a drop at `y` within a row `height` tall means "below this row"
+/// rather than "above" it. Splitting the row at its midpoint is what lets a
+/// list of n rows offer all n+1 insertion points: without it the bottom slot
+/// would be unreachable, since there's no row *after* the last one to aim at.
+fn drops_below(y: f64, height: f64) -> bool {
+    y > height / 2.0
+}
+
+/// Where the group currently at index `from` ends up when it's dropped on the
+/// row at index `target` - `below` picking which side of that row it lands on.
+///
+/// The subtraction is the part worth stating: the dragged group is lifted out
+/// of the list before it's put back, so every insertion point after the hole it
+/// leaves behind has already shifted down by one by the time it's reinserted.
+/// Without this, dragging a row downward always lands it one row short of where
+/// it was dropped.
+fn drop_index(from: usize, target: usize, below: bool) -> usize {
+    let insert_at = if below { target + 1 } else { target };
+    if from < insert_at {
+        insert_at - 1
+    } else {
+        insert_at
+    }
+}
+
+fn set_class(widget: &impl IsA<gtk4::Widget>, class: &str, on: bool) {
+    if on {
+        widget.add_css_class(class);
+    } else {
+        widget.remove_css_class(class);
+    }
+}
+
+/// Takes the insertion line off a row - on leaving it, and on dropping onto it.
+/// Both matter: a class left behind here is a line drawn under a drag that
+/// ended somewhere else entirely.
+fn clear_drop_classes(row: &gtk4::ListBoxRow) {
+    row.remove_css_class(DROP_ABOVE_CLASS);
+    row.remove_css_class(DROP_BELOW_CLASS);
 }
 
 /// Starts the shell that relaunches us once we're gone - and, crucially, starts
@@ -343,6 +390,30 @@ impl Groups {
             update_in_flight: Cell::new(false),
             hamburger: hamburger_button.clone(),
         }));
+
+        // `entries` is the one place the project order lives, and this is what
+        // makes the sidebar show it: the rows sort by their group's position in
+        // that vec, so a reorder is a reorder *of the vec* (see `move_group_to`)
+        // and the list follows. The alternative - removing and reinserting the
+        // row widget - would have to keep two orders in step by hand, and the
+        // vec's is the one that already decides what `cycle_group` calls "next".
+        //
+        // A row whose group isn't in `entries` sorts last rather than panicking;
+        // the only moment that can happen is a row mid-removal.
+        let this_weak = Rc::downgrade(&this.0);
+        this.0.sidebar_list.set_sort_func(move |a, b| {
+            let Some(inner) = this_weak.upgrade() else {
+                return gtk4::Ordering::Equal;
+            };
+            let entries = inner.entries.borrow();
+            let position = |row: &gtk4::ListBoxRow| {
+                entries
+                    .iter()
+                    .position(|e| e.id == row.widget_name())
+                    .unwrap_or(usize::MAX)
+            };
+            position(a).cmp(&position(b)).into()
+        });
 
         // A row click (or arrow-key navigation within the sidebar) switches
         // the stack; a stack switch (from here, from `cycle_group`, or from
@@ -913,22 +984,167 @@ impl Groups {
         let row = gtk4::ListBoxRow::builder().child(&row_box).build();
         row.set_widget_name(&id);
         row.add_css_class("sidebar-row");
-        self.0.sidebar_list.append(&row);
+        row.set_tooltip_text(Some(&format!(
+            "{name}\nDrag to reorder (or Super+Alt+Shift+[ / ])"
+        )));
 
         let this = self.clone();
         let id_for_close = id.clone();
         close_button.connect_clicked(move |_| this.remove_group(&id_for_close));
 
+        self.install_reorder(&row, &id);
+
+        // Registered in `entries` *before* the row is appended, because
+        // appending runs the ListBox's sort func (see `new`), which asks
+        // `entries` where this group goes - and a group it can't find there
+        // sorts to the very end, which is only coincidentally right.
         self.0.entries.borrow_mut().push(GroupEntry {
             id: id.clone(),
             tiler: tiler.clone(),
             row: row.clone(),
         });
+        self.0.sidebar_list.append(&row);
 
         self.0.stack.set_visible_child_name(&id);
         self.0.sidebar_list.select_row(Some(&row));
 
         tiler
+    }
+
+    /// Makes `row` draggable onto its neighbours, so the sidebar's project
+    /// order is the user's rather than the order they happened to open things
+    /// in.
+    ///
+    /// The drag carries the group's id as a plain string. That means the row
+    /// will also *accept* any old text dragged in from outside the app - a
+    /// selection from a terminal pane, say - so the drop handler treats a
+    /// string that names no group as "not mine" and declines it, rather than
+    /// trusting the payload because it arrived on the right widget.
+    fn install_reorder(&self, row: &gtk4::ListBoxRow, id: &str) {
+        let drag = gtk4::DragSource::builder()
+            .actions(gdk::DragAction::MOVE)
+            .build();
+        let dragged_id = id.to_string();
+        drag.connect_prepare(move |_, _, _| {
+            Some(gdk::ContentProvider::for_value(&dragged_id.to_value()))
+        });
+        // Without an explicit icon the drag has no visible payload at all: the
+        // row stays put and nothing follows the pointer, so the drag reads as
+        // the app having ignored the gesture. A picture of the row itself is
+        // both the obvious icon and a free one.
+        let row_weak = row.downgrade();
+        drag.connect_drag_begin(move |source, _| {
+            if let Some(row) = row_weak.upgrade() {
+                source.set_icon(Some(&gtk4::WidgetPaintable::new(Some(&row))), 0, 0);
+            }
+        });
+        row.add_controller(drag);
+
+        let drop = gtk4::DropTarget::new(glib::types::Type::STRING, gdk::DragAction::MOVE);
+
+        // The insertion line, redrawn as the pointer crosses the row's midpoint:
+        // a drop with no preview is a guess, and the guess is wrong half the
+        // time by construction (each row is two targets, not one).
+        let row_weak = row.downgrade();
+        drop.connect_motion(move |_, _, y| {
+            if let Some(row) = row_weak.upgrade() {
+                let below = drops_below(y, f64::from(row.height()));
+                set_class(&row, DROP_ABOVE_CLASS, !below);
+                set_class(&row, DROP_BELOW_CLASS, below);
+            }
+            gdk::DragAction::MOVE
+        });
+
+        let row_weak = row.downgrade();
+        drop.connect_leave(move |_| {
+            if let Some(row) = row_weak.upgrade() {
+                clear_drop_classes(&row);
+            }
+        });
+
+        let this = self.clone();
+        let target_id = id.to_string();
+        let row_weak = row.downgrade();
+        drop.connect_drop(move |_, value, _, y| {
+            let Some(row) = row_weak.upgrade() else {
+                return false;
+            };
+            clear_drop_classes(&row);
+            let Ok(source_id) = value.get::<String>() else {
+                return false;
+            };
+            this.reorder_onto(
+                &source_id,
+                &target_id,
+                drops_below(y, f64::from(row.height())),
+            )
+        });
+        row.add_controller(drop);
+    }
+
+    /// Answers a drop of group `source_id` onto the row of `target_id`.
+    /// `false` means the drop wasn't ours to take - the payload named no group
+    /// of this app's (see `install_reorder`).
+    fn reorder_onto(&self, source_id: &str, target_id: &str, below: bool) -> bool {
+        let to = {
+            let entries = self.0.entries.borrow();
+            let find = |id: &str| entries.iter().position(|e| e.id == id);
+            let (Some(from), Some(target)) = (find(source_id), find(target_id)) else {
+                return false;
+            };
+            drop_index(from, target, below)
+        };
+        self.move_group_to(source_id, to);
+        true
+    }
+
+    /// Moves group `id` to index `to` in the project order, clamped to the
+    /// list. The sidebar is repainted from `entries` rather than reshuffled
+    /// widget by widget - see the sort func in `new`.
+    fn move_group_to(&self, id: &str, to: usize) {
+        {
+            let mut entries = self.0.entries.borrow_mut();
+            let Some(from) = entries.iter().position(|e| e.id == id) else {
+                return;
+            };
+            let to = to.min(entries.len().saturating_sub(1));
+            if from == to {
+                return;
+            }
+            let entry = entries.remove(from);
+            entries.insert(to, entry);
+        }
+        // Outside the borrow above: sorting calls back into `entries`, and a
+        // sort kicked off while it was still mutably borrowed would panic.
+        self.0.sidebar_list.invalidate_sort();
+    }
+
+    /// Moves the *visible* group one place up (`delta = -1`) or down
+    /// (`delta = 1`) - the keyboard's way in to what a drag does with the
+    /// mouse. A no-op with a single group.
+    ///
+    /// Clamped rather than wrapped, unlike `cycle_group`: moving focus off the
+    /// end of the list and round to the top costs nothing, but a project that
+    /// silently teleports from the bottom of the list to the top because a key
+    /// was pressed once too often is a reorder the user now has to undo.
+    pub fn move_active_group(&self, delta: i32) {
+        let (id, to) = {
+            let entries = self.0.entries.borrow();
+            let len = entries.len();
+            if len < 2 {
+                return;
+            }
+            let current = self.0.stack.visible_child_name();
+            let Some(from) = entries
+                .iter()
+                .position(|e| Some(e.id.as_str()) == current.as_deref())
+            else {
+                return;
+            };
+            let to = (from as i32 + delta).clamp(0, len as i32 - 1) as usize;
+            (entries[from].id.clone(), to)
+        };
+        self.move_group_to(&id, to);
     }
 
     /// Closes every pane in the group `id` and removes it from both the
@@ -989,6 +1205,133 @@ impl Groups {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The order of the groups, as `entries` has it - which is what decides
+    /// what `cycle_group` calls "next".
+    fn order(groups: &Groups) -> Vec<String> {
+        groups
+            .0
+            .entries
+            .borrow()
+            .iter()
+            .map(|e| e.id.clone())
+            .collect()
+    }
+
+    /// The order of the groups as the *sidebar* shows them, read back off the
+    /// ListBox - which is the thing the user actually reorders, and which only
+    /// matches `order` above if the sort func in `new` is doing its job.
+    fn sidebar_order(groups: &Groups) -> Vec<String> {
+        let mut ids = Vec::new();
+        let mut i = 0;
+        while let Some(row) = groups.0.sidebar_list.row_at_index(i) {
+            ids.push(row.widget_name().to_string());
+            i += 1;
+        }
+        ids
+    }
+
+    /// A row is two drop targets, not one - its top half and its bottom half -
+    /// and that's what gives a list of n rows the n+1 places a project can go.
+    #[test]
+    fn a_row_is_split_into_an_above_half_and_a_below_half() {
+        assert!(!drops_below(4.0, 30.0), "the top of a row inserts above it");
+        assert!(drops_below(26.0, 30.0), "the bottom of a row inserts below");
+    }
+
+    /// The off-by-one that makes a *downward* drag land where it was dropped
+    /// rather than one row short of it: the dragged project is lifted out of
+    /// the list before it's put back, so every slot below the hole it left has
+    /// already shifted up by one.
+    #[test]
+    fn a_downward_drop_accounts_for_the_hole_the_drag_left_behind() {
+        // The first project, dropped below the third: it lands third (index 2),
+        // not fourth - the two it passed have each moved up one.
+        assert_eq!(drop_index(0, 2, true), 2);
+        assert_eq!(drop_index(0, 2, false), 1);
+
+        // Dragging *up*, nothing below the hole has moved, so the line drawn is
+        // exactly the index it lands on.
+        assert_eq!(drop_index(3, 1, false), 1);
+        assert_eq!(drop_index(3, 1, true), 2);
+
+        // Dropped back onto itself, either half: it stays put.
+        assert_eq!(drop_index(2, 2, false), 2);
+        assert_eq!(drop_index(2, 2, true), 2);
+    }
+
+    /// A reorder has to move the project in *both* orders at once - the sidebar
+    /// the user is looking at, and the `entries` order that decides which group
+    /// `[`/`]` go to next. A drag that only repainted the list would leave the
+    /// keyboard cycling projects in an order nothing on screen still shows.
+    #[test]
+    fn reordering_moves_a_group_for_the_sidebar_and_the_keyboard_alike() {
+        if gtk4::init().is_err() {
+            eprintln!("skipping: no display available for gtk4::init()");
+            return;
+        }
+
+        let groups = Groups::new("/tmp");
+        groups.add_group("/usr");
+        groups.add_group("/etc");
+        assert_eq!(order(&groups), ["0", "1", "2"]);
+        assert_eq!(sidebar_order(&groups), ["0", "1", "2"]);
+
+        // Drag the last project onto the top half of the first: to the top.
+        assert!(groups.reorder_onto("2", "0", false));
+        assert_eq!(order(&groups), ["2", "0", "1"]);
+        assert_eq!(
+            sidebar_order(&groups),
+            ["2", "0", "1"],
+            "the sidebar must show the order the drag produced",
+        );
+
+        // And the keyboard now cycles in that order: after "2" comes "0".
+        groups.0.stack.set_visible_child_name("2");
+        groups.cycle_group(1);
+        assert_eq!(groups.0.stack.visible_child_name().as_deref(), Some("0"));
+
+        // Super+Alt+Shift+[ on the visible group ("0", now second) lifts it back
+        // above "2"...
+        groups.move_active_group(-1);
+        assert_eq!(order(&groups), ["0", "2", "1"]);
+        assert_eq!(sidebar_order(&groups), ["0", "2", "1"]);
+
+        // ...and pressing it again at the top does nothing, rather than wrapping
+        // the project round to the bottom of the list behind the user's back.
+        groups.move_active_group(-1);
+        assert_eq!(order(&groups), ["0", "2", "1"]);
+
+        // A drag *into* the sidebar from outside the app (a text selection from
+        // a terminal pane, say) arrives as a string that names no group. It must
+        // be declined, not acted on.
+        assert!(!groups.reorder_onto("/some/dragged/text", "0", true));
+        assert_eq!(order(&groups), ["0", "2", "1"]);
+    }
+
+    /// A moved project keeps its panes and its identity - the reorder shuffles
+    /// rows, not the groups behind them. Getting this wrong (rebuilding rows in
+    /// place of moving them) would silently hang up the agents in the group the
+    /// user dragged.
+    #[test]
+    fn a_reordered_group_keeps_its_tiler() {
+        if gtk4::init().is_err() {
+            eprintln!("skipping: no display available for gtk4::init()");
+            return;
+        }
+
+        let groups = Groups::new("/tmp");
+        groups.add_group("/usr");
+        let moved = groups.0.entries.borrow()[1].tiler.clone();
+
+        assert!(groups.reorder_onto("1", "0", false));
+        assert_eq!(order(&groups), ["1", "0"]);
+        assert_eq!(
+            groups.0.entries.borrow()[0].tiler,
+            moved,
+            "the dragged group must arrive with the same Tiler it left with",
+        );
+    }
 
     /// Exercises the group state machine directly (add/switch/cycle/remove),
     /// bypassing `new_group`'s `FileDialog` - GTK's own file chooser needs a

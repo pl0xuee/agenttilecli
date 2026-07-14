@@ -45,6 +45,19 @@ pub fn install(window: &impl IsA<gtk4::Widget>, groups: &Groups) {
                 groups.cycle_group(1);
                 return glib::Propagation::Stop;
             }
+            // Shift+[ and Shift+] *move* the current group where plain [ and ]
+            // switch to another - the same pairing dwm gives its tags. They're
+            // matched as `braceleft`/`braceright` rather than as the bracket
+            // keys with `shift`, because shifting a bracket doesn't produce a
+            // shifted bracket keyval: it produces a brace.
+            gdk::Key::braceleft => {
+                groups.move_active_group(-1);
+                return glib::Propagation::Stop;
+            }
+            gdk::Key::braceright => {
+                groups.move_active_group(1);
+                return glib::Propagation::Stop;
+            }
             // Text size is a global setting across every group's panes and
             // the app's own chrome (see `Groups::set_font_scale`), not just
             // the active group's - so it belongs here too.

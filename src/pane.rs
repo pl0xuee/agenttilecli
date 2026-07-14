@@ -257,6 +257,7 @@ fn help_text() -> String {
             ("Return", "new project as a new group"),
             ("g", "toggle the project sidebar"),
             ("[  /  ]", "previous / next group"),
+            ("{  /  }", "move this group up / down"),
         ],
     );
     let mouse = section(
@@ -268,6 +269,7 @@ fn help_text() -> String {
             ("click \u{2630}", "toggle the project sidebar"),
             ("sidebar +", "open a new project as a new group"),
             ("sidebar row", "switch to that group"),
+            ("drag a row", "reorder the projects"),
             ("sidebar \u{21bb}", "check GitHub for a newer version"),
             ("new-agent btn", "spawn another agent in this group"),
         ],
