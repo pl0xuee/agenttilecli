@@ -44,6 +44,12 @@ you want to nudge it.
 - **Per-project panes** — the **new-agent** button spawns another agent in
   the current group's project directly, no picker. Each pane's corner shows
   the folder name it's running in.
+- **Paste, including screenshots** — `Ctrl+V` (or `Ctrl+Shift+V`, or
+  `Shift+Insert`) pastes into a pane, and `Ctrl+Shift+C` copies the selection.
+  Paste a *copied image* and it's written out as a PNG whose path is typed into
+  the prompt for you, so claude reads the picture from there — no `wl-clipboard`
+  or `xclip` needed, since the image comes from GTK rather than a command-line
+  clipboard tool. Text still pastes as text when the clipboard holds both.
 - **One-click updates** — **Check for updates**, at the bottom of the sidebar
   (or `Super+Alt+u`), checks `origin/master` for a newer version, shows you
   what's new, and can pull and reinstall it for you in a pane so you can watch

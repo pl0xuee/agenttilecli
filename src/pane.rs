@@ -242,6 +242,18 @@ fn help_text() -> String {
             ("0", "reset text size"),
         ],
     );
+    // The one section whose keys aren't Super+Alt anything - they're the
+    // terminal's own clipboard keys, so they're spelled out in full and the
+    // heading says so, rather than being silently exempted from the Super+Alt
+    // line above them.
+    let clipboard = section(
+        "CLIPBOARD (no Super+Alt)",
+        &[
+            ("Ctrl+V", "paste \u{2014} text, or a copied image"),
+            ("Ctrl+Shift+V", "paste (same)"),
+            ("Ctrl+Shift+C", "copy the selection"),
+        ],
+    );
     let layout = section(
         "LAYOUT",
         &[
@@ -291,7 +303,10 @@ fn help_text() -> String {
         .map(|s| s.trim_end_matches("\r\n").split("\r\n").count())
         .max()
         .unwrap_or(0);
-    let col_a = format!("{}\r\n\r\n{text_size}", pad_to(&panes, top_height));
+    let col_a = format!(
+        "{}\r\n\r\n{text_size}\r\n{clipboard}",
+        pad_to(&panes, top_height)
+    );
     let col_b = format!("{}\r\n\r\n{groups}", pad_to(&layout, top_height));
     let col_c = format!("{}\r\n\r\n{help}", pad_to(&mouse, top_height));
     let keys = side_by_side(&side_by_side(&col_a, &col_b, 6), &col_c, 6);
@@ -301,6 +316,7 @@ fn help_text() -> String {
         bullet("Drag any seam to size panes by hand; master-stack keeps its divider where you put it."),
         bullet("Adding panes never resizes the window \u{2014} they tile smaller inside the size you set."),
         bullet("A pane's corner label tracks its real directory, not claude's own /cd."),
+        bullet("Paste a screenshot and it's saved as a PNG whose path is typed in for you \u{2014} claude reads it from there."),
         bullet("Switching groups doesn't stop the others' agents; closing a group's \u{2715} hangs up every agent in it."),
         bullet("This help pane has no process behind it \u{2014} close it like any other, with Super+Alt+w."),
     ]
@@ -414,6 +430,10 @@ impl Pane {
         // are working at once. VTE still emits the `bell` signal either way;
         // this only suppresses the beep.
         terminal.set_audible_bell(false);
+        // VTE has no clipboard keybindings of its own, so without this a pane
+        // can't be pasted into at all. Installed here rather than per pane kind
+        // so the help pane can be copied *out of* too.
+        crate::clipboard::install(&terminal);
 
         let close_button = gtk4::Button::builder()
             .icon_name("window-close-symbolic")
