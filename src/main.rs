@@ -2,6 +2,8 @@ mod groups;
 mod keybindings;
 mod layout;
 mod pane;
+#[cfg(test)]
+mod testing;
 mod tiler;
 mod update;
 
@@ -112,6 +114,7 @@ fn build_window(app: &Application) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::gtk_test;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -127,26 +130,23 @@ mod tests {
     /// which - at `cargo test`, rather than by squinting at a button.
     #[test]
     fn the_stylesheet_parses_without_errors() {
-        if gtk4::init().is_err() {
-            eprintln!("skipping: no display available for gtk4::init()");
-            return;
-        }
+        gtk_test(|| {
+            let errors = Rc::new(RefCell::new(Vec::new()));
+            let provider = CssProvider::new();
+            let sink = errors.clone();
+            provider.connect_parsing_error(move |_, section, error| {
+                sink.borrow_mut()
+                    .push(format!("{}: {error}", section.to_str()));
+            });
+            provider.load_from_string(include_str!("style.css"));
 
-        let errors = Rc::new(RefCell::new(Vec::new()));
-        let provider = CssProvider::new();
-        let sink = errors.clone();
-        provider.connect_parsing_error(move |_, section, error| {
-            sink.borrow_mut()
-                .push(format!("{}: {error}", section.to_str()));
+            let errors = errors.borrow();
+            assert!(
+                errors.is_empty(),
+                "style.css has {} parse error(s) GTK would have silently ignored:\n{}",
+                errors.len(),
+                errors.join("\n"),
+            );
         });
-        provider.load_from_string(include_str!("style.css"));
-
-        let errors = errors.borrow();
-        assert!(
-            errors.is_empty(),
-            "style.css has {} parse error(s) GTK would have silently ignored:\n{}",
-            errors.len(),
-            errors.join("\n"),
-        );
     }
 }

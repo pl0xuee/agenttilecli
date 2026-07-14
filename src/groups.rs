@@ -1205,6 +1205,7 @@ impl Groups {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::gtk_test;
 
     /// The order of the groups, as `entries` has it - which is what decides
     /// what `cycle_group` calls "next".
@@ -1266,47 +1267,44 @@ mod tests {
     /// keyboard cycling projects in an order nothing on screen still shows.
     #[test]
     fn reordering_moves_a_group_for_the_sidebar_and_the_keyboard_alike() {
-        if gtk4::init().is_err() {
-            eprintln!("skipping: no display available for gtk4::init()");
-            return;
-        }
+        gtk_test(|| {
+            let groups = Groups::new("/tmp");
+            groups.add_group("/usr");
+            groups.add_group("/etc");
+            assert_eq!(order(&groups), ["0", "1", "2"]);
+            assert_eq!(sidebar_order(&groups), ["0", "1", "2"]);
 
-        let groups = Groups::new("/tmp");
-        groups.add_group("/usr");
-        groups.add_group("/etc");
-        assert_eq!(order(&groups), ["0", "1", "2"]);
-        assert_eq!(sidebar_order(&groups), ["0", "1", "2"]);
+            // Drag the last project onto the top half of the first: to the top.
+            assert!(groups.reorder_onto("2", "0", false));
+            assert_eq!(order(&groups), ["2", "0", "1"]);
+            assert_eq!(
+                sidebar_order(&groups),
+                ["2", "0", "1"],
+                "the sidebar must show the order the drag produced",
+            );
 
-        // Drag the last project onto the top half of the first: to the top.
-        assert!(groups.reorder_onto("2", "0", false));
-        assert_eq!(order(&groups), ["2", "0", "1"]);
-        assert_eq!(
-            sidebar_order(&groups),
-            ["2", "0", "1"],
-            "the sidebar must show the order the drag produced",
-        );
+            // And the keyboard now cycles in that order: after "2" comes "0".
+            groups.0.stack.set_visible_child_name("2");
+            groups.cycle_group(1);
+            assert_eq!(groups.0.stack.visible_child_name().as_deref(), Some("0"));
 
-        // And the keyboard now cycles in that order: after "2" comes "0".
-        groups.0.stack.set_visible_child_name("2");
-        groups.cycle_group(1);
-        assert_eq!(groups.0.stack.visible_child_name().as_deref(), Some("0"));
+            // Super+Alt+Shift+[ on the visible group ("0", now second) lifts it back
+            // above "2"...
+            groups.move_active_group(-1);
+            assert_eq!(order(&groups), ["0", "2", "1"]);
+            assert_eq!(sidebar_order(&groups), ["0", "2", "1"]);
 
-        // Super+Alt+Shift+[ on the visible group ("0", now second) lifts it back
-        // above "2"...
-        groups.move_active_group(-1);
-        assert_eq!(order(&groups), ["0", "2", "1"]);
-        assert_eq!(sidebar_order(&groups), ["0", "2", "1"]);
+            // ...and pressing it again at the top does nothing, rather than wrapping
+            // the project round to the bottom of the list behind the user's back.
+            groups.move_active_group(-1);
+            assert_eq!(order(&groups), ["0", "2", "1"]);
 
-        // ...and pressing it again at the top does nothing, rather than wrapping
-        // the project round to the bottom of the list behind the user's back.
-        groups.move_active_group(-1);
-        assert_eq!(order(&groups), ["0", "2", "1"]);
-
-        // A drag *into* the sidebar from outside the app (a text selection from
-        // a terminal pane, say) arrives as a string that names no group. It must
-        // be declined, not acted on.
-        assert!(!groups.reorder_onto("/some/dragged/text", "0", true));
-        assert_eq!(order(&groups), ["0", "2", "1"]);
+            // A drag *into* the sidebar from outside the app (a text selection from
+            // a terminal pane, say) arrives as a string that names no group. It must
+            // be declined, not acted on.
+            assert!(!groups.reorder_onto("/some/dragged/text", "0", true));
+            assert_eq!(order(&groups), ["0", "2", "1"]);
+        });
     }
 
     /// A moved project keeps its panes and its identity - the reorder shuffles
@@ -1315,22 +1313,19 @@ mod tests {
     /// user dragged.
     #[test]
     fn a_reordered_group_keeps_its_tiler() {
-        if gtk4::init().is_err() {
-            eprintln!("skipping: no display available for gtk4::init()");
-            return;
-        }
+        gtk_test(|| {
+            let groups = Groups::new("/tmp");
+            groups.add_group("/usr");
+            let moved = groups.0.entries.borrow()[1].tiler.clone();
 
-        let groups = Groups::new("/tmp");
-        groups.add_group("/usr");
-        let moved = groups.0.entries.borrow()[1].tiler.clone();
-
-        assert!(groups.reorder_onto("1", "0", false));
-        assert_eq!(order(&groups), ["1", "0"]);
-        assert_eq!(
-            groups.0.entries.borrow()[0].tiler,
-            moved,
-            "the dragged group must arrive with the same Tiler it left with",
-        );
+            assert!(groups.reorder_onto("1", "0", false));
+            assert_eq!(order(&groups), ["1", "0"]);
+            assert_eq!(
+                groups.0.entries.borrow()[0].tiler,
+                moved,
+                "the dragged group must arrive with the same Tiler it left with",
+            );
+        });
     }
 
     /// Exercises the group state machine directly (add/switch/cycle/remove),
@@ -1340,39 +1335,36 @@ mod tests {
     /// is what this test is meant to cover anyway.
     #[test]
     fn add_switch_remove_and_cycle_groups() {
-        if gtk4::init().is_err() {
-            eprintln!("skipping: no display available for gtk4::init()");
-            return;
-        }
+        gtk_test(|| {
+            let groups = Groups::new("/tmp");
+            assert_eq!(groups.0.entries.borrow().len(), 1);
+            assert_eq!(groups.0.stack.visible_child_name().as_deref(), Some("0"));
+            // The initial group must not get an agent pane spawned into it
+            // unasked - see `add_group`'s doc comment.
+            assert!(groups.active_tiler().is_some());
 
-        let groups = Groups::new("/tmp");
-        assert_eq!(groups.0.entries.borrow().len(), 1);
-        assert_eq!(groups.0.stack.visible_child_name().as_deref(), Some("0"));
-        // The initial group must not get an agent pane spawned into it
-        // unasked - see `add_group`'s doc comment.
-        assert!(groups.active_tiler().is_some());
+            groups.add_group("/usr");
+            groups.add_group("/etc");
+            assert_eq!(groups.0.entries.borrow().len(), 3);
+            // add_group switches to the group it just created.
+            assert_eq!(groups.0.stack.visible_child_name().as_deref(), Some("2"));
 
-        groups.add_group("/usr");
-        groups.add_group("/etc");
-        assert_eq!(groups.0.entries.borrow().len(), 3);
-        // add_group switches to the group it just created.
-        assert_eq!(groups.0.stack.visible_child_name().as_deref(), Some("2"));
+            groups.cycle_group(1);
+            assert_eq!(groups.0.stack.visible_child_name().as_deref(), Some("0"));
+            groups.cycle_group(-1);
+            assert_eq!(groups.0.stack.visible_child_name().as_deref(), Some("2"));
 
-        groups.cycle_group(1);
-        assert_eq!(groups.0.stack.visible_child_name().as_deref(), Some("0"));
-        groups.cycle_group(-1);
-        assert_eq!(groups.0.stack.visible_child_name().as_deref(), Some("2"));
+            // Removing the active group falls back to a neighbor.
+            groups.remove_group("2");
+            assert_eq!(groups.0.entries.borrow().len(), 2);
+            assert_ne!(groups.0.stack.visible_child_name().as_deref(), Some("2"));
 
-        // Removing the active group falls back to a neighbor.
-        groups.remove_group("2");
-        assert_eq!(groups.0.entries.borrow().len(), 2);
-        assert_ne!(groups.0.stack.visible_child_name().as_deref(), Some("2"));
-
-        // Never removes the last remaining group.
-        groups.remove_group("1");
-        assert_eq!(groups.0.entries.borrow().len(), 1);
-        groups.remove_group("0");
-        assert_eq!(groups.0.entries.borrow().len(), 1);
+            // Never removes the last remaining group.
+            groups.remove_group("1");
+            assert_eq!(groups.0.entries.borrow().len(), 1);
+            groups.remove_group("0");
+            assert_eq!(groups.0.entries.borrow().len(), 1);
+        });
     }
 
     /// Clicking the update button must hand the (network-bound) check off to
@@ -1385,26 +1377,23 @@ mod tests {
     /// then decides.
     #[test]
     fn the_update_button_locks_out_a_second_check_while_one_is_running() {
-        if gtk4::init().is_err() {
-            eprintln!("skipping: no display available for gtk4::init()");
-            return;
-        }
+        gtk_test(|| {
+            let groups = Groups::new("/tmp");
+            assert!(groups.0.update_button.is_sensitive());
+            assert!(!groups.0.update_in_flight.get());
 
-        let groups = Groups::new("/tmp");
-        assert!(groups.0.update_button.is_sensitive());
-        assert!(!groups.0.update_in_flight.get());
+            groups.0.update_button.emit_clicked();
+            assert!(
+                groups.0.update_in_flight.get(),
+                "check runs off the main loop"
+            );
+            assert!(!groups.0.update_button.is_sensitive());
 
-        groups.0.update_button.emit_clicked();
-        assert!(
-            groups.0.update_in_flight.get(),
-            "check runs off the main loop"
-        );
-        assert!(!groups.0.update_button.is_sensitive());
-
-        // The keybinding path bypasses the button, so it's the flag - not the
-        // button's sensitivity - that has to hold the line here.
-        groups.check_for_updates();
-        assert!(groups.0.update_in_flight.get());
+            // The keybinding path bypasses the button, so it's the flag - not the
+            // button's sensitivity - that has to hold the line here.
+            groups.check_for_updates();
+            assert!(groups.0.update_in_flight.get());
+        });
     }
 
     /// A check that couldn't be *made* must not be read as "no update": it
@@ -1437,33 +1426,30 @@ mod tests {
     /// nothing.
     #[test]
     fn the_update_buttons_caption_and_highlight_always_agree() {
-        if gtk4::init().is_err() {
-            eprintln!("skipping: no display available for gtk4::init()");
-            return;
-        }
+        gtk_test(|| {
+            let groups = Groups::new("/tmp");
+            let green = || groups.0.update_button.has_css_class("update-available");
+            let caption = || groups.0.update_label.label().to_string();
 
-        let groups = Groups::new("/tmp");
-        let green = || groups.0.update_button.has_css_class("update-available");
-        let caption = || groups.0.update_label.label().to_string();
+            groups.refresh_update_button();
+            assert!(!green());
+            assert_eq!(caption(), UPDATE_LABEL);
 
-        groups.refresh_update_button();
-        assert!(!green());
-        assert_eq!(caption(), UPDATE_LABEL);
+            groups.0.update_available.set(true);
+            groups.refresh_update_button();
+            assert!(green());
+            assert_eq!(caption(), "Update available");
 
-        groups.0.update_available.set(true);
-        groups.refresh_update_button();
-        assert!(green());
-        assert_eq!(caption(), "Update available");
+            // The state a *failed* check leaves behind: the flag is untouched, so
+            // repainting must restore the found update rather than clear it.
+            groups.refresh_update_button();
+            assert!(green());
+            assert_eq!(caption(), "Update available");
 
-        // The state a *failed* check leaves behind: the flag is untouched, so
-        // repainting must restore the found update rather than clear it.
-        groups.refresh_update_button();
-        assert!(green());
-        assert_eq!(caption(), "Update available");
-
-        groups.0.update_available.set(false);
-        groups.refresh_update_button();
-        assert!(!green());
-        assert_eq!(caption(), UPDATE_LABEL);
+            groups.0.update_available.set(false);
+            groups.refresh_update_button();
+            assert!(!green());
+            assert_eq!(caption(), UPDATE_LABEL);
+        });
     }
 }
