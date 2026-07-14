@@ -20,7 +20,9 @@ you want to nudge it.
 - **Background agents tell you when they want you** — when an agent finishes a
   turn, or stops to ask permission, its group's sidebar row pulses and then
   stays quietly tinted until you open that group, so a finished agent in a
-  project you aren't watching doesn't sit there unnoticed. Panes launch
+  project you aren't watching doesn't sit there unnoticed. The hamburger
+  pulses with it, since the sidebar is usually closed — it says *a* project
+  wants you, and the row behind it says which. Panes launch
   `claude` with `Stop` and `Notification` hooks that ring the terminal bell;
   they're layered on per-pane via `--settings`, so your `~/.claude` config is
   never modified and your `claude` in other terminals is unaffected. The bell

@@ -92,6 +92,12 @@ struct GroupsInner {
     /// started on top of it (the keybinding doesn't go through the button,
     /// so the button's own sensitivity can't be what enforces this).
     update_in_flight: Cell<bool>,
+    /// The sidebar-toggle button, kept here because it doubles as the
+    /// notification of last resort: the sidebar starts *collapsed*, so a row
+    /// lighting up behind it is a notification nobody can see. The hamburger
+    /// is what's on screen at that moment, so it carries the same signal out
+    /// to where it can be - see `flash_row`.
+    hamburger: gtk4::Button,
 }
 
 /// A hamburger-toggled sidebar of project groups, each holding its own
@@ -290,6 +296,7 @@ impl Groups {
             update_label,
             update_available: Cell::new(false),
             update_in_flight: Cell::new(false),
+            hamburger: hamburger_button.clone(),
         }));
 
         // A row click (or arrow-key navigation within the sidebar) switches
@@ -390,20 +397,45 @@ impl Groups {
             return;
         };
 
+        // The hamburger flashes alongside the row, because most of the time the
+        // row isn't on screen to flash: the sidebar starts collapsed, and a
+        // notification behind a collapsed sidebar notifies nobody. The
+        // hamburger is the one thing that's always visible, so it says "one of
+        // your projects wants you" and the row behind it says which.
+        let hamburger = self.0.hamburger.clone();
+
         // A CSS animation restarts only when the class is *newly* added, so
-        // re-adding one the row already carries would pulse nothing - which is
-        // exactly the case that matters, a second agent in an
-        // already-flagged group finishing while the first is still waiting.
-        // Dropping the class and restoring it once GTK has had a frame to
-        // notice it gone replays the pulses from the top.
+        // re-adding one the widget already carries would pulse nothing - which
+        // is exactly the case that matters, a second agent finishing while the
+        // first is still waiting. Dropping the class and restoring it once GTK
+        // has had a frame to notice it gone replays the pulses from the top.
         row.remove_css_class(ATTENTION_CLASS);
-        glib::idle_add_local_once(move || row.add_css_class(ATTENTION_CLASS));
+        hamburger.remove_css_class(ATTENTION_CLASS);
+        glib::idle_add_local_once(move || {
+            row.add_css_class(ATTENTION_CLASS);
+            hamburger.add_css_class(ATTENTION_CLASS);
+        });
     }
 
     /// Answers group `id`'s call for attention - it's been looked at.
     fn clear_attention(&self, id: &str) {
         if let Some(row) = self.row_for(id) {
             row.remove_css_class(ATTENTION_CLASS);
+        }
+        self.refresh_hamburger();
+    }
+
+    /// The hamburger speaks for every group at once, so it goes quiet only once
+    /// the *last* group still asking for attention has been seen - or closed.
+    fn refresh_hamburger(&self) {
+        let still_waiting = self
+            .0
+            .entries
+            .borrow()
+            .iter()
+            .any(|e| e.row.has_css_class(ATTENTION_CLASS));
+        if !still_waiting {
+            self.0.hamburger.remove_css_class(ATTENTION_CLASS);
         }
     }
 
@@ -882,6 +914,10 @@ impl Groups {
         removed.tiler.close_all_panes();
         self.0.stack.remove(&removed.tiler);
         self.0.sidebar_list.remove(&removed.row);
+        // The closed group might have been the only one still asking for
+        // attention, and it can't answer for itself now that it's gone -
+        // leaving the hamburger lit for a project that no longer exists.
+        self.refresh_hamburger();
 
         if removed_was_active {
             self.0.stack.set_visible_child_name(&fallback.id);

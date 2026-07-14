@@ -222,6 +222,35 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
   color: #6ab0de;
 }
 
+/* The same signal as the flashing row, carried out to where it can actually be
+   seen. The sidebar starts collapsed, so most of the time the row that lit up
+   is behind it - and a notification nobody can see isn't one. The hamburger is
+   what's on screen at that moment: it says "one of your projects wants you",
+   and the row behind it says which. It stays lit until the last flagged group
+   has been looked at.
+
+   Brighter than the row's tint, because it's carrying the message alone, and
+   because it sits over pane content rather than the sidebar's flat backdrop. */
+@keyframes hamburger-attention {
+  from { background-color: rgba(27, 32, 36, 0.7); }
+  50%  { background-color: rgba(216, 166, 87, 0.85); }
+  to   { background-color: rgba(27, 32, 36, 0.7); }
+}
+
+.add-pane.needs-attention {
+  color: #d8a657;
+  opacity: 1;
+  animation-name: hamburger-attention;
+  animation-duration: 900ms;
+  animation-iteration-count: 3;
+  animation-timing-function: ease-in-out;
+}
+
+.add-pane.needs-attention:hover {
+  color: #ffffff;
+  background-color: #d8a657;
+}
+
 /* Sits directly under the update button, saying what it's checking. Dimmer
    and smaller than everything else in the sidebar - it's a fact to look up,
    not a control, and it should read as a footnote to the button above it. */
