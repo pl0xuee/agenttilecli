@@ -233,8 +233,9 @@ fn blocked_reason(repo: &str) -> Option<String> {
 }
 
 /// Quotes a path for POSIX `sh`, so a checkout under a directory with spaces
-/// (or quotes) still works.
-fn sh_quote(s: &str) -> String {
+/// (or quotes) still works. Also used by `pane` to quote claude's settings
+/// path, which has the same problem.
+pub(crate) fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 

@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::os::fd::AsRawFd;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -10,6 +11,25 @@ use vte4::{prelude::*, PtyFlags, Terminal};
 /// How often to re-check a pane's current directory. Cheap (a single
 /// syscall pair per pane) so a short interval is fine.
 const CWD_POLL_INTERVAL: Duration = Duration::from_millis(1000);
+
+/// The shell one-liner claude runs when it finishes a turn (`Stop`) or stops
+/// to ask for something (`Notification`) - the two moments a watching human
+/// would want to know about, and the two this app repaints a sidebar row for
+/// (see `Groups::flash_row`). All it does is ring the pane's bell, which VTE
+/// reports as the `bell` signal and `Tiler` forwards on as "this group wants
+/// you".
+///
+/// It has to find the terminal the hard way, because both obvious routes are
+/// closed: claude runs hooks with *no controlling terminal* (`/dev/tty` there
+/// is "No such device or address"), and it captures their stdout rather than
+/// letting it through to the pane. What is still open is claude's own stdin -
+/// the pane's pty - so the hook reads its parent's fd 0 back out of /proc and
+/// writes the bell byte straight to that device. Bytes written to a pty slave
+/// surface on the master exactly as if the program had printed them, which is
+/// precisely the thing the bell signal watches for.
+///
+/// POSIX sh, not the login shell: claude runs hook commands through /bin/sh.
+const BELL_HOOK: &str = r#"PTY=$(readlink /proc/$PPID/fd/0 2>/dev/null); case "$PTY" in /dev/pts/*) printf '\a' > "$PTY" ;; esac"#;
 
 /// The working directory of whichever process currently holds the
 /// foreground process group of `terminal`'s PTY - the same technique real
@@ -298,6 +318,70 @@ fn help_text() -> String {
     )
 }
 
+/// The `--settings` layer every claude pane is launched with: `BELL_HOOK`,
+/// wired to the two events worth interrupting someone for.
+///
+/// Written out as a file rather than passed inline (`--settings` takes either)
+/// because an inline JSON argument would have to survive being quoted through
+/// the user's login shell - and that shell can be fish, whose backslash rules
+/// inside single quotes differ from POSIX sh's, which is precisely enough to
+/// turn the hook's `printf '\a'` into a hook that prints the letter "a". A
+/// file has no quoting layers to get wrong.
+fn claude_settings_json() -> String {
+    // The hook is a shell one-liner full of quotes and a backslash, going into
+    // a JSON string: escape both, in that order.
+    let hook = BELL_HOOK.replace('\\', r"\\").replace('"', "\\\"");
+    let entry = format!(r#"[{{"hooks":[{{"type":"command","command":"{hook}"}}]}}]"#);
+    format!(r#"{{"hooks":{{"Stop":{entry},"Notification":{entry}}}}}"#)
+}
+
+/// Writes `claude_settings_json` under the user's cache directory and returns
+/// its path, or `None` if it couldn't be written - in which case panes fall
+/// back to a plain, bell-less `claude` rather than failing to start.
+///
+/// Rewritten on every pane launch instead of only when absent, so a stale hook
+/// left behind by an older AgentTileCLI can't outlive the version that wrote
+/// it.
+fn claude_settings_file() -> Option<String> {
+    let dir = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?
+        .join("agenttilecli");
+    std::fs::create_dir_all(&dir).ok()?;
+
+    let path = dir.join("claude-settings.json");
+    std::fs::write(&path, claude_settings_json()).ok()?;
+    Some(path.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+
+    /// The hook is a shell one-liner embedded in a JSON string, so every
+    /// character in it crosses two escaping layers. A single backslash lost on
+    /// the way turns `printf '\a'` - the entire point of the hook - into one
+    /// that prints the letter "a", and *nothing downstream would say so*:
+    /// claude runs it happily, the pane quietly prints an "a", and the sidebar
+    /// row just never lights up.
+    #[test]
+    fn bell_hook_survives_json_escaping() {
+        let json = claude_settings_json();
+
+        // The bell byte, still an escape sequence after JSON encoding rather
+        // than a stray backslash that ate the "a".
+        assert!(json.contains(r#"printf '\\a'"#), "bell byte mangled: {json}");
+        // The hook's own double quotes, escaped instead of ending the JSON
+        // string early.
+        assert!(json.contains(r#"\"$PTY\""#), "shell quotes mangled: {json}");
+
+        // Both moments worth interrupting someone for: finished, and asking.
+        assert!(json.contains(r#""Stop""#));
+        assert!(json.contains(r#""Notification""#));
+    }
+
+}
+
 /// A single tile: a bordered frame containing a VTE terminal. Most panes run
 /// `claude` via the user's login shell (so PATH/nvm/aliases resolve the same
 /// way an interactive terminal would); the help pane instead just has static
@@ -321,6 +405,13 @@ impl Pane {
         terminal.set_hexpand(true);
         terminal.set_vexpand(true);
         apply_theme(&terminal);
+        // An agent's bell is this app's "the agent wants you" signal - it's
+        // what lights up the group's sidebar row (see `Groups::flash_row`).
+        // Turning the *audible* half off keeps that a visual notification
+        // rather than a room-filling one, which matters when several agents
+        // are working at once. VTE still emits the `bell` signal either way;
+        // this only suppresses the beep.
+        terminal.set_audible_bell(false);
 
         let close_button = gtk4::Button::builder()
             .icon_name("window-close-symbolic")
@@ -342,9 +433,21 @@ impl Pane {
         (frame, terminal, overlay, close_button)
     }
 
-    /// The usual pane: `claude`, running in `cwd`.
+    /// The usual pane: `claude`, running in `cwd` - with `BELL_HOOK` installed,
+    /// so a finished or waiting agent lights up its group's sidebar row.
+    ///
+    /// The hooks arrive via `--settings`, which layers over the user's own
+    /// settings files rather than replacing them, and only for panes this app
+    /// launches: nothing in ~/.claude is written to, and their claude in any
+    /// other terminal is untouched. If the settings file can't be written for
+    /// any reason, the pane still gets a perfectly good claude - just a silent
+    /// one, which is exactly what it was before this existed.
     pub fn new(cwd: &str) -> Self {
-        Self::command(cwd, "claude")
+        let command = match claude_settings_file() {
+            Some(path) => format!("claude --settings {}", crate::update::sh_quote(&path)),
+            None => "claude".to_string(),
+        };
+        Self::command(cwd, &command)
     }
 
     /// A pane running `command` instead of `claude` (via the same login

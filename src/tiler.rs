@@ -193,6 +193,9 @@ mod imp {
         pub focus: Cell<usize>,
         pub cwd: RefCell<String>,
         pub title_cb: RefCell<Option<Box<dyn Fn(&str)>>>,
+        /// Invoked when a pane in this group wants the user - see
+        /// `Tiler::set_attention_callback`.
+        pub attention_cb: RefCell<Option<Box<dyn Fn()>>>,
         pub resizing: Cell<bool>,
         pub drag_start_ratio: Cell<f64>,
         pub drag_start_width: Cell<i32>,
@@ -532,8 +535,9 @@ impl Tiler {
     }
 
     /// Wires up the signals every pane with a child process needs (close on
-    /// exit, re-title on the child's title change) and attaches it. The help
-    /// pane skips this - it has no process behind it to exit or re-title.
+    /// exit, re-title on the child's title change, flag for attention when the
+    /// agent rings the bell) and attaches it. The help pane skips this - it has
+    /// no process behind it to exit, re-title, or ring anything.
     fn attach_process_pane(&self, pane: Pane) {
         let pane = Rc::new(pane);
 
@@ -542,6 +546,21 @@ impl Tiler {
         pane.terminal.connect_child_exited(move |_, _status| {
             if let (Some(this), Some(pane)) = (this_weak.upgrade(), pane_weak.upgrade()) {
                 this.remove_pane(&pane);
+                // An agent quitting is news too, if it happened somewhere the
+                // user wasn't looking.
+                this.notify_attention();
+            }
+        });
+
+        // The bell is what "the agent wants you" actually looks like on the
+        // wire: Claude rings it when it finishes a turn and when it stops to
+        // ask something. Nothing else in a stream of terminal output
+        // distinguishes "done" from "still typing", so this one byte is the
+        // whole signal - `Groups` turns it into a flashing sidebar row.
+        let this_weak = self.downgrade();
+        pane.terminal.connect_bell(move |_| {
+            if let Some(this) = this_weak.upgrade() {
+                this.notify_attention();
             }
         });
 
@@ -779,6 +798,22 @@ impl Tiler {
     /// title (e.g. so `main.rs` can mirror it onto the window titlebar).
     pub fn set_title_callback(&self, f: impl Fn(&str) + 'static) {
         *self.imp().title_cb.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Register a callback invoked whenever any pane in this group wants the
+    /// user's attention - the agent rang the bell (it finished, or it's asking
+    /// something) or its process exited. `Groups` uses this to flash the
+    /// group's sidebar row; it fires regardless of which pane, or which group,
+    /// the user is currently looking at, and it's the listener's job to decide
+    /// whether that's worth saying anything about.
+    pub fn set_attention_callback(&self, f: impl Fn() + 'static) {
+        *self.imp().attention_cb.borrow_mut() = Some(Box::new(f));
+    }
+
+    fn notify_attention(&self) {
+        if let Some(cb) = self.imp().attention_cb.borrow().as_ref() {
+            cb();
+        }
     }
 
     fn notify_title(&self) {

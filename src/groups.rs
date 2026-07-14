@@ -12,6 +12,11 @@ use crate::update;
 /// having been swapped for a "Checking..." one while it ran.
 const UPDATE_LABEL: &str = "Check for updates";
 
+/// Set on the sidebar row of a background group whose agent has asked for the
+/// user (see `Groups::flash_row`); cleared the moment that group is shown.
+/// Styled in `style.css` - a few pulses, then a quiet tint that persists.
+const ATTENTION_CLASS: &str = "needs-attention";
+
 /// How much each font-size keybinding press changes the UI's text scale - a
 /// multiplier applied both to every pane's VTE `font-scale` and, via a
 /// dynamic `window { font-size: {scale}em; }` CSS rule, to every chrome
@@ -285,12 +290,21 @@ impl Groups {
             }
         });
 
-        this.0.stack.connect_visible_child_notify(|stack| {
+        // Showing a group is also what answers its call for attention: the
+        // user has now seen whatever the agent rang about, so the row stops
+        // saying so. This is the single choke point for that - every way of
+        // switching groups (row click, `cycle_group`, a group being added or
+        // removed) goes through the stack.
+        let this_weak = Rc::downgrade(&this.0);
+        this.0.stack.connect_visible_child_notify(move |stack| {
             if let Some(tiler) = stack
                 .visible_child()
                 .and_then(|w| w.downcast::<Tiler>().ok())
             {
                 tiler.on_shown();
+            }
+            if let (Some(inner), Some(id)) = (this_weak.upgrade(), stack.visible_child_name()) {
+                Groups(inner).clear_attention(&id);
             }
         });
 
@@ -330,6 +344,50 @@ impl Groups {
     pub fn toggle_sidebar(&self) {
         let revealed = self.0.revealer.reveals_child();
         self.0.revealer.set_reveal_child(!revealed);
+    }
+
+    fn row_for(&self, id: &str) -> Option<gtk4::ListBoxRow> {
+        self.0
+            .entries
+            .borrow()
+            .iter()
+            .find(|e| e.id == id)
+            .map(|e| e.row.clone())
+    }
+
+    /// Flags group `id` as wanting the user: its sidebar row pulses a few
+    /// times and then stays quietly tinted until the group is shown. Driven by
+    /// `Tiler::set_attention_callback` - an agent that rang the bell (it
+    /// finished a turn, or it's stopped to ask something) or one whose process
+    /// exited.
+    ///
+    /// A group the user is already looking at gets nothing. The agent that
+    /// rang is on screen in front of them; a sidebar row lighting up to report
+    /// what they can already see is just noise, and noise is what makes people
+    /// stop reading a notification.
+    fn flash_row(&self, id: &str) {
+        if self.0.stack.visible_child_name().as_deref() == Some(id) {
+            return;
+        }
+        let Some(row) = self.row_for(id) else {
+            return;
+        };
+
+        // A CSS animation restarts only when the class is *newly* added, so
+        // re-adding one the row already carries would pulse nothing - which is
+        // exactly the case that matters, a second agent in an
+        // already-flagged group finishing while the first is still waiting.
+        // Dropping the class and restoring it once GTK has had a frame to
+        // notice it gone replays the pulses from the top.
+        row.remove_css_class(ATTENTION_CLASS);
+        glib::idle_add_local_once(move || row.add_css_class(ATTENTION_CLASS));
+    }
+
+    /// Answers group `id`'s call for attention - it's been looked at.
+    fn clear_attention(&self, id: &str) {
+        if let Some(row) = self.row_for(id) {
+            row.remove_css_class(ATTENTION_CLASS);
+        }
     }
 
     /// The `Tiler` for whichever group is currently visible - `None` only
@@ -447,10 +505,7 @@ impl Groups {
         match status {
             update::Status::UpToDate => self.alert(
                 "You're up to date",
-                &format!(
-                    "AgentTileCLI {} already has everything on origin/master.",
-                    update::version(),
-                ),
+                &format!("AgentTileCLI {}", update::version()),
             ),
             update::Status::Failed(reason) => self.alert("Couldn't check for updates", &reason),
             update::Status::Available(update) => self.offer_update(update),
@@ -656,6 +711,17 @@ impl Groups {
             };
             if let Some(cb) = title_cb.borrow().as_ref() {
                 cb(&combined);
+            }
+        });
+
+        // Weak, like the title callback above: the `Tiler` this closure is
+        // being hung on is itself owned (via `entries`) by the `GroupsInner`
+        // it would otherwise hold a strong reference back to.
+        let inner_weak = Rc::downgrade(&self.0);
+        let id_for_attention = id.clone();
+        tiler.set_attention_callback(move || {
+            if let Some(inner) = inner_weak.upgrade() {
+                Groups(inner).flash_row(&id_for_attention);
             }
         });
 

@@ -163,6 +163,37 @@ row.sidebar-row:hover .sidebar-row-close {
   background-color: #d16969;
 }
 
+/* An agent in a group the user isn't watching rang the bell - it finished, or
+   it stopped to ask something (see Groups::flash_row).
+
+   Three slow pulses catch the eye if it happens to be on the sidebar, and then
+   a quiet amber keeps saying so until the group is opened, for the far more
+   likely case that it wasn't. A flash alone would be a notification you have
+   to be looking at to receive; the tint is what makes it survive a coffee
+   break.
+
+   Amber, rather than the accent blue used everywhere else: a row glowing the
+   selection colour while not being selected reads as "this is the open one",
+   which is the one thing a row asking for attention definitely isn't. */
+@keyframes sidebar-attention {
+  from { background-color: rgba(216, 166, 87, 0); }
+  50%  { background-color: rgba(216, 166, 87, 0.22); }
+  to   { background-color: rgba(216, 166, 87, 0); }
+}
+
+row.sidebar-row.needs-attention {
+  color: #e8c98a;
+  animation-name: sidebar-attention;
+  animation-duration: 900ms;
+  animation-iteration-count: 3;
+  animation-timing-function: ease-in-out;
+}
+
+row.sidebar-row.needs-attention .sidebar-row-icon {
+  color: #d8a657;
+  opacity: 1;
+}
+
 /* Mirrors .sidebar-header's divider, on the other edge - the footer closes
    the sidebar off the same way the header opens it. */
 .sidebar-footer {
