@@ -184,11 +184,28 @@ impl Groups {
             .child(&update_content)
             .tooltip_text("Check GitHub for a newer version (Super+Alt+u)")
             .build();
+        // What the update button is talking about, kept where it can be read
+        // without pressing anything. Dim and small: it's the answer to a
+        // question ("which build am I actually running?") that only gets asked
+        // occasionally, usually right before or right after clicking the
+        // button above it - so it belongs next to that button, not competing
+        // with it. `halign` rather than `hexpand`, for the same reason the
+        // update label avoids hexpand (see above).
+        let version_label = gtk4::Label::builder()
+            .label(format!("AgentTileCLI {}", update::version()))
+            .halign(gtk4::Align::Start)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .selectable(true)
+            .css_classes(["sidebar-version"])
+            .tooltip_text("The version and commit this build was made from")
+            .build();
+
         let footer = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .css_classes(["sidebar-footer"])
             .build();
         footer.append(&update_button);
+        footer.append(&version_label);
 
         let sidebar_box = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)

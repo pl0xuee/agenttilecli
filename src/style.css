@@ -222,6 +222,22 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
   color: #6ab0de;
 }
 
+/* Sits directly under the update button, saying what it's checking. Dimmer
+   and smaller than everything else in the sidebar - it's a fact to look up,
+   not a control, and it should read as a footnote to the button above it. */
+.sidebar-version {
+  padding: 0.1em 0.75em 0.15em;
+  font-size: 0.78em;
+  color: #5a6570;
+}
+
+/* Selectable text draws a selection highlight; keep it in the sidebar's own
+   accent rather than the theme's default blue-on-white. */
+.sidebar-version selection {
+  background-color: rgba(106, 176, 222, 0.3);
+  color: #ffffff;
+}
+
 /* Left on the button once a check has actually found something, so dismissing
    the dialog with "Not now" doesn't also dismiss the fact. Same green the help
    pane uses for its "getting started" steps. */
