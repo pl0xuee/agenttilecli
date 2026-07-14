@@ -108,3 +108,45 @@ fn build_window(app: &Application) {
     }
     window.present();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// GTK doesn't reject a stylesheet it can't understand - it drops the
+    /// offending declaration, prints a warning to a terminal a GUI app doesn't
+    /// have, and carries on. So a mistyped property doesn't fail the build, or
+    /// the app, or the eye: it just quietly stops styling something, which is
+    /// indistinguishable from the rule having worked and looked like that.
+    ///
+    /// GTK's CSS is also only a *subset* of the web's, and the gap is where this
+    /// bites: `animation-name: none` to stop the update button's pulse under the
+    /// pointer is valid CSS that GTK may or may not take. This is what says
+    /// which - at `cargo test`, rather than by squinting at a button.
+    #[test]
+    fn the_stylesheet_parses_without_errors() {
+        if gtk4::init().is_err() {
+            eprintln!("skipping: no display available for gtk4::init()");
+            return;
+        }
+
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let provider = CssProvider::new();
+        let sink = errors.clone();
+        provider.connect_parsing_error(move |_, section, error| {
+            sink.borrow_mut()
+                .push(format!("{}: {error}", section.to_str()));
+        });
+        provider.load_from_string(include_str!("style.css"));
+
+        let errors = errors.borrow();
+        assert!(
+            errors.is_empty(),
+            "style.css has {} parse error(s) GTK would have silently ignored:\n{}",
+            errors.len(),
+            errors.join("\n"),
+        );
+    }
+}

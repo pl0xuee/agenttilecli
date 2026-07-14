@@ -321,9 +321,43 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
   color: #8fbf7f;
 }
 
+/* And pulsing, so it reads as news rather than as one more dim thing in the
+   footer. The green alone is easy to walk past - it's a colour change on a
+   control the eye has already learned to ignore, in the corner of a sidebar
+   that's usually shut.
+
+   The pulse runs for as long as the update is pending, rather than the few
+   beats a flashing sidebar row gets, because unlike a row this button is never
+   on screen at the moment it starts: an available update always arrives with
+   the dialog on top of it, so a burst of three would play out behind that
+   dialog and be over before the button was ever looked at. What has to still
+   be moving is the button someone finds later, when they next open the
+   sidebar - which is the only time this animation costs anything to run, since
+   a collapsed sidebar's Revealer unmaps the footer and GTK stops ticking it.
+
+   Slow and shallow on purpose: it sits a few pixels from the project list the
+   user is actually trying to read, and this is housekeeping, not an alarm. */
+@keyframes update-available-pulse {
+  from { background-color: rgba(143, 191, 127, 0); }
+  50%  { background-color: rgba(143, 191, 127, 0.26); }
+  to   { background-color: rgba(143, 191, 127, 0); }
+}
+
+.sidebar-footer-button.update-available {
+  animation-name: update-available-pulse;
+  animation-duration: 1600ms;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+}
+
+/* Hovering the button is the user answering it, so it stops pulsing under the
+   pointer and settles into the solid hover fill. Without the reset the
+   animation would keep overpainting `background-color` - animations outrank
+   plain declarations - and the hover state would flicker instead of landing. */
 .sidebar-footer-button.update-available:hover {
   color: #1b2024;
   background-color: #8fbf7f;
+  animation-name: none;
 }
 
 .sidebar-footer-button.update-available:hover .sidebar-footer-icon {
