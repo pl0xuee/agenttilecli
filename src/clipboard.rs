@@ -18,6 +18,33 @@
 //! writes it to a PNG under the cache dir, and types that path into the pane.
 //! Claude reads an image path in a prompt perfectly happily, so the paste lands
 //! whether or not the user has ever heard of wl-clipboard.
+//!
+//! # Why the keys are split rather than clever
+//!
+//! Text and images each get their own key, and neither ever second-guesses the
+//! other. That looks like one key too many until you try to write the clever
+//! version, which this module did first and which had to be taken back out.
+//!
+//! The clever version was a single paste key that sniffed the clipboard and
+//! guessed: image if the clipboard held an image and no text, text otherwise.
+//! The guess reads sensibly and is wrong in practice, because *whether a copied
+//! image comes with text attached is decided by the app it was copied from*,
+//! not by the person pressing the key. A screenshot tool offers `image/png`
+//! alone, so it pasted as an image. Firefox's "Copy Image" helpfully attaches
+//! `text/plain` as well, so the same gesture pasted as text instead. Plasma's
+//! clipboard manager re-offers a history entry with formats of its own choosing,
+//! so an image could change its mind about what it was between one paste and the
+//! next. One intent, one keystroke, and the answer depended on which program the
+//! user had been standing in - which is indistinguishable, from the outside,
+//! from the feature being broken at random.
+//!
+//! There is no tie-break that fixes this, only a choice of which case to get
+//! wrong: "image wins" turns copying a paragraph that happens to contain an
+//! inline image into a PNG path where the words should be. So the tie isn't
+//! broken here, it's refused. `Ctrl+V` is text, always. `Ctrl+Shift+V` is the
+//! image, always. The key says which, the clipboard's advertised formats don't
+//! get a vote, and the same keystroke does the same thing every time no matter
+//! where the copy came from.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -34,15 +61,18 @@ const PASTED_IMAGE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Wires copy/paste onto `terminal`. Installed on every pane (see `Pane::bare`).
 ///
-/// The bindings are the ones a terminal user already has in their fingers:
-///
-/// - `Ctrl+Shift+V` and `Shift+Insert` - paste, the two standard terminal ones.
-/// - `Ctrl+V` - also paste. Not traditional, but this app's panes are claude
-///   sessions rather than shells, and claude asks people to press Ctrl+V; the
-///   0x16 it would otherwise send has no use in a claude prompt, so there is
-///   nothing to lose by honoring the keystroke everyone presses first anyway.
+/// - `Ctrl+V` and `Shift+Insert` - paste the clipboard's text, and only ever its
+///   text. `Shift+Insert` is the traditional terminal one; `Ctrl+V` isn't, but
+///   this app's panes are claude sessions rather than shells, and the 0x16 it
+///   would otherwise send has no use in a claude prompt, so there's nothing lost
+///   in honoring the key everyone presses first anyway.
+/// - `Ctrl+Shift+V` - paste a copied image, as a PNG path claude can read. Falls
+///   back to text when there's no image to paste, so it's never a dead key.
 /// - `Ctrl+Shift+C` - copy the selection, and *only* when there is one, so the
 ///   binding can't shadow anything when there isn't.
+///
+/// Neither paste key consults the other's format: see the module docs for why
+/// guessing between them is the one thing that can't work.
 ///
 /// Plain `Ctrl+C` is deliberately absent: it must stay SIGINT, which is how you
 /// interrupt a running agent.
@@ -59,15 +89,14 @@ pub fn install(terminal: &Terminal) {
         let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
         let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
 
-        // Letter keys arrive uppercase when Shift is held, so normalize and let
-        // `shift` alone say whether Shift was down.
-        match keyval.to_lower() {
-            gdk::Key::v if ctrl => paste(&target),
-            gdk::Key::Insert if shift && !ctrl => paste(&target),
-            gdk::Key::c if ctrl && shift && target.has_selection() => {
-                target.copy_clipboard_format(Format::Text);
-            }
-            _ => return glib::Propagation::Proceed,
+        let Some(action) = action_for(keyval, ctrl, shift, target.has_selection()) else {
+            return glib::Propagation::Proceed;
+        };
+
+        match action {
+            Action::PasteText => paste_text(&target),
+            Action::PasteImage => paste_image(&target),
+            Action::Copy => target.copy_clipboard_format(Format::Text),
         }
 
         glib::Propagation::Stop
@@ -76,37 +105,74 @@ pub fn install(terminal: &Terminal) {
     terminal.add_controller(controller);
 }
 
-/// Paste whatever the clipboard is holding into `terminal`.
+/// What a keystroke means, once the modifiers have been read off it.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum Action {
+    PasteText,
+    PasteImage,
+    Copy,
+}
+
+/// Maps a keystroke to the clipboard action it triggers, or `None` for "not
+/// ours, hand it to the pty untouched".
 ///
-/// Text first: a clipboard that offers text is a text paste, even if it *also*
-/// offers an image (Firefox's "copy image" hands over both an image and the
-/// HTML around it, and a file manager's copied file offers its path as text) -
-/// pasting the text is what the user meant in every one of those cases. Only a
-/// clipboard with an image and no text at all - a screenshot, in other words -
-/// takes the image path.
-fn paste(terminal: &Terminal) {
-    let clipboard = terminal.clipboard();
-
-    if wants_image_paste(&clipboard.formats()) {
-        paste_image(terminal, &clipboard);
-        return;
+/// Split out from `install` so the mapping can be tested without a window, a
+/// focused terminal, or a synthetic key event: this is a pure decision, and it's
+/// the part with the sharp edge in it (see the shift-ordering note below).
+fn action_for(keyval: gdk::Key, ctrl: bool, shift: bool, has_selection: bool) -> Option<Action> {
+    // Letter keys arrive uppercase when Shift is held, so normalize and let
+    // `shift` alone say whether Shift was down.
+    match keyval.to_lower() {
+        // Shift first: `ctrl && shift` is a strictly narrower match than `ctrl`,
+        // so it has to be asked first or the text arm would answer for both and
+        // Ctrl+Shift+V would never paste an image.
+        gdk::Key::v if ctrl && shift => Some(Action::PasteImage),
+        gdk::Key::v if ctrl => Some(Action::PasteText),
+        gdk::Key::Insert if shift && !ctrl => Some(Action::PasteText),
+        // Only with a selection to copy, so the binding can't shadow anything
+        // when there isn't one.
+        gdk::Key::c if ctrl && shift && has_selection => Some(Action::Copy),
+        _ => None,
     }
+}
 
-    // VTE's own paste: it pulls the text, filters out the control characters a
-    // pasted string has no business carrying, and honors bracketed-paste mode
-    // if the program in the pane has asked for it. All things this module very
-    // much does not want to reimplement.
+/// Paste the clipboard's text into `terminal`, whatever else it may also be
+/// holding. Bound to `Ctrl+V` and `Shift+Insert`.
+///
+/// VTE's own paste: it pulls the text, filters out the control characters a
+/// pasted string has no business carrying, and honors bracketed-paste mode if
+/// the program in the pane has asked for it. All things this module very much
+/// does not want to reimplement.
+fn paste_text(terminal: &Terminal) {
     terminal.paste_clipboard();
 }
 
-/// Whether `formats` describes a clipboard that should paste as an image: one
-/// carrying an image and *no* text. See `paste` for why text wins the tie.
-fn wants_image_paste(formats: &gdk::ContentFormats) -> bool {
-    let has_text = formats.contain_mime_type("text/plain")
-        || formats.contain_mime_type("text/plain;charset=utf-8");
-    let has_image = formats.contains_type(gdk::Texture::static_type());
+/// Paste the clipboard's image into `terminal` as a PNG path. Bound to
+/// `Ctrl+Shift+V`.
+///
+/// Falls back to a text paste when the clipboard has no image in it. That's for
+/// the fingers rather than the logic: `Ctrl+Shift+V` is the paste key in every
+/// other terminal on the machine, so someone will press it meaning "paste", with
+/// nothing but text copied, and having it do nothing at all would be its own
+/// small bug. There's no guessing in the fallback - it happens only when the
+/// image key has no image to paste, never when there's a choice to be made.
+fn paste_image(terminal: &Terminal) {
+    let clipboard = terminal.clipboard();
 
-    has_image && !has_text
+    if !has_image(&clipboard.formats()) {
+        paste_text(terminal);
+        return;
+    }
+    read_and_type_image(terminal, &clipboard);
+}
+
+/// Whether `formats` describes a clipboard carrying an image.
+///
+/// Note this asks about the *image* alone and pointedly says nothing about text:
+/// text's presence used to be half this answer, and that's precisely the coin
+/// flip the module docs describe removing.
+fn has_image(formats: &gdk::ContentFormats) -> bool {
+    formats.contains_type(gdk::Texture::static_type())
 }
 
 /// Read the clipboard's image, write it out as a PNG, and type its path into
@@ -117,7 +183,7 @@ fn wants_image_paste(formats: &gdk::ContentFormats) -> bool {
 /// anything in that chain fails, the paste is dropped rather than guessed at -
 /// there's nothing sensible to type into a prompt on behalf of an image that
 /// didn't arrive.
-fn paste_image(terminal: &Terminal, clipboard: &gdk::Clipboard) {
+fn read_and_type_image(terminal: &Terminal, clipboard: &gdk::Clipboard) {
     let terminal = terminal.clone();
     clipboard.read_texture_async(None::<&gio::Cancellable>, move |result| {
         let Ok(Some(texture)) = result else {
@@ -210,52 +276,126 @@ mod tests {
         dir
     }
 
-    /// The screenshot case, and the whole reason `paste_image` exists: an image
-    /// on the clipboard and nothing else has to route to the image path, or the
-    /// user gets VTE's text paste of an image, which is nothing at all.
+    /// The whole point of the split: each paste key means one thing, and the
+    /// two don't overlap. Ctrl+Shift+V in particular has to reach the *image*
+    /// arm - it's a strictly narrower match than the Ctrl+V text arm, so an arm
+    /// written in the other order would quietly swallow it and paste text.
+    #[test]
+    fn each_paste_key_means_exactly_one_thing() {
+        let no_selection = false;
+        for (key, ctrl, shift, expected, why) in [
+            (
+                gdk::Key::v,
+                true,
+                false,
+                Some(Action::PasteText),
+                "Ctrl+V is text",
+            ),
+            (
+                gdk::Key::V,
+                true,
+                true,
+                Some(Action::PasteImage),
+                "Ctrl+Shift+V is the image key",
+            ),
+            (
+                gdk::Key::Insert,
+                false,
+                true,
+                Some(Action::PasteText),
+                "Shift+Insert is text",
+            ),
+            (gdk::Key::v, false, false, None, "a bare v is just a letter"),
+            (
+                gdk::Key::Insert,
+                false,
+                false,
+                None,
+                "a bare Insert isn't ours",
+            ),
+        ] {
+            assert_eq!(
+                action_for(key, ctrl, shift, no_selection),
+                expected,
+                "{why}",
+            );
+        }
+    }
+
+    /// Plain Ctrl+C must stay SIGINT - it's how you interrupt a running agent,
+    /// and swallowing it would strand the user in front of a pane that won't
+    /// stop. Ctrl+Shift+C only copies when there's a selection to copy.
+    #[test]
+    fn ctrl_c_is_left_alone_so_agents_stay_interruptible() {
+        assert_eq!(
+            action_for(gdk::Key::c, true, false, true),
+            None,
+            "plain Ctrl+C was intercepted; it has to reach the pty as SIGINT \
+             even when there's a selection sitting there",
+        );
+        assert_eq!(
+            action_for(gdk::Key::C, true, true, true),
+            Some(Action::Copy),
+            "Ctrl+Shift+C with a selection should copy",
+        );
+        assert_eq!(
+            action_for(gdk::Key::C, true, true, false),
+            None,
+            "Ctrl+Shift+C with nothing selected should fall through, not \
+             swallow the key",
+        );
+    }
+
+    /// The screenshot case, and the whole reason the image paste exists: an
+    /// image on the clipboard has to be seen as one, or Ctrl+Shift+V falls back
+    /// to pasting text and the user gets nothing.
     ///
     /// Asserted against a *real* `gdk::Clipboard` rather than a hand-built
     /// `ContentFormats`, because the question this has to answer is what GDK
     /// actually advertises for a copied image - which a fabricated format list
     /// would be me answering it myself.
     #[test]
-    fn an_image_alone_pastes_as_an_image() {
+    fn an_image_alone_is_seen_as_an_image() {
         gtk_test(|| {
             let clipboard = gdk::Display::default().expect("a display").clipboard();
             clipboard.set_texture(&a_texture());
 
             assert!(
-                wants_image_paste(&clipboard.formats()),
-                "a clipboard holding only an image should paste as an image, \
+                has_image(&clipboard.formats()),
+                "a clipboard holding an image should be seen as holding one, \
                  but GDK advertised it as: {:?}",
                 clipboard.formats().mime_types(),
             );
         });
     }
 
-    /// Copied text is a text paste - the ordinary case, and the one that has to
-    /// keep working now that Ctrl+V is intercepted rather than passed through.
+    /// Copied text isn't an image, so Ctrl+Shift+V falls back to pasting it
+    /// rather than writing a PNG of nothing.
     #[test]
-    fn copied_text_pastes_as_text() {
+    fn copied_text_is_not_seen_as_an_image() {
         gtk_test(|| {
             let clipboard = gdk::Display::default().expect("a display").clipboard();
             clipboard.set_text("git status");
 
             assert!(
-                !wants_image_paste(&clipboard.formats()),
-                "copied text should paste as text, but was taken for an image; \
-                 GDK advertised: {:?}",
+                !has_image(&clipboard.formats()),
+                "copied text was taken for an image; GDK advertised: {:?}",
                 clipboard.formats().mime_types(),
             );
         });
     }
 
-    /// The tie, which text wins: a browser's "copy image" puts the image *and*
-    /// the markup around it on the clipboard, and a file manager's copied file
-    /// offers its own path as text. Writing a PNG to disk in either case would
-    /// be a strange answer to a paste the user meant as text.
+    /// The regression test for the bug that split the keys apart.
+    ///
+    /// A browser's "Copy Image" hands over the image *and* the markup and URL
+    /// around it. This module used to read that attached text as a signal that
+    /// the user meant a text paste, which made an image copied from Firefox
+    /// behave differently from the same image copied from a screenshot tool -
+    /// the inconsistency that got reported. Attached text is the source app
+    /// being helpful; it says nothing about intent, and Ctrl+Shift+V no longer
+    /// listens to it.
     #[test]
-    fn text_wins_when_the_clipboard_holds_both() {
+    fn an_image_is_still_an_image_when_text_rides_along() {
         gtk_test(|| {
             let both = gdk::ContentProvider::new_union(&[
                 gdk::ContentProvider::for_value(&a_texture().to_value()),
@@ -265,9 +405,9 @@ mod tests {
             clipboard.set_content(Some(&both)).expect("clipboard set");
 
             assert!(
-                !wants_image_paste(&clipboard.formats()),
-                "a clipboard holding text *and* an image should paste the text; \
-                 GDK advertised: {:?}",
+                has_image(&clipboard.formats()),
+                "an image with text alongside it should still paste as an image \
+                 on the image key; GDK advertised: {:?}",
                 clipboard.formats().mime_types(),
             );
         });

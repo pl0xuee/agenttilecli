@@ -249,8 +249,9 @@ fn help_text() -> String {
     let clipboard = section(
         "CLIPBOARD (no Super+Alt)",
         &[
-            ("Ctrl+V", "paste \u{2014} text, or a copied image"),
-            ("Ctrl+Shift+V", "paste (same)"),
+            ("Ctrl+V", "paste text"),
+            ("Shift+Insert", "paste text (same)"),
+            ("Ctrl+Shift+V", "paste a copied image"),
             ("Ctrl+Shift+C", "copy the selection"),
         ],
     );
@@ -316,7 +317,7 @@ fn help_text() -> String {
         bullet("Drag any seam to size panes by hand; master-stack keeps its divider where you put it."),
         bullet("Adding panes never resizes the window \u{2014} they tile smaller inside the size you set."),
         bullet("A pane's corner label tracks its real directory, not claude's own /cd."),
-        bullet("Paste a screenshot and it's saved as a PNG whose path is typed in for you \u{2014} claude reads it from there."),
+        bullet("Ctrl+Shift+V saves a copied image as a PNG and types its path in for you \u{2014} claude reads the picture from there."),
         bullet("Switching groups doesn't stop the others' agents; closing a group's \u{2715} hangs up every agent in it."),
         bullet("This help pane has no process behind it \u{2014} close it like any other, with Super+Alt+w."),
     ]
