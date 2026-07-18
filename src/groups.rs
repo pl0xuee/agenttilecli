@@ -29,7 +29,14 @@ const DROP_BELOW_CLASS: &str = "drop-below";
 /// element sized in `em` (sidebar, floating buttons, pane borders/labels) -
 /// so the whole program's text and the app's own controls grow together
 /// instead of only the terminal contents.
-const FONT_SCALE_STEP: f64 = 0.1;
+///
+/// The step is a *ratio*, not an addend: each press multiplies (or divides) the
+/// scale by it. A flat additive step feels lumpy because a fixed 0.1 is a fifth
+/// of the way up from 0.5 but a thirtieth of the way up from 2.9 - same key, a
+/// huge jump when small and a barely-visible one when large. Multiplying keeps
+/// every press the same *percentage* change, so the steps read as even the
+/// whole way across the range.
+const FONT_SCALE_STEP: f64 = 1.1;
 const FONT_SCALE_MIN: f64 = 0.5;
 const FONT_SCALE_MAX: f64 = 3.0;
 
@@ -593,12 +600,12 @@ impl Groups {
     }
 
     pub fn inc_font_scale(&self) {
-        let scale = (self.0.font_scale.get() + FONT_SCALE_STEP).min(FONT_SCALE_MAX);
+        let scale = (self.0.font_scale.get() * FONT_SCALE_STEP).min(FONT_SCALE_MAX);
         self.set_font_scale(scale);
     }
 
     pub fn dec_font_scale(&self) {
-        let scale = (self.0.font_scale.get() - FONT_SCALE_STEP).max(FONT_SCALE_MIN);
+        let scale = (self.0.font_scale.get() / FONT_SCALE_STEP).max(FONT_SCALE_MIN);
         self.set_font_scale(scale);
     }
 
