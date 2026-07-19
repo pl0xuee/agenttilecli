@@ -74,28 +74,49 @@ fn rgba(hex: &str) -> gdk::RGBA {
 }
 
 fn apply_theme(terminal: &Terminal) {
-    let foreground = rgba("#d8dee3");
-    let background = rgba("#1b2024");
+    // Matched to `.pane`'s own fill in style.css (`@gm-surface`), so a pane is
+    // one continuous surface rather than a terminal of one shade sitting in a
+    // frame of another - the seam is visible at any size, and it's the thing
+    // that makes a tiling app look assembled rather than designed.
+    let foreground = rgba("#e7eef4");
+    let background = rgba("#1c242b");
+    // ANSI 0 and 7 are pulled onto the gunmetal ramp too: programs paint
+    // "black" backgrounds and "white" text far more often than they mean the
+    // literal colours, so anything else leaves rectangles of a foreign grey
+    // sitting in the middle of the pane.
     let palette = [
-        rgba("#1b2024"), // black
-        rgba("#d16969"), // red
-        rgba("#8fbf7f"), // green
-        rgba("#d7ba7d"), // yellow
-        rgba("#6ab0de"), // blue
-        rgba("#b98fce"), // magenta
-        rgba("#5fb3b3"), // cyan
-        rgba("#d6dade"), // white
-        rgba("#5a6570"), // bright black
-        rgba("#e0807f"), // bright red
-        rgba("#a3d494"), // bright green
-        rgba("#e6cd94"), // bright yellow
-        rgba("#82c0e8"), // bright blue
-        rgba("#cba6dd"), // bright magenta
-        rgba("#79c6c6"), // bright cyan
-        rgba("#eef1f3"), // bright white
+        rgba("#1c242b"), // black - the surface itself
+        rgba("#e06b6b"), // red
+        rgba("#92c47f"), // green
+        rgba("#d8a657"), // yellow - the amber the sidebar flashes in
+        rgba("#6ab0de"), // blue - the accent used throughout the chrome
+        rgba("#bf93d6"), // magenta
+        rgba("#63bcbb"), // cyan
+        rgba("#ccd6de"), // white
+        rgba("#5b6874"), // bright black
+        rgba("#ef8a8a"), // bright red
+        rgba("#a8d795"), // bright green
+        rgba("#ecc07a"), // bright yellow
+        rgba("#8cc8ec"), // bright blue
+        rgba("#d3ade4"), // bright magenta
+        rgba("#82d0cf"), // bright cyan
+        rgba("#f2f7fb"), // bright white
     ];
     let palette_refs: Vec<&gdk::RGBA> = palette.iter().collect();
     terminal.set_colors(Some(&foreground), Some(&background), &palette_refs);
+
+    // The three colours VTE does *not* take from the palette, and which
+    // otherwise arrive from the ambient GTK theme - which is how a carefully
+    // built dark palette ends up with a stock-blue selection and a white block
+    // cursor in the middle of it.
+    terminal.set_color_cursor(Some(&rgba("#6ab0de")));
+    terminal.set_color_cursor_foreground(Some(&background));
+    // Selection as a tint rather than an inversion: the text stays its own
+    // colour and keeps its syntax highlighting, which matters here because
+    // selecting is now how you copy (see `clipboard`), so it happens over real
+    // output rather than over a blank prompt.
+    terminal.set_color_highlight(Some(&rgba("#2f4657")));
+    terminal.set_color_highlight_foreground(Some(&foreground));
 }
 
 const RESET: &str = "\x1b[0m";

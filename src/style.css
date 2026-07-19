@@ -1,5 +1,43 @@
+/* ── Palette ──────────────────────────────────────────────────────────────
+   One gunmetal ramp, defined once, derived from everywhere below.
+
+   Every surface in the app is a step on a single cool blue-grey ladder
+   (hue ~205°, chroma kept low) rather than a set of independently chosen
+   near-blacks. That's what makes depth read as depth: a pane sits *above*
+   the window because it's one rung lighter, not because it happens to be a
+   different colour. The rungs are spaced widely enough to survive a dim
+   laptop panel, which is where flat-looking dark themes usually come apart.
+
+   Tints are derived with `alpha()`/`mix()` rather than hand-mixed hex, so a
+   change to `@accent` carries through every hover, selection and focus ring
+   in one edit instead of a dozen. GTK resolves these at parse time - see
+   `the_stylesheet_parses_without_errors`, which is what stops an unsupported
+   colour function being silently dropped. */
+
+@define-color gm-abyss    #0e1317; /* window backdrop, the floor */
+@define-color gm-sunken   #141b21; /* sidebar - recessed below the panes */
+@define-color gm-surface  #1c242b; /* pane body: gunmetal proper */
+@define-color gm-raised   #232e36; /* chips and overlays sitting on a pane */
+@define-color gm-line     #2b363f; /* hairlines inside the chrome */
+@define-color gm-edge     #38464f; /* pane borders, the strongest hairline */
+
+@define-color gm-text     #e7eef4; /* the thing being read */
+@define-color gm-dim      #a9b7c2; /* secondary labels */
+@define-color gm-muted    #7b8994; /* icons, quiet controls */
+@define-color gm-faint    #5b6874; /* footnotes */
+
+@define-color accent      #6ab0de; /* steel blue - focus, selection, "here" */
+@define-color amber       #d8a657; /* attention: an agent wants you */
+@define-color green       #8fbf7f; /* an update is available */
+@define-color red         #d16969; /* close, hang up, destroy */
+
+/* A hair of lift toward the top of the window, so a maximized app doesn't
+   read as one flat rectangle of near-black behind the panes. Shallow enough
+   that it never competes with the panes themselves - it's the difference
+   between a room and a void, not a visible gradient. */
 window {
-  background-color: #121517;
+  background-color: @gm-abyss;
+  background-image: linear-gradient(to bottom, alpha(@accent, 0.035), transparent 22em);
 }
 
 /* Sizes below are in `em`, relative to `window`'s own font-size - which
@@ -11,48 +49,78 @@ window {
    so hairlines stay crisp instead of going blurry or vanishing at small
    scales. */
 
+/* The drop shadow is what actually seats a pane above the backdrop; the
+   border alone draws its outline without ever lifting it off the page. Two
+   shadows rather than one: a tight dark contact shadow that reads as the
+   edge touching down, and a wide soft one for the ambient falloff. That
+   pairing is the whole difference between "modern" and "a box with a
+   border" - a single mid-blur shadow reads as neither. */
 .pane {
-  background-color: #1b2024;
-  border: 1px solid #333c43;
-  border-radius: 0.75em;
-  transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+  background-color: @gm-surface;
+  border: 1px solid @gm-edge;
+  border-radius: 0.8em;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0.5em 1.4em rgba(0, 0, 0, 0.28);
+  transition: border-color 140ms ease-out, box-shadow 140ms ease-out,
+    background-color 140ms ease-out;
 }
 
+/* The focused pane is the one the keyboard is talking to, so it gets both a
+   brighter edge and a wider ambient glow - and, quietly, a lighter fill. The
+   fill is what makes focus survive the case the border can't: a pane pushed
+   flush against a screen edge or a neighbour, where there's no backdrop left
+   around it for a glow to land on. */
 .pane.focused {
-  border-color: #6ab0de;
-  box-shadow: 0 0 0 1px rgba(106, 176, 222, 0.35), 0 0 1.05em 1px rgba(106, 176, 222, 0.25);
+  background-color: shade(@gm-surface, 1.06);
+  border-color: @accent;
+  box-shadow: 0 0 0 1px alpha(@accent, 0.4), 0 0 1.2em 1px alpha(@accent, 0.24),
+    0 0.6em 1.6em rgba(0, 0, 0, 0.34);
+}
+
+/* Chrome that floats *over* a pane - the close ✕, the hamburger, the
+   directory label. They share a fill and a hairline so they read as one
+   family of controls rather than three separately-invented buttons, and the
+   hairline is what keeps them legible when they happen to sit over a patch
+   of pale terminal output. */
+.pane-close,
+.add-pane,
+.pane-dir {
+  background-color: alpha(@gm-raised, 0.88);
+  border: 1px solid alpha(@gm-edge, 0.55);
+  color: @gm-muted;
 }
 
 .pane-close {
   margin: 0.45em;
   min-width: 1.65em;
   min-height: 1.65em;
-  color: #9aa4ac;
-  background-color: rgba(27, 32, 36, 0.7);
-  opacity: 0.75;
-  transition: opacity 120ms ease-out, background-color 120ms ease-out, color 120ms ease-out;
+  border-radius: 0.5em;
+  opacity: 0.7;
+  transition: opacity 140ms ease-out, background-color 140ms ease-out,
+    border-color 140ms ease-out, color 140ms ease-out;
 }
 
 .pane-close:hover {
   opacity: 1;
   color: #ffffff;
-  background-color: #d16969;
+  background-color: @red;
+  border-color: @red;
 }
 
 .add-pane {
   min-width: 2.4em;
   min-height: 2.4em;
-  color: #9aa4ac;
-  background-color: rgba(27, 32, 36, 0.7);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
-  opacity: 0.55;
-  transition: opacity 120ms ease-out, background-color 120ms ease-out, color 120ms ease-out;
+  border-radius: 0.7em;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35), 0 0.4em 1em rgba(0, 0, 0, 0.25);
+  opacity: 0.6;
+  transition: opacity 140ms ease-out, background-color 140ms ease-out,
+    border-color 140ms ease-out, color 140ms ease-out;
 }
 
 .add-pane:hover {
   opacity: 1;
   color: #ffffff;
-  background-color: #6ab0de;
+  background-color: @accent;
+  border-color: @accent;
 }
 
 .floating-bottom-right {
@@ -67,16 +135,19 @@ window {
   margin: 0.45em;
   padding: 0.15em 0.6em;
   font-size: 0.85em;
-  color: #9aa4ac;
-  background-color: rgba(27, 32, 36, 0.7);
   border-radius: 0.6em;
-  opacity: 0.85;
+  letter-spacing: 0.02em;
+  opacity: 0.9;
 }
 
+/* Recessed rather than raised: the sidebar is the shelf the panes sit out
+   from, so it's a rung *below* the window's own backdrop, with the border
+   and an inner shadow doing the work of a bevel. */
 .sidebar {
   min-width: 16.5em;
-  background-color: #16191c;
-  border-right: 1px solid #262d33;
+  background-color: @gm-sunken;
+  border-right: 1px solid @gm-line;
+  box-shadow: inset -0.6em 0 0.9em -0.6em rgba(0, 0, 0, 0.45);
 }
 
 /* No bottom border, unlike the footer: an all-caps, letter-spaced, dimmed
@@ -91,24 +162,25 @@ window {
 .sidebar-header-label {
   font-weight: bold;
   font-size: 0.78em;
-  color: #7c868f;
-  letter-spacing: 0.11em;
+  color: @gm-muted;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
 .sidebar-header button {
   min-width: 1.9em;
   min-height: 1.9em;
-  color: #7c868f;
-  transition: color 120ms ease-out, background-color 120ms ease-out;
+  border-radius: 0.5em;
+  color: @gm-muted;
+  transition: color 140ms ease-out, background-color 140ms ease-out;
 }
 
 /* A tinted wash rather than a solid blue fill. At this size a saturated disc
    is the loudest thing in the sidebar, which is a strange amount of noise for
    "add a project" to make while the pointer merely passes over it. */
 .sidebar-header button:hover {
-  color: #6ab0de;
-  background-color: rgba(106, 176, 222, 0.16);
+  color: @accent;
+  background-color: alpha(@accent, 0.16);
 }
 
 .sidebar-list {
@@ -120,14 +192,14 @@ row.sidebar-row {
   padding: 0.5em 0.7em;
   margin: 0.1em 0;
   border-radius: 0.6em;
-  color: #aab1b8;
-  transition: background-color 120ms ease-out, color 120ms ease-out,
-    box-shadow 120ms ease-out;
+  color: @gm-dim;
+  transition: background-color 140ms ease-out, color 140ms ease-out,
+    box-shadow 140ms ease-out;
 }
 
 row.sidebar-row:hover {
-  background-color: rgba(255, 255, 255, 0.045);
-  color: #dfe3e6;
+  background-color: alpha(@gm-text, 0.05);
+  color: @gm-text;
 }
 
 /* Tint *and* a left accent bar. The tint alone has to carry the selection on
@@ -138,23 +210,23 @@ row.sidebar-row:hover {
    glanced at rather than compared against its neighbours. `inset` keeps it
    inside the row's own rounded corners instead of squaring them off. */
 row.sidebar-row:selected {
-  background-color: rgba(106, 176, 222, 0.16);
+  background-color: alpha(@accent, 0.16);
   color: #ffffff;
-  box-shadow: inset 0.19em 0 0 0 #6ab0de;
+  box-shadow: inset 0.19em 0 0 0 @accent;
 }
 
 row.sidebar-row:selected:hover {
-  background-color: rgba(106, 176, 222, 0.22);
+  background-color: alpha(@accent, 0.22);
 }
 
 .sidebar-row-icon {
-  color: #6c7680;
+  color: @gm-muted;
   opacity: 0.9;
-  transition: color 120ms ease-out;
+  transition: color 140ms ease-out;
 }
 
 row.sidebar-row:selected .sidebar-row-icon {
-  color: #6ab0de;
+  color: @accent;
 }
 
 .sidebar-row-label {
@@ -170,9 +242,11 @@ row.sidebar-row:selected .sidebar-row-label {
 .sidebar-row-close {
   min-width: 1.5em;
   min-height: 1.5em;
-  color: #9aa4ac;
+  border-radius: 0.45em;
+  color: @gm-muted;
   opacity: 0;
-  transition: opacity 120ms ease-out, color 120ms ease-out, background-color 120ms ease-out;
+  transition: opacity 140ms ease-out, color 140ms ease-out,
+    background-color 140ms ease-out;
 }
 
 row.sidebar-row:hover .sidebar-row-close {
@@ -182,7 +256,7 @@ row.sidebar-row:hover .sidebar-row-close {
 .sidebar-row-close:hover {
   opacity: 1;
   color: #ffffff;
-  background-color: #d16969;
+  background-color: @red;
 }
 
 /* Where a dragged project would land if it were dropped right now. Each row is
@@ -194,11 +268,11 @@ row.sidebar-row:hover .sidebar-row-close {
    height the moment a drag crossed it, shoving every row below it down a line
    mid-drag - so the list would squirm away from the pointer aiming at it. */
 row.sidebar-row.drop-above {
-  box-shadow: inset 0 2px 0 0 #6ab0de;
+  box-shadow: inset 0 2px 0 0 @accent;
 }
 
 row.sidebar-row.drop-below {
-  box-shadow: inset 0 -2px 0 0 #6ab0de;
+  box-shadow: inset 0 -2px 0 0 @accent;
 }
 
 /* An agent in a group the user isn't watching rang the bell - it finished, or
@@ -214,13 +288,13 @@ row.sidebar-row.drop-below {
    selection colour while not being selected reads as "this is the open one",
    which is the one thing a row asking for attention definitely isn't. */
 @keyframes sidebar-attention {
-  from { background-color: rgba(216, 166, 87, 0); }
-  50%  { background-color: rgba(216, 166, 87, 0.22); }
-  to   { background-color: rgba(216, 166, 87, 0); }
+  from { background-color: alpha(@amber, 0); }
+  50%  { background-color: alpha(@amber, 0.22); }
+  to   { background-color: alpha(@amber, 0); }
 }
 
 row.sidebar-row.needs-attention {
-  color: #e8c98a;
+  color: mix(@amber, @gm-text, 0.55);
   animation-name: sidebar-attention;
   animation-duration: 900ms;
   animation-iteration-count: 3;
@@ -228,7 +302,7 @@ row.sidebar-row.needs-attention {
 }
 
 row.sidebar-row.needs-attention .sidebar-row-icon {
-  color: #d8a657;
+  color: @amber;
   opacity: 1;
 }
 
@@ -237,7 +311,7 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
    more project - a strange one, at the bottom, that opens a dialog. */
 .sidebar-footer {
   padding: 0.5em 0.4em 0.35em;
-  border-top: 1px solid #21272c;
+  border-top: 1px solid @gm-line;
 }
 
 /* Same padding and radius as a sidebar row: it sits in the same column, at the
@@ -246,22 +320,22 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
 .sidebar-footer-button {
   padding: 0.5em 0.7em;
   border-radius: 0.6em;
-  color: #9aa4ac;
+  color: @gm-dim;
   font-size: 0.95em;
-  transition: background-color 120ms ease-out, color 120ms ease-out;
+  transition: background-color 140ms ease-out, color 140ms ease-out;
 }
 
 .sidebar-footer-button:hover {
-  color: #ffffff;
-  background-color: rgba(255, 255, 255, 0.06);
+  color: @gm-text;
+  background-color: alpha(@gm-text, 0.07);
 }
 
 .sidebar-footer-icon {
-  color: #6c7680;
+  color: @gm-muted;
 }
 
 .sidebar-footer-button:hover .sidebar-footer-icon {
-  color: #6ab0de;
+  color: @accent;
 }
 
 /* The same signal as the flashing row, carried out to where it can actually be
@@ -274,13 +348,14 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
    Brighter than the row's tint, because it's carrying the message alone, and
    because it sits over pane content rather than the sidebar's flat backdrop. */
 @keyframes hamburger-attention {
-  from { background-color: rgba(27, 32, 36, 0.7); }
-  50%  { background-color: rgba(216, 166, 87, 0.85); }
-  to   { background-color: rgba(27, 32, 36, 0.7); }
+  from { background-color: alpha(@gm-raised, 0.88); }
+  50%  { background-color: alpha(@amber, 0.85); }
+  to   { background-color: alpha(@gm-raised, 0.88); }
 }
 
 .add-pane.needs-attention {
-  color: #d8a657;
+  color: @amber;
+  border-color: alpha(@amber, 0.5);
   opacity: 1;
   animation-name: hamburger-attention;
   animation-duration: 900ms;
@@ -289,8 +364,9 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
 }
 
 .add-pane.needs-attention:hover {
-  color: #ffffff;
-  background-color: #d8a657;
+  color: @gm-surface;
+  background-color: @amber;
+  border-color: @amber;
 }
 
 /* The list only overflows once there are more projects open than fit, so the
@@ -306,11 +382,11 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
   min-width: 0.35em;
   margin: 0.2em;
   border-radius: 0.35em;
-  background-color: rgba(255, 255, 255, 0.11);
+  background-color: alpha(@gm-text, 0.12);
 }
 
 .sidebar scrollbar slider:hover {
-  background-color: rgba(255, 255, 255, 0.2);
+  background-color: alpha(@gm-text, 0.22);
 }
 
 /* Sits directly under the update button, saying what it's checking. Dimmer
@@ -319,13 +395,13 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
 .sidebar-version {
   padding: 0.15em 0.7em 0.15em;
   font-size: 0.78em;
-  color: #5a6570;
+  color: @gm-faint;
 }
 
 /* Selectable text draws a selection highlight; keep it in the sidebar's own
    accent rather than the theme's default blue-on-white. */
 .sidebar-version selection {
-  background-color: rgba(106, 176, 222, 0.3);
+  background-color: alpha(@accent, 0.3);
   color: #ffffff;
 }
 
@@ -334,7 +410,7 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
    pane uses for its "getting started" steps. */
 .sidebar-footer-button.update-available,
 .sidebar-footer-button.update-available .sidebar-footer-icon {
-  color: #8fbf7f;
+  color: @green;
 }
 
 /* And pulsing, so it reads as news rather than as one more dim thing in the
@@ -354,9 +430,9 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
    Slow and shallow on purpose: it sits a few pixels from the project list the
    user is actually trying to read, and this is housekeeping, not an alarm. */
 @keyframes update-available-pulse {
-  from { background-color: rgba(143, 191, 127, 0); }
-  50%  { background-color: rgba(143, 191, 127, 0.26); }
-  to   { background-color: rgba(143, 191, 127, 0); }
+  from { background-color: alpha(@green, 0); }
+  50%  { background-color: alpha(@green, 0.26); }
+  to   { background-color: alpha(@green, 0); }
 }
 
 .sidebar-footer-button.update-available {
@@ -371,11 +447,11 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
    animation would keep overpainting `background-color` - animations outrank
    plain declarations - and the hover state would flicker instead of landing. */
 .sidebar-footer-button.update-available:hover {
-  color: #1b2024;
-  background-color: #8fbf7f;
+  color: @gm-surface;
+  background-color: @green;
   animation-name: none;
 }
 
 .sidebar-footer-button.update-available:hover .sidebar-footer-icon {
-  color: #1b2024;
+  color: @gm-surface;
 }
