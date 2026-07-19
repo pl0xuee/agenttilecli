@@ -78,29 +78,29 @@ fn apply_theme(terminal: &Terminal) {
     // one continuous surface rather than a terminal of one shade sitting in a
     // frame of another - the seam is visible at any size, and it's the thing
     // that makes a tiling app look assembled rather than designed.
-    let foreground = rgba("#e7eef4");
-    let background = rgba("#1c242b");
+    let foreground = rgba("#ebeef1");
+    let background = rgba("#202428");
     // ANSI 0 and 7 are pulled onto the gunmetal ramp too: programs paint
     // "black" backgrounds and "white" text far more often than they mean the
     // literal colours, so anything else leaves rectangles of a foreign grey
     // sitting in the middle of the pane.
     let palette = [
-        rgba("#1c242b"), // black - the surface itself
+        rgba("#202428"), // black - the surface itself
         rgba("#e06b6b"), // red
         rgba("#92c47f"), // green
         rgba("#d8a657"), // yellow - the amber the sidebar flashes in
         rgba("#6ab0de"), // blue - the accent used throughout the chrome
         rgba("#bf93d6"), // magenta
         rgba("#63bcbb"), // cyan
-        rgba("#ccd6de"), // white
-        rgba("#5b6874"), // bright black
+        rgba("#d1d6da"), // white
+        rgba("#626870"), // bright black
         rgba("#ef8a8a"), // bright red
         rgba("#a8d795"), // bright green
         rgba("#ecc07a"), // bright yellow
         rgba("#8cc8ec"), // bright blue
         rgba("#d3ade4"), // bright magenta
         rgba("#82d0cf"), // bright cyan
-        rgba("#f2f7fb"), // bright white
+        rgba("#f5f7f9"), // bright white
     ];
     let palette_refs: Vec<&gdk::RGBA> = palette.iter().collect();
     terminal.set_colors(Some(&foreground), Some(&background), &palette_refs);

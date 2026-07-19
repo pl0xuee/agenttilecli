@@ -1,12 +1,18 @@
 /* ── Palette ──────────────────────────────────────────────────────────────
    One gunmetal ramp, defined once, derived from everywhere below.
 
-   Every surface in the app is a step on a single cool blue-grey ladder
-   (hue ~205°, chroma kept low) rather than a set of independently chosen
-   near-blacks. That's what makes depth read as depth: a pane sits *above*
-   the window because it's one rung lighter, not because it happens to be a
-   different colour. The rungs are spaced widely enough to survive a dim
-   laptop panel, which is where flat-looking dark themes usually come apart.
+   Every surface in the app is a step on a single grey ladder rather than a
+   set of independently chosen near-blacks. That's what makes depth read as
+   depth: a pane sits *above* the window because it's one rung lighter, not
+   because it happens to be a different colour. The rungs are spaced widely
+   enough to survive a dim laptop panel, which is where flat-looking dark
+   themes usually come apart.
+
+   The ladder is grey with a cool cast, not a blue: about 4 points of
+   red-to-blue spread per rung, enough to keep it from going dead neutral
+   and never enough to read as a colour. Blue is reserved for @accent, and
+   a surface that borrows the accent's hue competes with it - the focus ring
+   stops announcing anything when everything behind it is already blue.
 
    Tints are derived with `alpha()`/`mix()` rather than hand-mixed hex, so a
    change to `@accent` carries through every hover, selection and focus ring
@@ -14,17 +20,17 @@
    `the_stylesheet_parses_without_errors`, which is what stops an unsupported
    colour function being silently dropped. */
 
-@define-color gm-abyss    #0e1317; /* window backdrop, the floor */
-@define-color gm-sunken   #141b21; /* sidebar - recessed below the panes */
-@define-color gm-surface  #1c242b; /* pane body: gunmetal proper */
-@define-color gm-raised   #232e36; /* chips and overlays sitting on a pane */
-@define-color gm-line     #2b363f; /* hairlines inside the chrome */
-@define-color gm-edge     #38464f; /* pane borders, the strongest hairline */
+@define-color gm-abyss    #111315; /* window backdrop, the floor */
+@define-color gm-sunken   #181b1e; /* sidebar - recessed below the panes */
+@define-color gm-surface  #202428; /* pane body: gunmetal proper */
+@define-color gm-raised   #292e33; /* chips and overlays sitting on a pane */
+@define-color gm-line     #31363b; /* hairlines inside the chrome */
+@define-color gm-edge     #3f464b; /* pane borders, the strongest hairline */
 
-@define-color gm-text     #e7eef4; /* the thing being read */
-@define-color gm-dim      #a9b7c2; /* secondary labels */
-@define-color gm-muted    #7b8994; /* icons, quiet controls */
-@define-color gm-faint    #5b6874; /* footnotes */
+@define-color gm-text     #ebeef1; /* the thing being read */
+@define-color gm-dim      #b0b7bd; /* secondary labels */
+@define-color gm-muted    #82898f; /* icons, quiet controls */
+@define-color gm-faint    #626870; /* footnotes */
 
 @define-color accent      #6ab0de; /* steel blue - focus, selection, "here" */
 @define-color amber       #d8a657; /* attention: an agent wants you */
@@ -34,10 +40,14 @@
 /* A hair of lift toward the top of the window, so a maximized app doesn't
    read as one flat rectangle of near-black behind the panes. Shallow enough
    that it never competes with the panes themselves - it's the difference
-   between a room and a void, not a visible gradient. */
+   between a room and a void, not a visible gradient.
+
+   The lift is white, not accent-tinted: at this alpha a hue reads as a
+   colour cast over the whole top of the window rather than as light, and
+   the backdrop is the one surface with enough area to make that obvious. */
 window {
   background-color: @gm-abyss;
-  background-image: linear-gradient(to bottom, alpha(@accent, 0.035), transparent 22em);
+  background-image: linear-gradient(to bottom, alpha(#ffffff, 0.03), transparent 22em);
 }
 
 /* Sizes below are in `em`, relative to `window`'s own font-size - which
