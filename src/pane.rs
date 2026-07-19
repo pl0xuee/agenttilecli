@@ -249,10 +249,12 @@ fn help_text() -> String {
     let clipboard = section(
         "CLIPBOARD (no Super+Alt)",
         &[
-            ("Ctrl+V", "paste text"),
-            ("Shift+Insert", "paste text (same)"),
-            ("Ctrl+Shift+V", "paste a copied image"),
-            ("Ctrl+Shift+C", "copy the selection"),
+            ("Ctrl+V", "paste (an image if one's copied)"),
+            ("Shift+Insert", "paste the text, never the image"),
+            (
+                "Ctrl+C",
+                "copy \u{2014} or interrupt, if nothing's selected",
+            ),
         ],
     );
     let layout = section(
@@ -317,7 +319,8 @@ fn help_text() -> String {
         bullet("Drag any seam to size panes by hand; master-stack keeps its divider where you put it."),
         bullet("Adding panes never resizes the window \u{2014} they tile smaller inside the size you set."),
         bullet("A pane's corner label tracks its real directory, not claude's own /cd."),
-        bullet("Ctrl+Shift+V saves a copied image as a PNG and types its path in for you \u{2014} claude reads the picture from there."),
+        bullet("Ctrl+V saves a copied image as a PNG and types its short path in for you \u{2014} claude reads the picture from there."),
+        bullet("Ctrl+C only copies when something is selected; with nothing selected it's the usual interrupt."),
         bullet("Switching groups doesn't stop the others' agents; closing a group's \u{2715} hangs up every agent in it."),
         bullet("This help pane has no process behind it \u{2014} close it like any other, with Super+Alt+w."),
     ]
@@ -389,7 +392,10 @@ mod settings_tests {
 
         // The bell byte, still an escape sequence after JSON encoding rather
         // than a stray backslash that ate the "a".
-        assert!(json.contains(r#"printf '\\a'"#), "bell byte mangled: {json}");
+        assert!(
+            json.contains(r#"printf '\\a'"#),
+            "bell byte mangled: {json}"
+        );
         // The hook's own double quotes, escaped instead of ending the JSON
         // string early.
         assert!(json.contains(r#"\"$PTY\""#), "shell quotes mangled: {json}");
@@ -398,7 +404,6 @@ mod settings_tests {
         assert!(json.contains(r#""Stop""#));
         assert!(json.contains(r#""Notification""#));
     }
-
 }
 
 /// A single tile: a bordered frame containing a VTE terminal. Most panes run
@@ -587,4 +592,3 @@ impl Pane {
         }
     }
 }
-

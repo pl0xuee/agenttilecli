@@ -44,14 +44,16 @@ you want to nudge it.
 - **Per-project panes** — the **new-agent** button spawns another agent in
   the current group's project directly, no picker. Each pane's corner shows
   the folder name it's running in.
-- **Paste, including screenshots** — `Ctrl+V` (or `Shift+Insert`) pastes text
-  into a pane, and `Ctrl+Shift+C` copies the selection. `Ctrl+Shift+V` pastes a
-  *copied image*: it's written out as a PNG whose path is typed into the prompt
-  for you, so claude reads the picture from there — no `wl-clipboard` or `xclip`
-  needed, since the image comes from GTK rather than a command-line clipboard
-  tool. The two paste keys never guess between text and image — the key you
-  press decides, so the same keystroke does the same thing whether you copied
-  from a screenshot tool, a browser, or anywhere else.
+- **Paste, including screenshots** — `Ctrl+V` pastes, and `Ctrl+C` copies the
+  selection. If what you copied was an *image*, `Ctrl+V` writes it out as a PNG
+  and types its short path (`~/.cache/atc/img/mfd0j1.png`) into the prompt, so
+  claude reads the picture from there — no `wl-clipboard` or `xclip` needed,
+  since the image comes from GTK rather than a command-line clipboard tool. An
+  image on the clipboard always wins over text; `Shift+Insert` is there for the
+  rare case you want the text out of a clipboard that also holds a picture.
+  `Ctrl+C` only copies when there's a selection — with nothing selected it stays
+  the interrupt that stops a running agent, so clear the selection (one click)
+  if a stale one is in the way.
 - **One-click updates** — **Check for updates**, at the bottom of the sidebar
   (or `Super+Alt+u`), checks `origin/master` for a newer version, shows you
   what's new, and can pull and reinstall it for you in a pane so you can watch

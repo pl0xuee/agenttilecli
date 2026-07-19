@@ -19,32 +19,37 @@
 //! Claude reads an image path in a prompt perfectly happily, so the paste lands
 //! whether or not the user has ever heard of wl-clipboard.
 //!
-//! # Why the keys are split rather than clever
+//! # One paste key, and which case it gets wrong
 //!
-//! Text and images each get their own key, and neither ever second-guesses the
-//! other. That looks like one key too many until you try to write the clever
-//! version, which this module did first and which had to be taken back out.
+//! `Ctrl+V` pastes an image when the clipboard holds one and text otherwise -
+//! "image wins". This module has been round this loop twice, so it's worth
+//! writing down what that costs, because it is not free.
 //!
-//! The clever version was a single paste key that sniffed the clipboard and
-//! guessed: image if the clipboard held an image and no text, text otherwise.
-//! The guess reads sensibly and is wrong in practice, because *whether a copied
-//! image comes with text attached is decided by the app it was copied from*,
-//! not by the person pressing the key. A screenshot tool offers `image/png`
-//! alone, so it pasted as an image. Firefox's "Copy Image" helpfully attaches
-//! `text/plain` as well, so the same gesture pasted as text instead. Plasma's
-//! clipboard manager re-offers a history entry with formats of its own choosing,
-//! so an image could change its mind about what it was between one paste and the
-//! next. One intent, one keystroke, and the answer depended on which program the
-//! user had been standing in - which is indistinguishable, from the outside,
-//! from the feature being broken at random.
+//! The first version sniffed the clipboard a different way: image only if the
+//! clipboard held an image *and no text*, text otherwise. That one is strictly
+//! broken, and it's the version to never go back to. Whether a copied image
+//! comes with text attached is decided by the app it was copied from, not by
+//! the person pressing the key: a screenshot tool offers `image/png` alone, so
+//! it pasted as an image; Firefox's "Copy Image" attaches `text/plain` too, so
+//! the same gesture pasted as text. One intent, one keystroke, and the answer
+//! depended on which program the user had been standing in.
 //!
-//! There is no tie-break that fixes this, only a choice of which case to get
-//! wrong: "image wins" turns copying a paragraph that happens to contain an
-//! inline image into a PNG path where the words should be. So the tie isn't
-//! broken here, it's refused. `Ctrl+V` is text, always. `Ctrl+Shift+V` is the
-//! image, always. The key says which, the clipboard's advertised formats don't
-//! get a vote, and the same keystroke does the same thing every time no matter
-//! where the copy came from.
+//! Splitting the keys apart fixed that, and cost a key everyone then had to
+//! remember. "Image wins" is the third position and the one the app now takes:
+//! the clipboard's *text* no longer gets a vote, so an image is an image no
+//! matter which app it came from - Firefox and the screenshot tool paste alike,
+//! which was the actual bug. What's given up is the paragraph-with-an-inline-
+//! image case: copy prose out of a rich-text editor that tucks a picture in it,
+//! and `Ctrl+V` types a PNG path where the words should be. That case is rarer
+//! than pasting a screenshot into an agent prompt, which is what this app is
+//! for, so it's the one deliberately gotten wrong. `Ctrl+Shift+V` is kept as a
+//! plain alias of `Ctrl+V` for fingers trained on the split version - with
+//! image-wins it would do the same thing either way.
+//!
+//! `Shift+Insert` stays text-only, and is the escape hatch when image-wins
+//! guesses wrong: it's the traditional terminal paste, it never looks at the
+//! image, and it's what to reach for to get the words out of a clipboard that
+//! also happens to hold a picture.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -61,21 +66,21 @@ const PASTED_IMAGE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Wires copy/paste onto `terminal`. Installed on every pane (see `Pane::bare`).
 ///
-/// - `Ctrl+V` and `Shift+Insert` - paste the clipboard's text, and only ever its
-///   text. `Shift+Insert` is the traditional terminal one; `Ctrl+V` isn't, but
-///   this app's panes are claude sessions rather than shells, and the 0x16 it
-///   would otherwise send has no use in a claude prompt, so there's nothing lost
-///   in honoring the key everyone presses first anyway.
-/// - `Ctrl+Shift+V` - paste a copied image, as a PNG path claude can read. Falls
-///   back to text when there's no image to paste, so it's never a dead key.
-/// - `Ctrl+Shift+C` - copy the selection, and *only* when there is one, so the
-///   binding can't shadow anything when there isn't.
-///
-/// Neither paste key consults the other's format: see the module docs for why
-/// guessing between them is the one thing that can't work.
-///
-/// Plain `Ctrl+C` is deliberately absent: it must stay SIGINT, which is how you
-/// interrupt a running agent.
+/// - `Ctrl+V` (and `Ctrl+Shift+V`) - paste. An image if the clipboard holds one,
+///   as a PNG path claude can read; the text otherwise. `Ctrl+V` isn't the
+///   traditional terminal paste key, but this app's panes are claude sessions
+///   rather than shells, and the 0x16 it would otherwise send has no use in a
+///   claude prompt, so there's nothing lost in honoring the key everyone presses
+///   first anyway.
+/// - `Shift+Insert` - paste the text, and only ever the text, whatever else the
+///   clipboard is also carrying. The way out when image-wins guesses wrong.
+/// - `Ctrl+C` - copy the selection, and *only* when there is one. With nothing
+///   selected the key falls straight through to the pty as SIGINT, which is how
+///   you interrupt a running agent - so the one thing to know about this binding
+///   is that a *stale* selection left sitting in a pane will eat a Ctrl+C meant
+///   as an interrupt. Click once to clear it and the key is SIGINT again. This
+///   is the same bargain gnome-terminal and kitty strike.
+/// - `Ctrl+Shift+C` - copy, same terms, for fingers trained on the old binding.
 pub fn install(terminal: &Terminal) {
     let controller = EventControllerKey::new();
     // Capture, so these land before the terminal turns the keypress into bytes
@@ -94,8 +99,8 @@ pub fn install(terminal: &Terminal) {
         };
 
         match action {
+            Action::Paste => paste(&target),
             Action::PasteText => paste_text(&target),
-            Action::PasteImage => paste_image(&target),
             Action::Copy => target.copy_clipboard_format(Format::Text),
         }
 
@@ -108,8 +113,10 @@ pub fn install(terminal: &Terminal) {
 /// What a keystroke means, once the modifiers have been read off it.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Action {
+    /// Image if the clipboard holds one, text otherwise.
+    Paste,
+    /// The text, whatever else the clipboard is also carrying.
     PasteText,
-    PasteImage,
     Copy,
 }
 
@@ -118,26 +125,24 @@ enum Action {
 ///
 /// Split out from `install` so the mapping can be tested without a window, a
 /// focused terminal, or a synthetic key event: this is a pure decision, and it's
-/// the part with the sharp edge in it (see the shift-ordering note below).
+/// the part with the sharp edge in it (see the `Ctrl+C` note below).
 fn action_for(keyval: gdk::Key, ctrl: bool, shift: bool, has_selection: bool) -> Option<Action> {
     // Letter keys arrive uppercase when Shift is held, so normalize and let
     // `shift` alone say whether Shift was down.
     match keyval.to_lower() {
-        // Shift first: `ctrl && shift` is a strictly narrower match than `ctrl`,
-        // so it has to be asked first or the text arm would answer for both and
-        // Ctrl+Shift+V would never paste an image.
-        gdk::Key::v if ctrl && shift => Some(Action::PasteImage),
-        gdk::Key::v if ctrl => Some(Action::PasteText),
+        gdk::Key::v if ctrl => Some(Action::Paste),
         gdk::Key::Insert if shift && !ctrl => Some(Action::PasteText),
-        // Only with a selection to copy, so the binding can't shadow anything
-        // when there isn't one.
-        gdk::Key::c if ctrl && shift && has_selection => Some(Action::Copy),
+        // The selection gate is what lets Ctrl+C be a copy key at all: with
+        // nothing selected this returns `None`, the key is never swallowed, and
+        // it reaches the pty as the SIGINT that stops a running agent. Copy only
+        // borrows the key for the moments there's something to copy.
+        gdk::Key::c if ctrl && has_selection => Some(Action::Copy),
         _ => None,
     }
 }
 
 /// Paste the clipboard's text into `terminal`, whatever else it may also be
-/// holding. Bound to `Ctrl+V` and `Shift+Insert`.
+/// holding. Bound to `Shift+Insert`.
 ///
 /// VTE's own paste: it pulls the text, filters out the control characters a
 /// pasted string has no business carrying, and honors bracketed-paste mode if
@@ -147,16 +152,9 @@ fn paste_text(terminal: &Terminal) {
     terminal.paste_clipboard();
 }
 
-/// Paste the clipboard's image into `terminal` as a PNG path. Bound to
-/// `Ctrl+Shift+V`.
-///
-/// Falls back to a text paste when the clipboard has no image in it. That's for
-/// the fingers rather than the logic: `Ctrl+Shift+V` is the paste key in every
-/// other terminal on the machine, so someone will press it meaning "paste", with
-/// nothing but text copied, and having it do nothing at all would be its own
-/// small bug. There's no guessing in the fallback - it happens only when the
-/// image key has no image to paste, never when there's a choice to be made.
-fn paste_image(terminal: &Terminal) {
+/// Paste, image-wins: a PNG path if the clipboard holds an image, its text if
+/// not. Bound to `Ctrl+V` and `Ctrl+Shift+V`.
+fn paste(terminal: &Terminal) {
     let clipboard = terminal.clipboard();
 
     if !has_image(&clipboard.formats()) {
@@ -169,8 +167,9 @@ fn paste_image(terminal: &Terminal) {
 /// Whether `formats` describes a clipboard carrying an image.
 ///
 /// Note this asks about the *image* alone and pointedly says nothing about text:
-/// text's presence used to be half this answer, and that's precisely the coin
-/// flip the module docs describe removing.
+/// text's presence used to be half this answer, and that coin flip made an image
+/// copied from Firefox behave differently from the same image copied from a
+/// screenshot tool. See the module docs.
 fn has_image(formats: &gdk::ContentFormats) -> bool {
     formats.contains_type(gdk::Texture::static_type())
 }
@@ -197,19 +196,59 @@ fn read_and_type_image(terminal: &Terminal, clipboard: &gdk::Clipboard) {
         // then a space, so whatever they type next doesn't run into it. No
         // newline - the paste goes into the prompt, and pressing Return stays
         // the user's decision, the same as it is for a pasted line of text.
-        terminal.feed_child(format!("{} ", path.display()).as_bytes());
+        //
+        // Abbreviated rather than absolute, because this lands in a prompt the
+        // user is still writing in: a full `/home/.../.cache/...` path is most
+        // of a line of noise wrapped around the sentence they're composing.
+        terminal.feed_child(format!("{} ", abbreviate(&path)).as_bytes());
     });
 }
 
-/// `$XDG_CACHE_HOME/agenttilecli/pasted-images`, created if it isn't there.
+/// The cache root images are written under: `$XDG_CACHE_HOME/atc/img`.
+///
+/// Short on purpose. Every character here is a character the user reads back in
+/// their own prompt, so the directory is abbreviated (`atc/img`) where the rest
+/// of the app spells itself out - it's the one path in the codebase whose length
+/// is part of the UI.
+const CACHE_SUBDIR: [&str; 2] = ["atc", "img"];
+
+/// Where pasted images used to live, before the path became short enough to type
+/// into a prompt. Swept alongside the current directory so an upgrade doesn't
+/// strand a day's screenshots somewhere nothing will ever tidy them again.
+const LEGACY_CACHE_SUBDIR: [&str; 2] = ["agenttilecli", "pasted-images"];
+
+/// `$XDG_CACHE_HOME/atc/img`, created if it isn't there.
 fn pasted_images_dir() -> Option<PathBuf> {
-    let dir = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?
-        .join("agenttilecli")
-        .join("pasted-images");
+    let dir = cache_root()?.join(CACHE_SUBDIR[0]).join(CACHE_SUBDIR[1]);
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
+}
+
+/// `$XDG_CACHE_HOME`, or `~/.cache` when it isn't set.
+fn cache_root() -> Option<PathBuf> {
+    std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home().map(|h| h.join(".cache")))
+}
+
+fn home() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+/// `path` with the user's home collapsed to `~`, for typing into a prompt.
+///
+/// Left absolute when it isn't under home (an `XDG_CACHE_HOME` pointed
+/// elsewhere), because a path claude can't resolve is worse than a long one.
+fn abbreviate(path: &Path) -> String {
+    let shortened = home()
+        .filter(|h| h.as_os_str().len() > 1) // `HOME=/` would eat the whole path
+        .and_then(|h| path.strip_prefix(h).ok())
+        .map(|rest| Path::new("~").join(rest));
+
+    shortened
+        .unwrap_or_else(|| path.to_path_buf())
+        .display()
+        .to_string()
 }
 
 /// Writes `texture` into the cache dir as a PNG and returns its path, first
@@ -218,23 +257,50 @@ fn pasted_images_dir() -> Option<PathBuf> {
 fn write_png(texture: &gdk::Texture) -> Option<PathBuf> {
     let dir = pasted_images_dir()?;
     sweep_old_images(&dir);
+    if let Some(legacy) =
+        cache_root().map(|r| r.join(LEGACY_CACHE_SUBDIR[0]).join(LEGACY_CACHE_SUBDIR[1]))
+    {
+        sweep_old_images(&legacy);
+    }
     save_texture(texture, &dir)
 }
 
 /// Writes `texture` into `dir` as a PNG under a fresh name, returning its path.
 fn save_texture(texture: &gdk::Texture, dir: &Path) -> Option<PathBuf> {
-    // Named by the clock, so two pastes never collide and the newest one is
-    // obvious in a directory listing. The clock can't run backwards past the
-    // epoch, so the fallback is unreachable in practice - it exists so a
-    // pathological clock costs a filename, not a panic.
+    // Named by the clock in base 36, so two pastes never collide and the name
+    // stays about six characters instead of the thirteen a millisecond stamp
+    // spells out in decimal. Only the low end of the clock is kept: names have
+    // to be unique against the images still on disk, and `PASTED_IMAGE_TTL`
+    // sweeps those after a day, so a value that repeats every ~25 days can't
+    // meet its own twin. The clock can't run backwards past the epoch, so the
+    // `unwrap_or` is unreachable in practice - it exists so a pathological clock
+    // costs a filename, not a panic.
+    const NAME_PERIOD: u128 = 36u128.pow(6); // ~25 days in ms, vs. a 1-day TTL
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let path = dir.join(format!("paste-{stamp}.png"));
+        .unwrap_or(0)
+        % NAME_PERIOD;
+    let path = dir.join(format!("{}.png", base36(stamp)));
 
     texture.save_to_png(&path).ok()?;
     Some(path)
+}
+
+/// `n` in base 36 (digits then lowercase letters) - the densest filename-safe
+/// encoding that survives a case-insensitive filesystem.
+fn base36(mut n: u128) -> String {
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    if n == 0 {
+        return "0".into();
+    }
+    let mut out = Vec::new();
+    while n > 0 {
+        out.push(DIGITS[(n % 36) as usize]);
+        n /= 36;
+    }
+    out.reverse();
+    String::from_utf8(out).expect("DIGITS is ASCII")
 }
 
 /// Deletes pasted images older than `PASTED_IMAGE_TTL`. Best-effort throughout:
@@ -276,34 +342,32 @@ mod tests {
         dir
     }
 
-    /// The whole point of the split: each paste key means one thing, and the
-    /// two don't overlap. Ctrl+Shift+V in particular has to reach the *image*
-    /// arm - it's a strictly narrower match than the Ctrl+V text arm, so an arm
-    /// written in the other order would quietly swallow it and paste text.
+    /// Ctrl+V is the one paste key, with or without Shift, and Shift+Insert is
+    /// the text-only way out when image-wins guesses wrong.
     #[test]
-    fn each_paste_key_means_exactly_one_thing() {
+    fn the_paste_keys_land_where_they_should() {
         let no_selection = false;
         for (key, ctrl, shift, expected, why) in [
             (
                 gdk::Key::v,
                 true,
                 false,
-                Some(Action::PasteText),
-                "Ctrl+V is text",
+                Some(Action::Paste),
+                "Ctrl+V is the paste key",
             ),
             (
                 gdk::Key::V,
                 true,
                 true,
-                Some(Action::PasteImage),
-                "Ctrl+Shift+V is the image key",
+                Some(Action::Paste),
+                "Ctrl+Shift+V is an alias of it, not a second meaning",
             ),
             (
                 gdk::Key::Insert,
                 false,
                 true,
                 Some(Action::PasteText),
-                "Shift+Insert is text",
+                "Shift+Insert is text-only",
             ),
             (gdk::Key::v, false, false, None, "a bare v is just a letter"),
             (
@@ -322,28 +386,98 @@ mod tests {
         }
     }
 
-    /// Plain Ctrl+C must stay SIGINT - it's how you interrupt a running agent,
-    /// and swallowing it would strand the user in front of a pane that won't
-    /// stop. Ctrl+Shift+C only copies when there's a selection to copy.
+    /// The bargain Ctrl+C-as-copy strikes: it copies when there's a selection,
+    /// and with nothing selected it must fall through to the pty as SIGINT.
+    /// Swallowing it unconditionally would strand the user in front of a running
+    /// agent that won't stop, which is the one failure this binding can't have.
     #[test]
-    fn ctrl_c_is_left_alone_so_agents_stay_interruptible() {
+    fn ctrl_c_without_a_selection_stays_sigint() {
+        assert_eq!(
+            action_for(gdk::Key::c, true, false, false),
+            None,
+            "Ctrl+C with nothing selected was intercepted; it has to reach the \
+             pty as SIGINT or a running agent can't be interrupted",
+        );
         assert_eq!(
             action_for(gdk::Key::c, true, false, true),
-            None,
-            "plain Ctrl+C was intercepted; it has to reach the pty as SIGINT \
-             even when there's a selection sitting there",
+            Some(Action::Copy),
+            "Ctrl+C with a selection should copy",
         );
         assert_eq!(
             action_for(gdk::Key::C, true, true, true),
             Some(Action::Copy),
-            "Ctrl+Shift+C with a selection should copy",
+            "Ctrl+Shift+C should still copy, for fingers trained on it",
+        );
+    }
+
+    /// The path is typed into a prompt the user is still writing in, so its
+    /// length is a feature. A full absolute path ran past 60 characters; this
+    /// keeps it under 20.
+    #[test]
+    fn a_pasted_image_path_is_short_enough_to_sit_in_a_prompt() {
+        gtk_test(|| {
+            let dir = temp_dir("short-path");
+            let path = save_texture(&a_texture(), &dir).expect("the texture was written");
+            let name = path.file_name().expect("a filename").to_string_lossy();
+
+            assert!(
+                name.len() <= 11,
+                "the filename `{name}` is longer than a base-36 stamp plus .png",
+            );
+            // Measured against the real home, since that's the only prefix
+            // `abbreviate` will collapse - see `abbreviate_only_collapses_the_
+            // real_home`, which is what keeps that restriction honest.
+            let home = std::env::var_os("HOME").map(PathBuf::from).expect("HOME");
+            let typed = abbreviate(&home.join(".cache/atc/img").join(&*name));
+            assert!(
+                typed.len() < 30,
+                "`{typed}` is too long to sit in a prompt without wrapping it",
+            );
+        });
+    }
+
+    /// `~` only stands in for the actual home directory - a path outside it has
+    /// to stay absolute, or claude is handed something it can't resolve.
+    #[test]
+    fn abbreviate_only_collapses_the_real_home() {
+        let home = std::env::var_os("HOME").map(PathBuf::from).expect("HOME");
+
+        assert_eq!(
+            abbreviate(&home.join(".cache/atc/img/mfd0j1.png")),
+            "~/.cache/atc/img/mfd0j1.png",
+            "a path under home should collapse to ~",
         );
         assert_eq!(
-            action_for(gdk::Key::C, true, true, false),
-            None,
-            "Ctrl+Shift+C with nothing selected should fall through, not \
-             swallow the key",
+            abbreviate(Path::new("/var/tmp/elsewhere/mfd0j1.png")),
+            "/var/tmp/elsewhere/mfd0j1.png",
+            "a path outside home must stay absolute and resolvable",
         );
+    }
+
+    /// Names have to be unique against every image still on disk, since a
+    /// collision would hand claude an older screenshot than the one just pasted.
+    #[test]
+    fn two_pastes_dont_collide() {
+        gtk_test(|| {
+            let dir = temp_dir("collide");
+            let first = save_texture(&a_texture(), &dir).expect("written");
+            std::thread::sleep(Duration::from_millis(2));
+            let second = save_texture(&a_texture(), &dir).expect("written");
+
+            assert_ne!(
+                first, second,
+                "two pastes a moment apart reused a filename; the second would \
+                 have overwritten the first",
+            );
+        });
+    }
+
+    #[test]
+    fn base36_encodes_the_way_the_filenames_assume() {
+        assert_eq!(base36(0), "0");
+        assert_eq!(base36(35), "z");
+        assert_eq!(base36(36), "10");
+        assert_eq!(base36(1752849301234 % 36u128.pow(6)).len(), 6);
     }
 
     /// The screenshot case, and the whole reason the image paste exists: an
