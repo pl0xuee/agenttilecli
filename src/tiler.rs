@@ -493,11 +493,16 @@ impl Tiler {
     fn update_focus_style(&self) {
         let focus = self.imp().focus.get();
         for (i, pane) in self.imp().panes.borrow().iter().enumerate() {
-            if i == focus {
+            let is_focused = i == focus;
+            if is_focused {
                 pane.frame.add_css_class("focused");
             } else {
                 pane.frame.remove_css_class("focused");
             }
+            // The frame's half of it is the border and the glow; this is the
+            // fill, which only reaches the screen if VTE paints it (see
+            // `Pane::set_focused`).
+            pane.set_focused(is_focused);
         }
     }
 

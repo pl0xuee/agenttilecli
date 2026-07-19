@@ -8,6 +8,8 @@ use gtk4::prelude::*;
 use gtk4::{gdk, Frame};
 use vte4::{prelude::*, PtyFlags, Terminal};
 
+use crate::palette;
+
 /// How often to re-check a pane's current directory. Cheap (a single
 /// syscall pair per pane) so a short interval is fine.
 const CWD_POLL_INTERVAL: Duration = Duration::from_millis(1000);
@@ -64,65 +66,180 @@ pub(crate) fn folder_name(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
-/// Modern dark "gunmetal" theme, applied to every terminal's own palette
-/// (independent of the CSS around it, since VTE paints its own background/
-/// text colors rather than taking them from GTK CSS). Loosely an "One Dark"
-/// style 16-color ANSI palette so things like `ls --color`/git diffs still
-/// read well against it.
-fn rgba(hex: &str) -> gdk::RGBA {
-    gdk::RGBA::parse(hex).expect("valid hex color")
+/// A hex literal used by nothing but the terminal. The greys and the two hues
+/// the chrome also uses come from `palette` instead, so they can't drift from
+/// the stylesheet; these twelve exist in one place already.
+fn rgb(hex: &str) -> palette::Rgb {
+    palette::Rgb::from_hex(hex).expect("valid hex colour")
 }
 
-fn apply_theme(terminal: &Terminal) {
-    // Matched to `.pane`'s own fill in style.css (`@gm-surface`), so a pane is
-    // one continuous surface rather than a terminal of one shade sitting in a
-    // frame of another - the seam is visible at any size, and it's the thing
-    // that makes a tiling app look assembled rather than designed.
-    let foreground = rgba("#ebeef1");
-    let background = rgba("#202428");
-    // ANSI 0 and 7 are pulled onto the gunmetal ramp too: programs paint
-    // "black" backgrounds and "white" text far more often than they mean the
-    // literal colours, so anything else leaves rectangles of a foreign grey
-    // sitting in the middle of the pane.
-    let palette = [
-        rgba("#202428"), // black - the surface itself
-        rgba("#e06b6b"), // red
-        rgba("#92c47f"), // green
-        rgba("#d8a657"), // yellow - the amber the sidebar flashes in
-        rgba("#6ab0de"), // blue - the accent used throughout the chrome
-        rgba("#bf93d6"), // magenta
-        rgba("#63bcbb"), // cyan
-        rgba("#d1d6da"), // white
-        rgba("#626870"), // bright black
-        rgba("#ef8a8a"), // bright red
-        rgba("#a8d795"), // bright green
-        rgba("#ecc07a"), // bright yellow
-        rgba("#8cc8ec"), // bright blue
-        rgba("#d3ade4"), // bright magenta
-        rgba("#82d0cf"), // bright cyan
-        rgba("#f5f7f9"), // bright white
-    ];
-    let palette_refs: Vec<&gdk::RGBA> = palette.iter().collect();
-    terminal.set_colors(Some(&foreground), Some(&background), &palette_refs);
+/// The 16-colour ANSI palette for a pane painted in `surface`. Loosely "One
+/// Dark", so `ls --color` and git diffs still read well against the gunmetal.
+///
+/// Split out from `apply_theme` so it can be checked without a display - it's
+/// the only place the terminal-only hexes are written, and `rgb` panics on a
+/// malformed one.
+fn ansi_palette(surface: palette::Rgb) -> [palette::Rgb; 16] {
+    // ANSI 0 and 7 sit on the gunmetal ramp rather than being literal black
+    // and white: programs paint "black" backgrounds and "white" text far more
+    // often than they mean the actual colours, so anything else leaves
+    // rectangles of a foreign grey in the middle of the pane. 0 tracks the
+    // surface itself, which is why it's a parameter - it has to keep matching
+    // when the pane lightens under focus.
+    [
+        surface,                       // black - the surface itself
+        rgb("#e06b6b"),                // red
+        rgb("#92c47f"),                // green
+        palette::color("amber"),       // yellow - the amber the sidebar flashes in
+        palette::color("accent"),      // blue - the accent used through the chrome
+        rgb("#bf93d6"),                // magenta
+        rgb("#63bcbb"),                // cyan
+        rgb("#d1d6da"),                // white
+        palette::color("gm-faint"),    // bright black - the footnote grey
+        rgb("#ef8a8a"),                // bright red
+        rgb("#a8d795"),                // bright green
+        rgb("#ecc07a"),                // bright yellow
+        rgb("#8cc8ec"),                // bright blue
+        rgb("#d3ade4"),                // bright magenta
+        rgb("#82d0cf"),                // bright cyan
+        rgb("#f5f7f9"),                // bright white
+    ]
+}
 
-    // The three colours VTE does *not* take from the palette, and which
-    // otherwise arrive from the ambient GTK theme - which is how a carefully
-    // built dark palette ends up with a stock-blue selection and a white block
-    // cursor in the middle of it.
-    terminal.set_color_cursor(Some(&rgba("#6ab0de")));
+/// Every colour one pane's terminal needs. VTE paints its own background,
+/// foreground, cursor and selection rather than taking them from GTK CSS, so
+/// none of this can be left to the stylesheet - but every colour shared with
+/// the stylesheet is read back out of it (see `palette`) rather than copied,
+/// which is what keeps the two in step.
+struct Theme {
+    foreground: palette::Rgb,
+    background: palette::Rgb,
+    cursor: palette::Rgb,
+    selection: palette::Rgb,
+    ansi: [palette::Rgb; 16],
+}
+
+/// The theme for a pane that has focus, or one that doesn't.
+///
+/// Resolving every colour here, away from the terminal it gets painted onto,
+/// is what lets `every_colour_the_terminal_needs_resolves` check the lot on a
+/// machine with no display: `palette::color` panics on a name the stylesheet
+/// no longer defines, and a panic while building a pane is a crash on startup.
+fn theme(focused: bool) -> Theme {
+    // Matched to `.pane`'s own fill in style.css, so a pane is one continuous
+    // surface rather than a terminal of one shade sitting in a frame of
+    // another - the seam is visible at any size, and it's the thing that makes
+    // a tiling app look assembled rather than designed.
+    let background = palette::color(if focused {
+        "gm-surface-focus"
+    } else {
+        "gm-surface"
+    });
+    Theme {
+        foreground: palette::color("gm-text"),
+        background,
+        cursor: palette::color("accent"),
+        selection: palette::selection(background),
+        ansi: ansi_palette(background),
+    }
+}
+
+/// Paints `terminal` in the surface a pane gets when it's `focused` or when it
+/// isn't.
+///
+/// The surface is the whole reason this takes `focused`. `.pane.focused`'s
+/// lighter fill is painted over by the terminal - the terminal fills the
+/// frame's content box and clears its background opaquely - so the fill only
+/// actually reaches the screen if VTE is the one drawing it.
+fn apply_theme(terminal: &Terminal, focused: bool) {
+    let theme = theme(focused);
+
+    let background = theme.background.to_rgba();
+    let foreground = theme.foreground.to_rgba();
+    let ansi = theme.ansi.map(|c| c.to_rgba());
+    let ansi_refs: Vec<&gdk::RGBA> = ansi.iter().collect();
+    terminal.set_colors(Some(&foreground), Some(&background), &ansi_refs);
+
+    // The colours VTE does *not* take from the palette, and which otherwise
+    // arrive from the ambient GTK theme - which is how a carefully built dark
+    // palette ends up with a stock-blue selection and a white block cursor in
+    // the middle of it.
+    terminal.set_color_cursor(Some(&theme.cursor.to_rgba()));
     terminal.set_color_cursor_foreground(Some(&background));
-    // Selection as a tint rather than an inversion: the text stays its own
-    // colour and keeps its syntax highlighting, which matters here because
-    // selecting is now how you copy (see `clipboard`), so it happens over real
-    // output rather than over a blank prompt.
-    //
-    // The accent at ~24% over `background` - the same tint the sidebar's
-    // selected row gets from `alpha(@accent, ...)`, mixed by hand because VTE
-    // needs one opaque colour rather than a colour and an alpha. Mixed against
-    // *this* function's `background`, which is the thing that has to be
-    // rechecked whenever the ramp moves.
-    terminal.set_color_highlight(Some(&rgba("#324654")));
+    terminal.set_color_highlight(Some(&theme.selection.to_rgba()));
     terminal.set_color_highlight_foreground(Some(&foreground));
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+
+    /// Builds both themes, which resolves every `@define-color` name the
+    /// terminal asks for and parses every terminal-only hex literal. Either
+    /// one going wrong is a panic here rather than a crash on the first pane.
+    ///
+    /// No manually-kept list of names to fall out of date: this calls the same
+    /// function the app calls, so a lookup added to `theme` or `ansi_palette`
+    /// is covered the moment it's written.
+    #[test]
+    fn every_colour_the_terminal_needs_resolves() {
+        for focused in [false, true] {
+            let theme = theme(focused);
+            assert_eq!(
+                theme.ansi.len(),
+                16,
+                "VTE wants a full 16-colour ANSI palette",
+            );
+            // Text has to be legible on the surface it's drawn on, and both
+            // are greys - so if they ever converge, the pane goes blank.
+            assert!(
+                theme.foreground.r.abs_diff(theme.background.r) > 100,
+                "foreground and background have converged: {:?} on {:?}",
+                theme.foreground,
+                theme.background,
+            );
+        }
+    }
+
+    /// ANSI 0 is the surface, not literal black: programs paint "black"
+    /// backgrounds far more often than they mean the colour, and a mismatch
+    /// leaves rectangles of a foreign grey in the middle of the pane. It has
+    /// to keep matching when the pane lightens under focus, which is the part
+    /// a fixed hex would get wrong.
+    #[test]
+    fn ansi_black_tracks_the_surface_through_a_focus_change() {
+        for focused in [false, true] {
+            let theme = theme(focused);
+            assert_eq!(
+                theme.ansi[0], theme.background,
+                "ANSI black left a seam against the surface (focused: {focused})",
+            );
+        }
+    }
+
+    /// The focused pane is painted in a lighter surface than an unfocused one,
+    /// and everything mixed over that surface follows it. This is the fill
+    /// that `.pane.focused` declares but can't deliver.
+    #[test]
+    fn focus_lightens_the_surface_and_everything_mixed_over_it() {
+        let unfocused = theme(false);
+        let focused = theme(true);
+
+        assert!(
+            focused.background.r > unfocused.background.r,
+            "focus didn't lighten the surface: {:?} vs {:?}",
+            unfocused.background,
+            focused.background,
+        );
+        assert_ne!(
+            focused.selection, unfocused.selection,
+            "the selection tint ignored the surface it's mixed over",
+        );
+        // The accent-carried colours are the app's constants and shouldn't
+        // drift with focus - only the greys under them move.
+        assert_eq!(focused.cursor, unfocused.cursor);
+        assert_eq!(focused.foreground, unfocused.foreground);
+    }
 }
 
 const RESET: &str = "\x1b[0m";
@@ -443,6 +560,11 @@ pub struct Pane {
     pub close_button: gtk4::Button,
     pid: Rc<Cell<Option<libc::pid_t>>>,
     is_help: bool,
+    /// What `apply_theme` was last called with, so `set_focused` can skip the
+    /// repaint when nothing changed. `Tiler::update_focus_style` runs over
+    /// every pane after any pane operation, and all but one of those panes
+    /// were already in the state it's about to set them to.
+    focused: Cell<bool>,
 }
 
 impl Pane {
@@ -455,7 +577,7 @@ impl Pane {
         let terminal = Terminal::new();
         terminal.set_hexpand(true);
         terminal.set_vexpand(true);
-        apply_theme(&terminal);
+        apply_theme(&terminal, false);
         // An agent's bell is this app's "the agent wants you" signal - it's
         // what lights up the group's sidebar row (see `Groups::flash_row`).
         // Turning the *audible* half off keeps that a visual notification
@@ -565,6 +687,7 @@ impl Pane {
             close_button,
             pid,
             is_help: false,
+            focused: Cell::new(false),
         }
     }
 
@@ -578,6 +701,23 @@ impl Pane {
             close_button,
             pid: Rc::new(Cell::new(None)),
             is_help: true,
+            focused: Cell::new(false),
+        }
+    }
+
+    /// Repaints the terminal in the focused or unfocused surface, to match the
+    /// `.focused` CSS class `Tiler::update_focus_style` sets on the frame at
+    /// the same moment.
+    ///
+    /// This is what actually puts the focused pane's lighter fill on screen:
+    /// the stylesheet's `.pane.focused` background is covered by the terminal,
+    /// which clears its own background across the whole content box. Without
+    /// it, focus is carried entirely by the border and the ambient glow - and
+    /// both of those need backdrop around the pane to land on, which a pane
+    /// pushed flush against a screen edge or a neighbour doesn't have.
+    pub fn set_focused(&self, focused: bool) {
+        if self.focused.replace(focused) != focused {
+            apply_theme(&self.terminal, focused);
         }
     }
 

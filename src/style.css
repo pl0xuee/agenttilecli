@@ -27,6 +27,7 @@
 @define-color gm-abyss    #111315; /* window backdrop, the floor */
 @define-color gm-sunken   #181b1e; /* sidebar - recessed below the panes */
 @define-color gm-surface  #202428; /* pane body: gunmetal proper */
+@define-color gm-surface-focus #24282c; /* the focused pane, same surface lit */
 @define-color gm-raised   #292e33; /* chips and overlays sitting on a pane */
 @define-color gm-line     #31363b; /* hairlines inside the chrome */
 @define-color gm-edge     #3f464b; /* pane borders, the strongest hairline */
@@ -82,9 +83,21 @@ window {
    brighter edge and a wider ambient glow - and, quietly, a lighter fill. The
    fill is what makes focus survive the case the border can't: a pane pushed
    flush against a screen edge or a neighbour, where there's no backdrop left
-   around it for a glow to land on. */
+   around it for a glow to land on.
+
+   That fill has to be painted by VTE, not by this rule. The terminal fills the
+   whole of the frame's content box and clears its own background opaquely, so
+   everything declared here is covered by it except the few pixels inside the
+   rounded corners - which is why `Pane::set_focused` sets the same colour on
+   the terminal. This declaration is still worth making: it's what those corner
+   pixels are, and what the pane is during the frame before VTE has painted.
+
+   Both surfaces are named rungs rather than a `shade()` of one, because
+   `pane.rs` resolves these two names to paint the terminal with (see
+   `palette`), and a colour derived by a CSS function is a colour it can't
+   read. */
 .pane.focused {
-  background-color: shade(@gm-surface, 1.06);
+  background-color: @gm-surface-focus;
   border-color: @accent;
   box-shadow: 0 0 0 1px alpha(@accent, 0.4), 0 0 1.2em 1px alpha(@accent, 0.24),
     0 0.6em 1.6em rgba(0, 0, 0, 0.34);

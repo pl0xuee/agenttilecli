@@ -2,6 +2,7 @@ mod clipboard;
 mod groups;
 mod keybindings;
 mod layout;
+mod palette;
 mod pane;
 #[cfg(test)]
 mod testing;
