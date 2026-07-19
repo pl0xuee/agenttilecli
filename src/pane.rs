@@ -115,7 +115,13 @@ fn apply_theme(terminal: &Terminal) {
     // colour and keeps its syntax highlighting, which matters here because
     // selecting is now how you copy (see `clipboard`), so it happens over real
     // output rather than over a blank prompt.
-    terminal.set_color_highlight(Some(&rgba("#2f4657")));
+    //
+    // The accent at ~24% over `background` - the same tint the sidebar's
+    // selected row gets from `alpha(@accent, ...)`, mixed by hand because VTE
+    // needs one opaque colour rather than a colour and an alpha. Mixed against
+    // *this* function's `background`, which is the thing that has to be
+    // rechecked whenever the ramp moves.
+    terminal.set_color_highlight(Some(&rgba("#324654")));
     terminal.set_color_highlight_foreground(Some(&foreground));
 }
 

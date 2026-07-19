@@ -8,9 +8,13 @@
    enough to survive a dim laptop panel, which is where flat-looking dark
    themes usually come apart.
 
-   The ladder is grey with a cool cast, not a blue: about 4 points of
-   red-to-blue spread per rung, enough to keep it from going dead neutral
-   and never enough to read as a colour. Blue is reserved for @accent, and
+   The ladder is grey with a cool cast, not a blue: 4 points of red-to-blue
+   spread at the darkest rung, widening to about 14 at the lightest, which is
+   enough to keep it from going dead neutral and never enough to read as a
+   colour. (The spread has to widen as the rungs lighten - a fixed offset is a
+   smaller and smaller fraction of the channel values as they climb, so holding
+   it flat would let the cast drain out of the top of the ramp.) Blue is
+   reserved for @accent, and
    a surface that borrows the accent's hue competes with it - the focus ring
    stops announcing anything when everything behind it is already blue.
 
