@@ -42,6 +42,26 @@
 @define-color green       #8fbf7f; /* an update is available */
 @define-color red         #d16969; /* close, hang up, destroy */
 
+/* Per-project identity colours, assigned to sidebar rows by hashing the project
+   name (see `hue_class`). Identity, not status: which project this is, said in
+   a way you can pick out of a list without reading it.
+
+   Deliberately *not* drawn from the four colours above, even where a hue is
+   close. Those four mean something - amber means an agent wants you, red means
+   destroy, green means an update - and a project that merely happens to hash to
+   amber would be saying it. These are their own set, and they skip the
+   amber/red band entirely so a flashing row stays unambiguous.
+
+   Five, spaced around the wheel at a chroma and lightness that match @accent's
+   register, so no project reads as louder than its neighbours. Five means a
+   sixth project repeats a colour - a collision costs a little distinctness, and
+   nothing else, which is why it isn't worth a bigger palette of muddier hues. */
+@define-color hue-1 #6ab0de; /* blue   */
+@define-color hue-2 #5cbfae; /* teal   */
+@define-color hue-3 #8fbf7f; /* green  */
+@define-color hue-4 #a98cdd; /* violet */
+@define-color hue-5 #dd8fb5; /* pink   */
+
 /* A hair of lift toward the top of the window, so a maximized app doesn't
    read as one flat rectangle of near-black behind the panes. Shallow enough
    that it never competes with the panes themselves - it's the difference
@@ -252,18 +272,51 @@ row.sidebar-row:selected:hover {
   transition: color 140ms ease-out;
 }
 
+/* Bold on every row, not just the open one. A project name is the thing you
+   aim at when you come back to this list, and a column of light grey names at
+   the same weight is a column you have to read top-to-bottom to use. Weight
+   makes each one a shape you can recognise instead of a line you have to
+   parse - which is the whole job of a sidebar you glance at. */
+.sidebar-row-label {
+  font-size: 0.95em;
+  font-weight: bold;
+}
+
+/* The per-project colour, on the icon and the name. Two marks rather than one:
+   the icon is the stronger signal but it's small and identical in silhouette
+   from row to row, so the colour has to reach the text to survive a glance
+   that never lands on the icon at all.
+
+   The name is mixed halfway to @gm-text rather than set to the hue outright.
+   At full strength five different hues of body text read as five different
+   *kinds* of item - a status list - and the quieter ones lose contrast against
+   the sidebar. Half-mixed, the row still says which project it is while every
+   name stays the same brightness as every other. */
+row.sidebar-row.hue-1 .sidebar-row-icon  { color: @hue-1; }
+row.sidebar-row.hue-2 .sidebar-row-icon  { color: @hue-2; }
+row.sidebar-row.hue-3 .sidebar-row-icon  { color: @hue-3; }
+row.sidebar-row.hue-4 .sidebar-row-icon  { color: @hue-4; }
+row.sidebar-row.hue-5 .sidebar-row-icon  { color: @hue-5; }
+
+row.sidebar-row.hue-1 .sidebar-row-label { color: mix(@hue-1, @gm-text, 0.5); }
+row.sidebar-row.hue-2 .sidebar-row-label { color: mix(@hue-2, @gm-text, 0.5); }
+row.sidebar-row.hue-3 .sidebar-row-label { color: mix(@hue-3, @gm-text, 0.5); }
+row.sidebar-row.hue-4 .sidebar-row-label { color: mix(@hue-4, @gm-text, 0.5); }
+row.sidebar-row.hue-5 .sidebar-row-label { color: mix(@hue-5, @gm-text, 0.5); }
+
+/* After the hue rules on purpose. These tie with them on specificity (one
+   element, three classes either way), so source order is what decides it, and
+   what has to win is "this is the open project": the selected row drops its
+   identity colour and takes the accent, because there is only ever one of it
+   and it needs to look like the answer to "where am I", not like one more
+   colour in the list. The same tie is why the attention rules further down
+   stay below both - amber outranks everything here. */
 row.sidebar-row:selected .sidebar-row-icon {
   color: @accent;
 }
 
-.sidebar-row-label {
-  font-size: 0.95em;
-}
-
-/* The selected row is the only one whose label is a statement of fact ("this
-   is what you're looking at") rather than an offer, so it gets the weight. */
 row.sidebar-row:selected .sidebar-row-label {
-  font-weight: bold;
+  color: #ffffff;
 }
 
 .sidebar-row-close {
@@ -331,6 +384,16 @@ row.sidebar-row.needs-attention {
 row.sidebar-row.needs-attention .sidebar-row-icon {
   color: @amber;
   opacity: 1;
+}
+
+/* The row above sets `color` and lets the label inherit it, which worked right
+   up until the label got a colour of its own: a rule that targets the label
+   directly beats any colour it would have inherited, however specific the
+   inherited one is. Without this the name would sit there in its project hue
+   through the whole flash - the one moment it is not supposed to be saying
+   "which project" but "this one needs you". */
+row.sidebar-row.needs-attention .sidebar-row-label {
+  color: mix(@amber, @gm-text, 0.55);
 }
 
 /* Fences the update button off from the rows above it: both are clickable

@@ -61,6 +61,31 @@ fn update_available(status: &update::Status) -> Option<bool> {
     }
 }
 
+/// How many `hue-N` classes `style.css` defines for sidebar rows.
+const HUE_COUNT: u64 = 5;
+
+/// The identity colour class for a project called `name` - `hue-1` through
+/// `hue-{HUE_COUNT}`, matching the rules in `style.css`.
+///
+/// Hashed from the name rather than handed out by row position, so a project's
+/// colour is a property *of that project*: it survives reordering the sidebar,
+/// closing the group above it, and quitting the app, all of which would shuffle
+/// an index-assigned palette and retrain the eye for nothing. The point of the
+/// colour is that you learn it once.
+///
+/// FNV-1a, spelled out here rather than reached for from `std`: `DefaultHasher`
+/// is explicitly not promised to be stable across Rust releases, and a toolchain
+/// upgrade silently repainting every project in the sidebar is the exact failure
+/// this function exists to avoid.
+fn hue_class(name: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in name.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("hue-{}", hash % HUE_COUNT + 1)
+}
+
 /// Whether a drop at `y` within a row `height` tall means "below this row"
 /// rather than "above" it. Splitting the row at its midpoint is what lets a
 /// list of n rows offer all n+1 insertion points: without it the bottom slot
@@ -997,6 +1022,7 @@ impl Groups {
         let row = gtk4::ListBoxRow::builder().child(&row_box).build();
         row.set_widget_name(&id);
         row.add_css_class("sidebar-row");
+        row.add_css_class(&hue_class(&name));
         row.set_tooltip_text(Some(&format!(
             "{name}\nDrag to reorder (or Super+Alt+Shift+[ / ])"
         )));
@@ -1219,6 +1245,30 @@ impl Groups {
 mod tests {
     use super::*;
     use crate::testing::gtk_test;
+
+    /// `hue_class` promises two things its callers can't check for themselves:
+    /// that the class it names is one `style.css` actually defines, and that a
+    /// given project keeps the same one forever. A hue outside the range is an
+    /// uncoloured row; a hue that drifts is every project in the sidebar
+    /// quietly changing colour on some unrelated release.
+    #[test]
+    fn a_projects_colour_is_in_range_and_never_moves() {
+        for name in ["agenttilecli", "Offline_map", "castle-of-the-dreadfort", ""] {
+            let class = hue_class(name);
+            assert!(
+                (1..=HUE_COUNT).any(|n| class == format!("hue-{n}")),
+                "{name} got {class}, which style.css does not define"
+            );
+            assert_eq!(class, hue_class(name), "{name} did not hash the same twice");
+        }
+
+        // Pinned literals, not a recomputation: the point is to fail if the
+        // hash function is ever swapped or "improved", which is precisely the
+        // change that would repaint everyone's sidebar without meaning to.
+        assert_eq!(hue_class("agenttilecli"), "hue-2");
+        assert_eq!(hue_class("Offline_map"), "hue-4");
+        assert_eq!(hue_class("castle-of-the-dreadfort"), "hue-3");
+    }
 
     /// The order of the groups, as `entries` has it - which is what decides
     /// what `cycle_group` calls "next".
