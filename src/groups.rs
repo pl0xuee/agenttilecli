@@ -36,7 +36,13 @@ const DROP_BELOW_CLASS: &str = "drop-below";
 /// huge jump when small and a barely-visible one when large. Multiplying keeps
 /// every press the same *percentage* change, so the steps read as even the
 /// whole way across the range.
-const FONT_SCALE_STEP: f64 = 1.1;
+///
+/// The ratio is a twentieth, not a tenth. Even steps still jump if each one is
+/// big, and a tenth of a ~11pt terminal font is over a point a press - enough
+/// that VTE reflows the character grid into a visibly different shape each
+/// time. A twentieth lands the text where you wanted it instead of stepping
+/// over it, at the cost of a few more presses to cross the range.
+const FONT_SCALE_STEP: f64 = 1.05;
 const FONT_SCALE_MIN: f64 = 0.5;
 const FONT_SCALE_MAX: f64 = 3.0;
 
