@@ -1,78 +1,85 @@
 /* ── Palette ──────────────────────────────────────────────────────────────
-   One gunmetal ramp, defined once, derived from everywhere below.
+   Cool graphite surfaces, one warm light.
 
-   Every surface in the app is a step on a single grey ladder rather than a
-   set of independently chosen near-blacks. That's what makes depth read as
-   depth: a pane sits *above* the window because it's one rung lighter, not
-   because it happens to be a different colour. The rungs are spaced widely
+   Two rules hold the whole scheme together, and everything below is derived
+   from them:
+
+     Light means focus.   The focused pane is the only lit thing on screen.
+     Colour means a message.  Every hue in the app is saying something.
+
+   That second rule is why focus is *not* a hue any more. A blue focus ring is
+   a colour spent on "you are here" - a fact the eye can read from brightness
+   alone - and it collides with the blue a project might be identified by. So
+   focus is @filament, a warm near-white, and it reads as a lamp because every
+   surface it lands on is cool. The hues left over are free to mean things:
+   amber that an agent wants you, green that an update landed, red that this
+   destroys something, and five identity colours for the projects themselves.
+
+   The surfaces are one graphite ladder, defined once. Depth reads as depth
+   because a pane sits *above* the window by being several rungs lighter, not
+   because it happens to be a different near-black. The rungs are spaced widely
    enough to survive a dim laptop panel, which is where flat-looking dark
-   themes usually come apart.
+   themes usually come apart - and widely enough to carry the separation on
+   their own, since nothing in this app casts a shadow.
 
-   The ladder is grey with a cool cast, not a blue: 4 points of red-to-blue
-   spread at the darkest rung, widening to about 14 at the lightest, which is
-   enough to keep it from going dead neutral and never enough to read as a
-   colour. (The spread has to widen as the rungs lighten - a fixed offset is a
-   smaller and smaller fraction of the channel values as they climb, so holding
-   it flat would let the cast drain out of the top of the ramp.) Blue is
-   reserved for @accent, and
-   a surface that borrows the accent's hue competes with it - the focus ring
-   stops announcing anything when everything behind it is already blue.
+   The cool cast widens as the ladder climbs (6 points of red-to-blue spread at
+   the floor, 20 at the top): a fixed offset is a smaller and smaller fraction
+   of the channel values as they lighten, so holding it flat would let the cast
+   drain out of the top of the ramp.
 
    Tints are derived with `alpha()`/`mix()` rather than hand-mixed hex, so a
-   change to `@accent` carries through every hover, selection and focus ring
-   in one edit instead of a dozen. GTK resolves these at parse time - see
+   change to @filament carries through every hover, selection and focus ring in
+   one edit instead of a dozen. GTK resolves these at parse time - see
    `the_stylesheet_parses_without_errors`, which is what stops an unsupported
    colour function being silently dropped. */
 
-@define-color gm-abyss    #111315; /* window backdrop, the floor */
-@define-color gm-sunken   #181b1e; /* sidebar - recessed below the panes */
-@define-color gm-surface  #202428; /* pane body: gunmetal proper */
-@define-color gm-surface-focus #24282c; /* the focused pane, same surface lit */
-@define-color gm-raised   #292e33; /* chips and overlays sitting on a pane */
-@define-color gm-line     #31363b; /* hairlines inside the chrome */
-@define-color gm-edge     #3f464b; /* pane borders, the strongest hairline */
+@define-color field    #0c0f12; /* the window's own panel, the floor */
+@define-color rack     #11151a; /* sidebar - recessed below the panes */
+@define-color tile     #191e24; /* pane body: graphite proper */
+@define-color tile-lit #1e2329; /* the focused pane, same graphite lit */
+@define-color chip     #252c33; /* small controls sitting on a pane */
+@define-color hairline #2b333b; /* rules inside the chrome */
+@define-color edge     #39434d; /* pane borders, the strongest rule */
 
-@define-color gm-text     #ebeef1; /* the thing being read */
-@define-color gm-dim      #b0b7bd; /* secondary labels */
-@define-color gm-muted    #82898f; /* icons, quiet controls */
-@define-color gm-faint    #626870; /* footnotes */
+@define-color text  #e8edf2; /* the thing being read */
+@define-color dim   #aeb8c2; /* secondary labels */
+@define-color muted #7f8b96; /* icons, quiet controls */
+@define-color faint #5d6873; /* footnotes and rack engraving */
 
-@define-color accent      #6ab0de; /* steel blue - focus, selection, "here" */
-@define-color amber       #d8a657; /* attention: an agent wants you */
-@define-color green       #8fbf7f; /* an update is available */
-@define-color red         #d16969; /* close, hang up, destroy */
+/* The lamp, and the three things worth saying in colour. @filament is warm on
+   purpose - a neutral white lights nothing, it just looks like a brighter grey,
+   and the whole point of the focus treatment is that the active tile looks
+   *lit* rather than *ticked*. */
+@define-color filament #f2e7d3; /* focus, selection, cursor - the light */
+@define-color tally    #f0a93c; /* an agent wants you */
+@define-color fresh    #79c58c; /* an update is available */
+@define-color hangup   #e06c60; /* close, hang up, destroy */
 
 /* Per-project identity colours, assigned to sidebar rows by hashing the project
    name (see `hue_class`). Identity, not status: which project this is, said in
-   a way you can pick out of a list without reading it.
+   a way you can pick out of a rack without reading it.
 
-   Deliberately *not* drawn from the four colours above, even where a hue is
-   close. Those four mean something - amber means an agent wants you, red means
-   destroy, green means an update - and a project that merely happens to hash to
-   amber would be saying it. These are their own set, and they skip the
-   amber/red band entirely so a flashing row stays unambiguous.
+   Deliberately disjoint from the three signals above. Those mean something, and
+   a project that merely happened to hash to amber would be saying it - so these
+   skip the amber/red band entirely, and skip @fresh's green for a lime that
+   won't be mistaken for it at rail size.
 
-   Five, spaced around the wheel at a chroma and lightness that match @accent's
-   register, so no project reads as louder than its neighbours. Five means a
-   sixth project repeats a colour - a collision costs a little distinctness, and
-   nothing else, which is why it isn't worth a bigger palette of muddier hues. */
-@define-color hue-1 #6ab0de; /* blue   */
-@define-color hue-2 #5cbfae; /* teal   */
-@define-color hue-3 #8fbf7f; /* green  */
-@define-color hue-4 #a98cdd; /* violet */
-@define-color hue-5 #dd8fb5; /* pink   */
+   Five, spaced around the wheel at a chroma and lightness that match each
+   other, so no project reads as louder than its neighbours. Five means a sixth
+   project repeats a colour - a collision costs a little distinctness and
+   nothing else, which is why it isn't worth a bigger palette of muddier hues.
+   Blue is available again now that focus doesn't use it. */
+@define-color hue-1 #6bb2e8; /* blue   */
+@define-color hue-2 #46c7ba; /* teal   */
+@define-color hue-3 #a9cf5b; /* lime   */
+@define-color hue-4 #ae8fe6; /* violet */
+@define-color hue-5 #e58fb8; /* pink   */
 
-/* A hair of lift toward the top of the window, so a maximized app doesn't
-   read as one flat rectangle of near-black behind the panes. Shallow enough
-   that it never competes with the panes themselves - it's the difference
-   between a room and a void, not a visible gradient.
-
-   The lift is white, not accent-tinted: at this alpha a hue reads as a
-   colour cast over the whole top of the window rather than as light, and
-   the backdrop is the one surface with enough area to make that obvious. */
+/* Flat, and deliberately so. The gutters between tiles are the app's own
+   diagram - which panes are where, at what size - and a gradient across the
+   backdrop puts a second, meaningless picture behind that one. */
 window {
-  background-color: @gm-abyss;
-  background-image: linear-gradient(to bottom, alpha(#ffffff, 0.03), transparent 22em);
+  background-color: @field;
 }
 
 /* Sizes below are in `em`, relative to `window`'s own font-size - which
@@ -81,238 +88,263 @@ window {
    the sidebar, floating buttons, and pane chrome all scale together with
    pane text, without this stylesheet needing to know the current scale
    itself. Border widths are the deliberate exception, kept at a flat 1px
-   so hairlines stay crisp instead of going blurry or vanishing at small
+   so rules stay crisp instead of going blurry or vanishing at small
    scales. */
 
-/* The drop shadow is what actually seats a pane above the backdrop; the
-   border alone draws its outline without ever lifting it off the page. Two
-   shadows rather than one: a tight dark contact shadow that reads as the
-   edge touching down, and a wide soft one for the ambient falloff. That
-   pairing is the whole difference between "modern" and "a box with a
-   border" - a single mid-blur shadow reads as neither. */
+/* A tile is cut, not dropped: a 3px radius that reads as a machined corner
+   rather than a soft card, a single hairline, and no shadow at all. What lifts
+   it off the backdrop is tone - @tile sits a full 13 points above @field, which
+   is a wider gap than any shadow was carrying - and keeping the lift in the
+   fill means it survives at any window size, on any panel, at any gutter width.
+   Nothing in this app floats except the pane the keyboard is talking to. */
 .pane {
-  background-color: @gm-surface;
-  border: 1px solid @gm-edge;
-  border-radius: 0.8em;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0.5em 1.4em rgba(0, 0, 0, 0.28);
-  transition: border-color 140ms ease-out, box-shadow 140ms ease-out,
-    background-color 140ms ease-out;
+  background-color: @tile;
+  border: 1px solid @edge;
+  border-radius: 0.25em;
+  transition: border-color 120ms ease-out, box-shadow 120ms ease-out,
+    background-color 120ms ease-out;
 }
 
-/* The focused pane is the one the keyboard is talking to, so it gets both a
-   brighter edge and a wider ambient glow - and, quietly, a lighter fill. The
-   fill is what makes focus survive the case the border can't: a pane pushed
-   flush against a screen edge or a neighbour, where there's no backdrop left
-   around it for a glow to land on.
+/* The lamp. Because it is the only glow anywhere in the app, it needs no
+   saturation to win the eye - a warm edge and a shallow warm bloom against
+   cool graphite reads as light falling on the active tile.
+
+   And, quietly, a lighter fill. The fill is what makes focus survive the case
+   the border can't: a pane pushed flush against a screen edge or a neighbour,
+   where there's no backdrop left around it for a bloom to land on.
 
    That fill has to be painted by VTE, not by this rule. The terminal fills the
    whole of the frame's content box and clears its own background opaquely, so
-   everything declared here is covered by it except the few pixels inside the
-   rounded corners - which is why `Pane::set_focused` sets the same colour on
-   the terminal. This declaration is still worth making: it's what those corner
-   pixels are, and what the pane is during the frame before VTE has painted.
+   everything declared here is covered by it except the border - which is why
+   `Pane::set_focused` sets the same colour on the terminal. This declaration is
+   still worth making: it's what the pane is during the frame before VTE has
+   painted.
 
    Both surfaces are named rungs rather than a `shade()` of one, because
    `pane.rs` resolves these two names to paint the terminal with (see
    `palette`), and a colour derived by a CSS function is a colour it can't
    read. */
 .pane.focused {
-  background-color: @gm-surface-focus;
-  border-color: @accent;
-  box-shadow: 0 0 0 1px alpha(@accent, 0.4), 0 0 1.2em 1px alpha(@accent, 0.24),
-    0 0.6em 1.6em rgba(0, 0, 0, 0.34);
+  background-color: @tile-lit;
+  border-color: @filament;
+  box-shadow: 0 0 0 2px alpha(@filament, 0.13), 0 0 1.6em alpha(@filament, 0.09);
 }
 
-/* Chrome that floats *over* a pane - the close ✕, the hamburger, the
-   directory label. They share a fill and a hairline so they read as one
-   family of controls rather than three separately-invented buttons, and the
-   hairline is what keeps them legible when they happen to sit over a patch
-   of pale terminal output. */
+/* Chrome that floats *over* a pane - the close ✕, the hamburger, the new-agent
+   button, the directory label. They share a fill, a rule and a corner radius so
+   they read as one family of controls rather than four separately-invented
+   buttons, and the rule is what keeps them legible when they happen to sit over
+   a patch of pale terminal output. */
 .pane-close,
 .add-pane,
 .pane-dir {
-  background-color: alpha(@gm-raised, 0.88);
-  border: 1px solid alpha(@gm-edge, 0.55);
-  color: @gm-muted;
+  background-color: alpha(@chip, 0.9);
+  border: 1px solid alpha(@edge, 0.6);
+  border-radius: 0.25em;
+  color: @muted;
 }
 
 .pane-close {
-  margin: 0.45em;
-  min-width: 1.65em;
-  min-height: 1.65em;
-  border-radius: 0.5em;
-  opacity: 0.7;
-  transition: opacity 140ms ease-out, background-color 140ms ease-out,
-    border-color 140ms ease-out, color 140ms ease-out;
+  margin: 0.4em;
+  min-width: 1.6em;
+  min-height: 1.6em;
+  opacity: 0.55;
+  transition: opacity 120ms ease-out, background-color 120ms ease-out,
+    border-color 120ms ease-out, color 120ms ease-out;
 }
 
 .pane-close:hover {
   opacity: 1;
-  color: #ffffff;
-  background-color: @red;
-  border-color: @red;
+  color: @field;
+  background-color: @hangup;
+  border-color: @hangup;
 }
 
 .add-pane {
-  min-width: 2.4em;
-  min-height: 2.4em;
-  border-radius: 0.7em;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35), 0 0.4em 1em rgba(0, 0, 0, 0.25);
-  opacity: 0.6;
-  transition: opacity 140ms ease-out, background-color 140ms ease-out,
-    border-color 140ms ease-out, color 140ms ease-out;
+  min-width: 2.3em;
+  min-height: 2.3em;
+  opacity: 0.5;
+  transition: opacity 120ms ease-out, background-color 120ms ease-out,
+    border-color 120ms ease-out, color 120ms ease-out;
 }
 
+/* The one place the light is borrowed by something other than a pane: these two
+   buttons are how you *make* a pane, so the hover reads as the lamp coming on
+   ahead of the thing it's about to light. */
 .add-pane:hover {
   opacity: 1;
-  color: #ffffff;
-  background-color: @accent;
-  border-color: @accent;
+  color: @field;
+  background-color: @filament;
+  border-color: @filament;
 }
 
 .floating-bottom-right {
-  margin: 0 1.5em 1.5em 0;
+  margin: 0 1.4em 1.4em 0;
 }
 
 .floating-top-left {
-  margin: 1.5em 0 0 1.5em;
+  margin: 1.4em 0 0 1.4em;
 }
 
+/* An engraved equipment label rather than a caption: monospace, small, in caps
+   with the letters opened up. It names the one thing about a pane that isn't
+   visible in its own output - which directory the agent is actually standing in
+   - and it has to say so without competing with a screen full of that agent's
+   text, which is why it's the quietest type in the app. */
 .pane-dir {
-  margin: 0.45em;
-  padding: 0.15em 0.6em;
-  font-size: 0.85em;
-  border-radius: 0.6em;
-  letter-spacing: 0.02em;
-  opacity: 0.9;
+  margin: 0.4em;
+  padding: 0.15em 0.55em;
+  font-family: monospace;
+  font-size: 0.72em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
-/* Recessed rather than raised: the sidebar is the shelf the panes sit out
-   from, so it's a rung *below* the window's own backdrop, with the border
-   and an inner shadow doing the work of a bevel. */
+/* ── The rack ──────────────────────────────────────────────────────────────
+   The sidebar is a rack of channel strips: every open project gets a strip,
+   every strip carries a tally rail in that project's own colour, and exactly
+   one of them is lit. It sits a rung below the window's own panel, because the
+   panes stand out from it. */
 .sidebar {
   min-width: 16.5em;
-  background-color: @gm-sunken;
-  border-right: 1px solid @gm-line;
-  box-shadow: inset -0.6em 0 0.9em -0.6em rgba(0, 0, 0, 0.45);
+  background-color: @rack;
+  border-right: 1px solid @hairline;
 }
 
-/* No bottom border, unlike the footer: an all-caps, letter-spaced, dimmed
-   label already reads as a section heading, and a rule under it only draws a
-   second line saying the same thing. The footer keeps its divider because it
-   has real work to do - fencing a clickable control off from the list of rows
-   above it, which no amount of typography does on its own. */
+/* No bottom border, unlike the footer: monospace caps at this tracking already
+   read as a section heading, and a rule under it only draws a second line
+   saying the same thing. The footer keeps its divider because it has real work
+   to do - fencing a clickable control off from the list of strips above it,
+   which no amount of typography does on its own. */
 .sidebar-header {
-  padding: 0.9em 0.6em 0.5em 1.1em;
+  padding: 1em 0.55em 0.6em 0.95em;
 }
 
 .sidebar-header-label {
-  font-weight: bold;
-  font-size: 0.78em;
-  color: @gm-muted;
-  letter-spacing: 0.12em;
+  font-family: monospace;
+  font-size: 0.72em;
+  color: @faint;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
 }
 
 .sidebar-header button {
-  min-width: 1.9em;
-  min-height: 1.9em;
-  border-radius: 0.5em;
-  color: @gm-muted;
-  transition: color 140ms ease-out, background-color 140ms ease-out;
+  min-width: 1.8em;
+  min-height: 1.8em;
+  border-radius: 0.25em;
+  color: @muted;
+  transition: color 120ms ease-out, background-color 120ms ease-out;
 }
 
-/* A tinted wash rather than a solid blue fill. At this size a saturated disc
-   is the loudest thing in the sidebar, which is a strange amount of noise for
-   "add a project" to make while the pointer merely passes over it. */
+/* A wash rather than a solid fill. At this size a filled square is the
+   brightest thing in the rack, which is a strange amount of noise for "add a
+   project" to make while the pointer merely passes over it. */
 .sidebar-header button:hover {
-  color: @accent;
-  background-color: alpha(@accent, 0.16);
+  color: @filament;
+  background-color: alpha(@filament, 0.12);
 }
 
 .sidebar-list {
   background-color: transparent;
-  padding: 0.25em 0.4em;
+  padding: 0.15em 0.4em;
 }
 
+/* The strip itself. The left padding is wide because the rail lives in it. */
 row.sidebar-row {
-  padding: 0.5em 0.7em;
-  margin: 0.1em 0;
-  border-radius: 0.6em;
-  color: @gm-dim;
-  transition: background-color 140ms ease-out, color 140ms ease-out,
-    box-shadow 140ms ease-out;
+  padding: 0.55em 0.7em 0.55em 0.85em;
+  margin: 0.08em 0;
+  border-radius: 0.25em;
+  color: @dim;
+  transition: background-color 120ms ease-out, color 120ms ease-out,
+    box-shadow 120ms ease-out;
 }
 
 row.sidebar-row:hover {
-  background-color: alpha(@gm-text, 0.05);
-  color: @gm-text;
+  background-color: alpha(@text, 0.045);
+  color: @text;
 }
 
-/* Tint *and* a left accent bar. The tint alone has to carry the selection on
-   colour contrast, which is exactly what the attention flash also does (in
-   amber) and what a hover does (in grey) - three states separated only by how
-   bright the same rectangle is. The bar is a different kind of mark, so the
-   open project stays obvious even mid-flash, and stays legible if the row is
-   glanced at rather than compared against its neighbours. `inset` keeps it
-   inside the row's own rounded corners instead of squaring them off. */
+/* The lit strip: a warm bed, a white name, and (from the rules below) its rail
+   at full strength. Bed *and* rail, because the bed alone would have to carry
+   the selection on brightness - which is exactly what a hover also does, and
+   what the attention flash also does, leaving three states separated only by
+   how bright the same rectangle is. */
 row.sidebar-row:selected {
-  background-color: alpha(@accent, 0.16);
-  color: #ffffff;
-  box-shadow: inset 0.19em 0 0 0 @accent;
+  background-color: alpha(@filament, 0.08);
+  color: @text;
 }
 
 row.sidebar-row:selected:hover {
-  background-color: alpha(@accent, 0.22);
+  background-color: alpha(@filament, 0.12);
 }
 
 .sidebar-row-icon {
-  color: @gm-muted;
-  opacity: 0.9;
-  transition: color 140ms ease-out;
+  color: @muted;
+  opacity: 0.85;
+  transition: color 120ms ease-out;
 }
 
-/* Bold on every row, not just the open one. A project name is the thing you
-   aim at when you come back to this list, and a column of light grey names at
-   the same weight is a column you have to read top-to-bottom to use. Weight
-   makes each one a shape you can recognise instead of a line you have to
-   parse - which is the whole job of a sidebar you glance at. */
+/* Monospace, like everything else in the chrome and like the panes themselves -
+   this is an app made entirely of terminals, and a proportional sans in the
+   sidebar is the one voice in it that belongs to some other program.
+
+   Bold on every strip, not just the lit one. A project name is the thing you
+   aim at when you come back to this rack, and a column of names at one weight
+   is a column you have to read top-to-bottom to use. Weight makes each one a
+   shape you can recognise instead of a line you have to parse. */
 .sidebar-row-label {
-  font-size: 0.95em;
+  font-family: monospace;
+  font-size: 0.88em;
   font-weight: bold;
+  letter-spacing: 0.01em;
 }
 
-/* The per-project colour, on the icon and the name. Two marks rather than one:
-   the icon is the stronger signal but it's small and identical in silhouette
-   from row to row, so the colour has to reach the text to survive a glance
-   that never lands on the icon at all.
+/* ── Tally rails ───────────────────────────────────────────────────────────
+   The signature of the rack, and the reason a project's colour is worth having
+   at all: a rail down the left edge of every strip, in that project's own hue.
+   Idle strips carry theirs at a third strength - present, so the rack reads as
+   a set of channels rather than a list of words, but never bright enough to
+   compete with the one that's live.
 
-   The name is mixed halfway to @gm-text rather than set to the hue outright.
-   At full strength five different hues of body text read as five different
-   *kinds* of item - a status list - and the quieter ones lose contrast against
-   the sidebar. Half-mixed, the row still says which project it is while every
-   name stays the same brightness as every other. */
+   `inset` rather than a border, for the same reason the drop-target rules use
+   it: a border would change the strip's height the moment its state changed,
+   shoving every strip below it down a line.
+
+   The colour reaches the name too, mixed halfway to @text rather than set to
+   the hue outright. At full strength five different hues of body text read as
+   five different *kinds* of item - a status list - and the quieter ones lose
+   contrast against the rack. Half-mixed, the strip still says which project it
+   is while every name stays the same brightness as every other. */
+row.sidebar-row.hue-1 { box-shadow: inset 0.16em 0 0 0 alpha(@hue-1, 0.35); }
+row.sidebar-row.hue-2 { box-shadow: inset 0.16em 0 0 0 alpha(@hue-2, 0.35); }
+row.sidebar-row.hue-3 { box-shadow: inset 0.16em 0 0 0 alpha(@hue-3, 0.35); }
+row.sidebar-row.hue-4 { box-shadow: inset 0.16em 0 0 0 alpha(@hue-4, 0.35); }
+row.sidebar-row.hue-5 { box-shadow: inset 0.16em 0 0 0 alpha(@hue-5, 0.35); }
+
 row.sidebar-row.hue-1 .sidebar-row-icon  { color: @hue-1; }
 row.sidebar-row.hue-2 .sidebar-row-icon  { color: @hue-2; }
 row.sidebar-row.hue-3 .sidebar-row-icon  { color: @hue-3; }
 row.sidebar-row.hue-4 .sidebar-row-icon  { color: @hue-4; }
 row.sidebar-row.hue-5 .sidebar-row-icon  { color: @hue-5; }
 
-row.sidebar-row.hue-1 .sidebar-row-label { color: mix(@hue-1, @gm-text, 0.5); }
-row.sidebar-row.hue-2 .sidebar-row-label { color: mix(@hue-2, @gm-text, 0.5); }
-row.sidebar-row.hue-3 .sidebar-row-label { color: mix(@hue-3, @gm-text, 0.5); }
-row.sidebar-row.hue-4 .sidebar-row-label { color: mix(@hue-4, @gm-text, 0.5); }
-row.sidebar-row.hue-5 .sidebar-row-label { color: mix(@hue-5, @gm-text, 0.5); }
+row.sidebar-row.hue-1 .sidebar-row-label { color: mix(@hue-1, @text, 0.5); }
+row.sidebar-row.hue-2 .sidebar-row-label { color: mix(@hue-2, @text, 0.5); }
+row.sidebar-row.hue-3 .sidebar-row-label { color: mix(@hue-3, @text, 0.5); }
+row.sidebar-row.hue-4 .sidebar-row-label { color: mix(@hue-4, @text, 0.5); }
+row.sidebar-row.hue-5 .sidebar-row-label { color: mix(@hue-5, @text, 0.5); }
 
-/* After the hue rules on purpose. These tie with them on specificity (one
-   element, three classes either way), so source order is what decides it, and
-   what has to win is "this is the open project": the selected row drops its
-   identity colour and takes the accent, because there is only ever one of it
-   and it needs to look like the answer to "where am I", not like one more
-   colour in the list. The same tie is why the attention rules further down
-   stay below both - amber outranks everything here. */
+/* Lit. The open project's rail goes to full strength - the one channel with its
+   lamp on - while its name and icon drop the identity colour for plain white:
+   there is only ever one open project, and it needs to look like the answer to
+   "where am I" rather than like one more colour in the rack. */
+row.sidebar-row.hue-1:selected { box-shadow: inset 0.16em 0 0 0 @hue-1; }
+row.sidebar-row.hue-2:selected { box-shadow: inset 0.16em 0 0 0 @hue-2; }
+row.sidebar-row.hue-3:selected { box-shadow: inset 0.16em 0 0 0 @hue-3; }
+row.sidebar-row.hue-4:selected { box-shadow: inset 0.16em 0 0 0 @hue-4; }
+row.sidebar-row.hue-5:selected { box-shadow: inset 0.16em 0 0 0 @hue-5; }
+
 row.sidebar-row:selected .sidebar-row-icon {
-  color: @accent;
+  color: @text;
 }
 
 row.sidebar-row:selected .sidebar-row-label {
@@ -320,61 +352,50 @@ row.sidebar-row:selected .sidebar-row-label {
 }
 
 .sidebar-row-close {
-  min-width: 1.5em;
-  min-height: 1.5em;
-  border-radius: 0.45em;
-  color: @gm-muted;
+  min-width: 1.4em;
+  min-height: 1.4em;
+  border-radius: 0.25em;
+  color: @muted;
   opacity: 0;
-  transition: opacity 140ms ease-out, color 140ms ease-out,
-    background-color 140ms ease-out;
+  transition: opacity 120ms ease-out, color 120ms ease-out,
+    background-color 120ms ease-out;
 }
 
 row.sidebar-row:hover .sidebar-row-close {
-  opacity: 0.7;
+  opacity: 0.65;
 }
 
 .sidebar-row-close:hover {
   opacity: 1;
-  color: #ffffff;
-  background-color: @red;
+  color: @field;
+  background-color: @hangup;
 }
 
-/* Where a dragged project would land if it were dropped right now. Each row is
-   two drop targets - its top half and its bottom half - and which one the
-   pointer is in is not something the user can be asked to infer, so the line is
-   drawn on the edge it would actually insert at.
-
-   An inset shadow rather than a border: a border would add 2px to the row's
-   height the moment a drag crossed it, shoving every row below it down a line
-   mid-drag - so the list would squirm away from the pointer aiming at it. */
-row.sidebar-row.drop-above {
-  box-shadow: inset 0 2px 0 0 @accent;
-}
-
-row.sidebar-row.drop-below {
-  box-shadow: inset 0 -2px 0 0 @accent;
-}
-
-/* An agent in a group the user isn't watching rang the bell - it finished, or
+/* ── Attention ─────────────────────────────────────────────────────────────
+   An agent in a group the user isn't watching rang the bell - it finished, or
    it stopped to ask something (see Groups::flash_row).
 
-   Three slow pulses catch the eye if it happens to be on the sidebar, and then
-   a quiet amber keeps saying so until the group is opened, for the far more
-   likely case that it wasn't. A flash alone would be a notification you have
-   to be looking at to receive; the tint is what makes it survive a coffee
-   break.
+   Three slow pulses catch the eye if it happens to be on the rack, and then a
+   quiet amber keeps saying so until the group is opened, for the far more
+   likely case that it wasn't. A flash alone would be a notification you have to
+   be looking at to receive; the tint is what makes it survive a coffee break.
 
-   Amber, rather than the accent blue used everywhere else: a row glowing the
-   selection colour while not being selected reads as "this is the open one",
-   which is the one thing a row asking for attention definitely isn't. */
+   Amber rather than the filament white used for focus: a strip glowing the
+   focus colour while not being focused reads as "this is the open one", which
+   is the one thing a strip asking for attention definitely isn't. */
 @keyframes sidebar-attention {
-  from { background-color: alpha(@amber, 0); }
-  50%  { background-color: alpha(@amber, 0.22); }
-  to   { background-color: alpha(@amber, 0); }
+  from { background-color: alpha(@tally, 0); }
+  50%  { background-color: alpha(@tally, 0.2); }
+  to   { background-color: alpha(@tally, 0); }
 }
 
+/* The rail goes amber too, and this rule has to sit below the hue rails to do
+   it: it ties with them on specificity (one element and two classes either
+   way), so source order is the whole of the argument. A strip asking for you
+   stops saying which colour it is and says only that it wants you. */
 row.sidebar-row.needs-attention {
-  color: mix(@amber, @gm-text, 0.55);
+  color: mix(@tally, @text, 0.55);
+  box-shadow: inset 0.16em 0 0 0 @tally;
   animation-name: sidebar-attention;
   animation-duration: 900ms;
   animation-iteration-count: 3;
@@ -382,70 +403,99 @@ row.sidebar-row.needs-attention {
 }
 
 row.sidebar-row.needs-attention .sidebar-row-icon {
-  color: @amber;
+  color: @tally;
   opacity: 1;
 }
 
-/* The row above sets `color` and lets the label inherit it, which worked right
+/* The rule above sets `color` and lets the label inherit it, which worked right
    up until the label got a colour of its own: a rule that targets the label
    directly beats any colour it would have inherited, however specific the
    inherited one is. Without this the name would sit there in its project hue
    through the whole flash - the one moment it is not supposed to be saying
    "which project" but "this one needs you". */
 row.sidebar-row.needs-attention .sidebar-row-label {
-  color: mix(@amber, @gm-text, 0.55);
+  color: mix(@tally, @text, 0.55);
 }
 
-/* Fences the update button off from the rows above it: both are clickable
-   things in a vertical stack, and without the rule the button reads as one
-   more project - a strange one, at the bottom, that opens a dialog. */
+/* ── Drop targets ──────────────────────────────────────────────────────────
+   Where a dragged project would land if it were dropped right now. Each strip
+   is two drop targets - its top half and its bottom half - and which one the
+   pointer is in is not something the user can be asked to infer, so the line is
+   drawn on the edge it would actually insert at.
+
+   These take the strip's rail over for as long as the drag lasts, which is
+   right: mid-drag the question isn't which project this is, it's where the one
+   in your hand is going. That means out-ranking every other rule that writes
+   `box-shadow` on a strip - and this is last in the file precisely so it does.
+
+   The `:selected` half of each pair is not decoration. A lit strip's rail is
+   set by `row.sidebar-row.hue-N:selected`, which carries one more class than a
+   bare `.drop-above` does and would therefore win on specificity alone - so
+   without it the insertion line would be invisible on exactly one strip in the
+   rack: the project you currently have open, which is also the one you are most
+   likely to be dragging past. */
+row.sidebar-row.drop-above,
+row.sidebar-row.drop-above:selected {
+  box-shadow: inset 0 2px 0 0 @filament;
+}
+
+row.sidebar-row.drop-below,
+row.sidebar-row.drop-below:selected {
+  box-shadow: inset 0 -2px 0 0 @filament;
+}
+
+/* ── Footer ────────────────────────────────────────────────────────────────
+   Fences the update button off from the strips above it: both are clickable
+   things in a vertical stack, and without the rule the button reads as one more
+   project - a strange one, at the bottom, that opens a dialog. */
 .sidebar-footer {
   padding: 0.5em 0.4em 0.35em;
-  border-top: 1px solid @gm-line;
+  border-top: 1px solid @hairline;
 }
 
-/* Same padding and radius as a sidebar row: it sits in the same column, at the
-   same indent, and lining the two up is what stops the footer looking bolted
-   on. */
+/* Same padding, radius and monospace as a strip: it sits in the same column, at
+   the same indent, and lining the two up is what stops the footer looking
+   bolted on. No rail, though - it isn't a channel. */
 .sidebar-footer-button {
-  padding: 0.5em 0.7em;
-  border-radius: 0.6em;
-  color: @gm-dim;
-  font-size: 0.95em;
-  transition: background-color 140ms ease-out, color 140ms ease-out;
+  padding: 0.55em 0.7em;
+  border-radius: 0.25em;
+  color: @dim;
+  font-family: monospace;
+  font-size: 0.82em;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
 }
 
 .sidebar-footer-button:hover {
-  color: @gm-text;
-  background-color: alpha(@gm-text, 0.07);
+  color: @text;
+  background-color: alpha(@text, 0.06);
 }
 
 .sidebar-footer-icon {
-  color: @gm-muted;
+  color: @muted;
 }
 
 .sidebar-footer-button:hover .sidebar-footer-icon {
-  color: @accent;
+  color: @filament;
 }
 
-/* The same signal as the flashing row, carried out to where it can actually be
-   seen. The sidebar starts collapsed, so most of the time the row that lit up
-   is behind it - and a notification nobody can see isn't one. The hamburger is
-   what's on screen at that moment: it says "one of your projects wants you",
-   and the row behind it says which. It stays lit until the last flagged group
+/* The same signal as the flashing strip, carried out to where it can actually
+   be seen. The sidebar starts collapsed, so most of the time the strip that lit
+   up is behind it - and a notification nobody can see isn't one. The hamburger
+   is what's on screen at that moment: it says "one of your projects wants you",
+   and the strip behind it says which. It stays lit until the last flagged group
    has been looked at.
 
-   Brighter than the row's tint, because it's carrying the message alone, and
-   because it sits over pane content rather than the sidebar's flat backdrop. */
+   Brighter than the strip's tint, because it's carrying the message alone, and
+   because it sits over pane content rather than the rack's flat backdrop. */
 @keyframes hamburger-attention {
-  from { background-color: alpha(@gm-raised, 0.88); }
-  50%  { background-color: alpha(@amber, 0.85); }
-  to   { background-color: alpha(@gm-raised, 0.88); }
+  from { background-color: alpha(@chip, 0.9); }
+  50%  { background-color: alpha(@tally, 0.85); }
+  to   { background-color: alpha(@chip, 0.9); }
 }
 
 .add-pane.needs-attention {
-  color: @amber;
-  border-color: alpha(@amber, 0.5);
+  color: @tally;
+  border-color: alpha(@tally, 0.5);
   opacity: 1;
   animation-name: hamburger-attention;
   animation-duration: 900ms;
@@ -454,53 +504,54 @@ row.sidebar-row.needs-attention .sidebar-row-label {
 }
 
 .add-pane.needs-attention:hover {
-  color: @gm-surface;
-  background-color: @amber;
-  border-color: @amber;
+  color: @field;
+  background-color: @tally;
+  border-color: @tally;
 }
 
 /* The list only overflows once there are more projects open than fit, so the
    scrollbar is a rare visitor - and the theme's default arrives with its own
-   trough colour, which is a grey stripe glued to the sidebar's edge. Strip it
-   back to a slider that appears against the flat backdrop and goes away again. */
+   trough colour, which is a grey stripe glued to the rack's edge. Strip it back
+   to a slider that appears against the flat backdrop and goes away again. */
 .sidebar scrollbar {
   background-color: transparent;
   border: none;
 }
 
 .sidebar scrollbar slider {
-  min-width: 0.35em;
+  min-width: 0.3em;
   margin: 0.2em;
-  border-radius: 0.35em;
-  background-color: alpha(@gm-text, 0.12);
+  border-radius: 0.15em;
+  background-color: alpha(@text, 0.12);
 }
 
 .sidebar scrollbar slider:hover {
-  background-color: alpha(@gm-text, 0.22);
+  background-color: alpha(@text, 0.22);
 }
 
-/* Sits directly under the update button, saying what it's checking. Dimmer
-   and smaller than everything else in the sidebar - it's a fact to look up,
-   not a control, and it should read as a footnote to the button above it. */
+/* Sits directly under the update button, saying what it's checking. The
+   engraved plate at the bottom of the rack: smallest type in the app, in the
+   quietest colour, because it's a fact to look up rather than a control. */
 .sidebar-version {
-  padding: 0.15em 0.7em 0.15em;
-  font-size: 0.78em;
-  color: @gm-faint;
+  padding: 0.2em 0.7em;
+  font-family: monospace;
+  font-size: 0.72em;
+  letter-spacing: 0.06em;
+  color: @faint;
 }
 
-/* Selectable text draws a selection highlight; keep it in the sidebar's own
-   accent rather than the theme's default blue-on-white. */
+/* Selectable text draws a selection highlight; keep it in the app's own light
+   rather than the theme's default blue-on-white. */
 .sidebar-version selection {
-  background-color: alpha(@accent, 0.3);
+  background-color: alpha(@filament, 0.25);
   color: #ffffff;
 }
 
 /* Left on the button once a check has actually found something, so dismissing
-   the dialog with "Not now" doesn't also dismiss the fact. Same green the help
-   pane uses for its "getting started" steps. */
+   the dialog with "Not now" doesn't also dismiss the fact. */
 .sidebar-footer-button.update-available,
 .sidebar-footer-button.update-available .sidebar-footer-icon {
-  color: @green;
+  color: @fresh;
 }
 
 /* And pulsing, so it reads as news rather than as one more dim thing in the
@@ -509,20 +560,20 @@ row.sidebar-row.needs-attention .sidebar-row-label {
    that's usually shut.
 
    The pulse runs for as long as the update is pending, rather than the few
-   beats a flashing sidebar row gets, because unlike a row this button is never
-   on screen at the moment it starts: an available update always arrives with
-   the dialog on top of it, so a burst of three would play out behind that
-   dialog and be over before the button was ever looked at. What has to still
-   be moving is the button someone finds later, when they next open the
-   sidebar - which is the only time this animation costs anything to run, since
-   a collapsed sidebar's Revealer unmaps the footer and GTK stops ticking it.
+   beats a flashing strip gets, because unlike a strip this button is never on
+   screen at the moment it starts: an available update always arrives with the
+   dialog on top of it, so a burst of three would play out behind that dialog
+   and be over before the button was ever looked at. What has to still be moving
+   is the button someone finds later, when they next open the sidebar - which is
+   the only time this animation costs anything to run, since a collapsed
+   sidebar's Revealer unmaps the footer and GTK stops ticking it.
 
    Slow and shallow on purpose: it sits a few pixels from the project list the
    user is actually trying to read, and this is housekeeping, not an alarm. */
 @keyframes update-available-pulse {
-  from { background-color: alpha(@green, 0); }
-  50%  { background-color: alpha(@green, 0.26); }
-  to   { background-color: alpha(@green, 0); }
+  from { background-color: alpha(@fresh, 0); }
+  50%  { background-color: alpha(@fresh, 0.24); }
+  to   { background-color: alpha(@fresh, 0); }
 }
 
 .sidebar-footer-button.update-available {
@@ -537,11 +588,11 @@ row.sidebar-row.needs-attention .sidebar-row-label {
    animation would keep overpainting `background-color` - animations outrank
    plain declarations - and the hover state would flicker instead of landing. */
 .sidebar-footer-button.update-available:hover {
-  color: @gm-surface;
-  background-color: @green;
+  color: @field;
+  background-color: @fresh;
   animation-name: none;
 }
 
 .sidebar-footer-button.update-available:hover .sidebar-footer-icon {
-  color: @gm-surface;
+  color: @field;
 }

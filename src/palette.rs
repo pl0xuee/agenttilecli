@@ -1,6 +1,6 @@
 //! The one palette, read back out of the stylesheet that documents it.
 //!
-//! `style.css` declares the gunmetal ramp and the four semantic colours in a
+//! `style.css` declares the graphite ramp and the semantic colours in a
 //! `@define-color` block, and the chrome derives everything from those names.
 //! The terminal can't: VTE paints its own background, foreground, cursor,
 //! selection and 16-colour ANSI palette, none of which GTK CSS reaches. So
@@ -15,7 +15,7 @@
 //! explained - and this module parses the `@define-color` declarations out of
 //! the very same `include_str!` the CSS provider is handed, at the same names
 //! the CSS selectors use. Colours the terminal derives rather than shares (the
-//! selection tint, which is the accent mixed over whichever surface the pane is
+//! selection tint, which is @filament mixed over whichever surface the pane is
 //! currently painted in) are computed here too, so they follow the ramp on their
 //! own instead of needing to be recomputed by hand whenever it moves.
 //!
@@ -107,8 +107,8 @@ pub fn color(name: &str) -> Rgb {
         .unwrap_or_else(|| panic!("style.css defines no @define-color named {name:?}"))
 }
 
-/// How much accent goes into a selection. Low enough that selected text keeps
-/// its own colour and its syntax highlighting - which matters because
+/// How much of the light goes into a selection. Low enough that selected text
+/// keeps its own colour and its syntax highlighting - which matters because
 /// selecting is how you copy here (see `clipboard`), so it happens over real
 /// output rather than over a blank prompt.
 const SELECTION_TINT: f32 = 0.24;
@@ -119,7 +119,7 @@ const SELECTION_TINT: f32 = 0.24;
 /// selection tint that matched only one of them would be the same bug this
 /// module exists to prevent, one rung further down.
 pub fn selection(surface: Rgb) -> Rgb {
-    surface.mix(color("accent"), SELECTION_TINT)
+    surface.mix(color("filament"), SELECTION_TINT)
 }
 
 #[cfg(test)]
@@ -146,11 +146,11 @@ mod tests {
         // A spot check with a known value, so a parser that returned the right
         // *number* of wrong colours doesn't pass either.
         assert_eq!(
-            color("gm-surface"),
+            color("tile"),
             Rgb {
-                r: 0x20,
-                g: 0x24,
-                b: 0x28
+                r: 0x19,
+                g: 0x1e,
+                b: 0x24
             },
         );
     }
@@ -161,8 +161,8 @@ mod tests {
     /// intent; this holds it to somewhere between "visible" and "a new rung".
     #[test]
     fn the_focused_surface_is_a_visible_lift_but_not_a_new_rung() {
-        let base = color("gm-surface");
-        let lit = color("gm-surface-focus");
+        let base = color("tile");
+        let lit = color("tile-lit");
         for (a, b) in [(base.r, lit.r), (base.g, lit.g), (base.b, lit.b)] {
             let lift = b as i16 - a as i16;
             assert!(
@@ -178,19 +178,31 @@ mod tests {
     /// fixed hex mixed against a surface two releases old.
     #[test]
     fn the_selection_follows_the_surface_it_sits_on() {
-        let unfocused = selection(color("gm-surface"));
-        let focused = selection(color("gm-surface-focus"));
+        let surface = color("tile");
+        let unfocused = selection(surface);
+        let focused = selection(color("tile-lit"));
         assert_ne!(
             unfocused, focused,
             "the selection tint ignored the surface it was mixed over",
         );
-        // And it's a tint, not a fill: still much nearer the surface than the
-        // accent, or selected text stops being readable as text.
-        let accent = color("accent");
-        assert!(
-            unfocused.b < accent.b / 2,
-            "the selection tint has drifted toward a solid accent fill: {unfocused:?}",
-        );
+        // And it's a tint, not a fill: every channel still sits nearer the
+        // surface it's drawn on than the light it's mixed with, or selected
+        // text stops being readable as text. Stated per channel rather than on
+        // one of them, since @filament is a near-white - it has no channel that
+        // stands in for "how much light got mixed in" the way a saturated
+        // accent's would.
+        let filament = color("filament");
+        for (channel, from_surface, from_light) in [
+            ("r", unfocused.r.abs_diff(surface.r), unfocused.r.abs_diff(filament.r)),
+            ("g", unfocused.g.abs_diff(surface.g), unfocused.g.abs_diff(filament.g)),
+            ("b", unfocused.b.abs_diff(surface.b), unfocused.b.abs_diff(filament.b)),
+        ] {
+            assert!(
+                from_surface < from_light,
+                "the selection tint has drifted toward a solid fill of light \
+                 on {channel}: {unfocused:?} between {surface:?} and {filament:?}",
+            );
+        }
     }
 
     #[test]
@@ -209,7 +221,7 @@ mod tests {
     }
 
     /// `mix` has to agree with GTK's, since the same intent is written both
-    /// ways in this codebase - `alpha(@accent, ...)` in the stylesheet and
+    /// ways in this codebase - `alpha(@filament, ...)` in the stylesheet and
     /// `Rgb::mix` here.
     #[test]
     fn mixing_runs_from_the_receiver_toward_the_argument() {

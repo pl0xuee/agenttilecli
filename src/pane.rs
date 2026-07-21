@@ -66,43 +66,49 @@ pub(crate) fn folder_name(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
-/// A hex literal used by nothing but the terminal. The greys and the two hues
-/// the chrome also uses come from `palette` instead, so they can't drift from
-/// the stylesheet; these twelve exist in one place already.
+/// A hex literal used by nothing but the terminal. Every colour the chrome also
+/// uses comes from `palette` instead, so the two can't drift from each other;
+/// these exist in one place already.
 fn rgb(hex: &str) -> palette::Rgb {
     palette::Rgb::from_hex(hex).expect("valid hex colour")
 }
 
 /// The 16-colour ANSI palette for a pane painted in `surface`. Loosely "One
-/// Dark", so `ls --color` and git diffs still read well against the gunmetal.
+/// Dark", so `ls --color` and git diffs still read well against the graphite.
 ///
 /// Split out from `apply_theme` so it can be checked without a display - it's
 /// the only place the terminal-only hexes are written, and `rgb` panics on a
 /// malformed one.
 fn ansi_palette(surface: palette::Rgb) -> [palette::Rgb; 16] {
-    // ANSI 0 and 7 sit on the gunmetal ramp rather than being literal black
+    // ANSI 0 and 7 sit on the graphite ramp rather than being literal black
     // and white: programs paint "black" backgrounds and "white" text far more
     // often than they mean the actual colours, so anything else leaves
     // rectangles of a foreign grey in the middle of the pane. 0 tracks the
     // surface itself, which is why it's a parameter - it has to keep matching
     // when the pane lightens under focus.
+    //
+    // Red, green and yellow are the app's own three signals rather than three
+    // more literals, because the terminal means the same things by them that
+    // the chrome does: red is something breaking, green is something landing,
+    // yellow is something asking. A palette that said them in slightly
+    // different hues inside the pane than outside it would be two palettes.
     [
-        surface,                       // black - the surface itself
-        rgb("#e06b6b"),                // red
-        rgb("#92c47f"),                // green
-        palette::color("amber"),       // yellow - the amber the sidebar flashes in
-        palette::color("accent"),      // blue - the accent used through the chrome
-        rgb("#bf93d6"),                // magenta
-        rgb("#63bcbb"),                // cyan
-        rgb("#d1d6da"),                // white
-        palette::color("gm-faint"),    // bright black - the footnote grey
-        rgb("#ef8a8a"),                // bright red
-        rgb("#a8d795"),                // bright green
-        rgb("#ecc07a"),                // bright yellow
-        rgb("#8cc8ec"),                // bright blue
-        rgb("#d3ade4"),                // bright magenta
-        rgb("#82d0cf"),                // bright cyan
-        rgb("#f5f7f9"),                // bright white
+        surface,                    // black - the surface itself
+        palette::color("hangup"),   // red - the red the chrome destroys in
+        palette::color("fresh"),    // green - the green news arrives in
+        palette::color("tally"),    // yellow - the amber an agent calls in
+        rgb("#74b8ea"),             // blue
+        rgb("#bf93d6"),             // magenta
+        rgb("#5cc4c0"),             // cyan
+        rgb("#d6dde3"),             // white
+        palette::color("faint"),    // bright black - the footnote grey
+        rgb("#ef8a8a"),             // bright red
+        rgb("#a8d795"),             // bright green
+        rgb("#ecc07a"),             // bright yellow
+        rgb("#96cbf0"),             // bright blue
+        rgb("#d3ade4"),             // bright magenta
+        rgb("#82d0cf"),             // bright cyan
+        rgb("#f4f7fa"),             // bright white
     ]
 }
 
@@ -130,15 +136,14 @@ fn theme(focused: bool) -> Theme {
     // surface rather than a terminal of one shade sitting in a frame of
     // another - the seam is visible at any size, and it's the thing that makes
     // a tiling app look assembled rather than designed.
-    let background = palette::color(if focused {
-        "gm-surface-focus"
-    } else {
-        "gm-surface"
-    });
+    let background = palette::color(if focused { "tile-lit" } else { "tile" });
     Theme {
-        foreground: palette::color("gm-text"),
+        foreground: palette::color("text"),
         background,
-        cursor: palette::color("accent"),
+        // The same warm light the focused tile is edged in. A cursor is the
+        // smallest possible statement of "the keyboard is here", which is the
+        // one thing @filament is for.
+        cursor: palette::color("filament"),
         selection: palette::selection(background),
         ansi: ansi_palette(background),
     }
@@ -242,12 +247,15 @@ mod theme_tests {
     }
 }
 
+/// The help pane speaks in two colours and no more, which is the same rule the
+/// chrome follows: white for the things you press, amber for the signposts
+/// between them, and everything else in the terminal's own foreground or dimmed
+/// out of the way. A cheatsheet painted in five colours is a cheatsheet where
+/// none of them mean anything.
 const RESET: &str = "\x1b[0m";
 const DIM: &str = "\x1b[2m";
-const BOLD_CYAN: &str = "\x1b[1;36m";
 const BOLD_YELLOW: &str = "\x1b[1;33m";
 const BOLD_WHITE: &str = "\x1b[1;37m";
-const BOLD_GREEN: &str = "\x1b[1;32m";
 
 fn sgr(code: &str, s: &str) -> String {
     format!("{code}{s}{RESET}")
@@ -313,7 +321,7 @@ fn side_by_side(left: &str, right: &str, gap: usize) -> String {
 
 /// A numbered "1. do the thing" step, indented to sit under its heading.
 fn step(n: usize, text: &str) -> String {
-    format!("  {} {}", sgr(BOLD_GREEN, &format!("{n}.")), text)
+    format!("  {} {}", sgr(BOLD_WHITE, &format!("{n}.")), text)
 }
 
 /// Blank-pads `block` out to `height` lines. Used to make the first section
@@ -336,17 +344,24 @@ fn bullet(text: &str) -> String {
 }
 
 fn help_text() -> String {
-    let title = " AgentTileCLI \u{2014} dynamic tiling window manager for AI CLI sessions ";
-    let box_width = title.chars().count();
-    let top = format!("\u{256d}{}\u{256e}", "\u{2500}".repeat(box_width));
-    let mid = format!("\u{2502}{}\u{2502}", sgr(BOLD_CYAN, title));
-    let bottom = format!("\u{2570}{}\u{256f}", "\u{2500}".repeat(box_width));
+    // A nameplate rather than a drawn box. There isn't a rounded frame left
+    // anywhere in this app's chrome, and a box around the title is a second,
+    // softer shape saying nothing the rule doesn't already say. The letters are
+    // opened up with spaces for the same reason the sidebar's own labels are
+    // letter-spaced in CSS: at this size it reads as engraved rather than
+    // typed, and it makes the one line of branding in the app look deliberate.
+    let nameplate = format!(
+        "  {name}  {rule}  {tagline}",
+        name = sgr(BOLD_WHITE, "A G E N T T I L E C L I"),
+        rule = sgr(DIM, &"\u{2500}".repeat(40)),
+        tagline = sgr(DIM, "dynamic tiling for AI CLI sessions"),
+    );
 
     // Numbered steps rather than a wrapped paragraph: the reader wants to
     // know what to press first, not to read prose.
     let getting_started = format!(
         "  {header}\r\n\r\n{s1}\r\n{s2}\r\n{s3}\r\n\r\n{after}",
-        header = sgr(BOLD_GREEN, "\u{25b6} GETTING STARTED"),
+        header = sgr(BOLD_YELLOW, "\u{25b8} GETTING STARTED"),
         s1 = step(
             1,
             &format!(
@@ -470,8 +485,14 @@ fn help_text() -> String {
     ]
     .join("\r\n");
 
+    // Two blank rows before anything is printed. The sidebar-toggle button
+    // floats over the top-left corner of whichever pane is there, and the help
+    // pane is the one pane whose first line is content rather than a prompt -
+    // so without them the ☰ sits on top of the nameplate. Two rows because the
+    // button is sized in `em` against the same font the terminal is scaled by,
+    // which keeps it about a line and a half tall at every text size.
     format!(
-        "{top}\r\n{mid}\r\n{bottom}\r\n\r\n\
+        "\r\n\r\n{nameplate}\r\n\r\n\
          {getting_started}\r\n\r\n\
          {modifier}\r\n\r\n\
          {keys}\r\n\
