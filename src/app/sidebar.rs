@@ -222,6 +222,10 @@ impl App {
                 }
             }
         });
+        // Once, at the end, rather than on every motion event the debounce would
+        // have to swallow anyway.
+        let this = self.clone();
+        drag.connect_drag_end(move |_, _, _| this.schedule_save());
         grip.add_controller(drag);
         grip
     }

@@ -99,6 +99,14 @@ you want to nudge it.
   on `Super+Alt+/` or from the menu. It's generated from the same table the
   app matches keypresses against, so it can't drift out of date, and it costs
   you no pane to read.
+- **It reopens where you left it** — quit and relaunch and your projects come
+  back, in the order you had them, with the layout mode and master ratio each
+  one was using, at the window size and sidebar width you last set. Written to
+  `$XDG_STATE_HOME/agenttilecli/session.json` a moment after anything changes,
+  so a crash costs at most the last second or two. Agents are deliberately
+  *not* restarted: an agent is a process with a token budget attached, and "I
+  quit with four running" is not the same thing as "start four now" — each
+  project reopens with its layout and an empty state telling you what to press.
 - **Adjustable text size** — enlarge or shrink every pane's terminal text
   together, independent of pane layout.
 

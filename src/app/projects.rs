@@ -108,6 +108,7 @@ impl App {
             if app.0.store.borrow().active() == Some(id) {
                 app.sync_mode_buttons(mode);
             }
+            app.schedule_save();
         });
 
         let weak = Rc::downgrade(&self.0);
@@ -123,6 +124,7 @@ impl App {
                 project.master_count = state.master_count;
                 project.focus = state.focus;
             }
+            App(inner).schedule_save();
         });
 
         let (row, count) = self.build_row(id);
@@ -136,6 +138,7 @@ impl App {
         self.0.list.append(&row);
         self.0.list.select_row(Some(&row));
         self.show_project(id);
+        self.schedule_save();
         tiler
     }
 
@@ -207,6 +210,7 @@ impl App {
         if let Some(fallback) = fallback {
             self.select(fallback);
         }
+        self.schedule_save();
     }
 
     /// Hands an agent's report to whichever project owns the pane that sent it.
@@ -252,6 +256,7 @@ impl App {
         if self.0.split.is_collapsed() {
             self.0.split.set_show_sidebar(false);
         }
+        self.schedule_save();
     }
 
     /// Selects a row, which switches the stack through `connect_row_selected`.

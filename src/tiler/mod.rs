@@ -296,6 +296,20 @@ impl Tiler {
         }
     }
 
+    /// Puts a group back the way a previous run left it.
+    ///
+    /// Writes the cells directly rather than going through `set_mode` and the
+    /// increment methods, because each of those reports outward - and a restore
+    /// is not news. Replaying a saved layout as a series of user actions would
+    /// mark the session dirty and schedule a save of the thing just loaded.
+    pub fn restore_layout(&self, mode: Mode, state: LayoutState) {
+        let lm = self.layout_mgr();
+        lm.imp().mode.set(mode);
+        lm.imp().master_ratio.set(state.master_ratio.clamp(0.1, 0.9));
+        lm.imp().master_count.set(state.master_count.max(1));
+        self.queue_allocate();
+    }
+
     /// Registers a callback invoked whenever the master ratio, master count or
     /// focus changes - by keybinding or by dragging the master seam.
     pub fn set_layout_callback(&self, f: impl Fn(LayoutState) + 'static) {

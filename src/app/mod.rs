@@ -34,7 +34,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk4::gdk;
+use gtk4::{gdk, glib};
 
 use crate::layout::Mode;
 use crate::model::{ProjectId, ProjectStore};
@@ -85,6 +85,11 @@ const FONT_SCALE_MAX: f64 = 3.0;
 /// defaults to a quarter, which on a wide window is a great deal of room for a
 /// column of folder names.
 const SIDEBAR_DEFAULT_FRACTION: f64 = 0.17;
+
+/// How long a burst of changes is allowed to run before the session is written.
+/// Long enough that a drag or a resize is one save rather than hundreds, short
+/// enough that a window killed rather than closed loses almost nothing.
+const SAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(1500);
 
 /// Below this width the sidebar stops taking space from the panes and overlays
 /// them instead. Four panes in a grid beside a 16.5em rack is already tight;
@@ -142,6 +147,10 @@ struct Inner {
     /// Phase 3's config file is where this stops being per-run memory.
     last_agent_count: Cell<usize>,
     font_scale: Cell<f64>,
+    /// Whether a session save is already waiting to happen, so a burst of
+    /// changes - dragging a seam produces one per motion event - costs one
+    /// write rather than one per event.
+    save_queued: Cell<bool>,
     /// "AgentTileCLI", plus a branch marker on builds that aren't off master.
     base_title: String,
     /// Holds just the one dynamic `window { font-size: ... }` rule that drives
@@ -163,6 +172,8 @@ impl App {
     /// whatever directory the app happened to be launched from is a surprise,
     /// and the empty state is where the app explains itself instead.
     pub fn new(application: &adw::Application, cwd: &str, title: &str) -> Self {
+        let saved = crate::session::Session::load();
+
         let stack = gtk4::Stack::builder()
             .transition_type(gtk4::StackTransitionType::None)
             .hexpand(true)
@@ -179,8 +190,12 @@ impl App {
         // than those need - width the panes have a better use for. The grip is
         // there for a project whose name wants more.
         let split = adw::OverlaySplitView::builder()
-            .show_sidebar(false)
-            .sidebar_width_fraction(SIDEBAR_DEFAULT_FRACTION)
+            .show_sidebar(saved.window.sidebar_shown)
+            .sidebar_width_fraction(if saved.window.sidebar_fraction > 0.0 {
+                saved.window.sidebar_fraction
+            } else {
+                SIDEBAR_DEFAULT_FRACTION
+            })
             .min_sidebar_width(sidebar::SIDEBAR_MIN_PX)
             .max_sidebar_width(sidebar::SIDEBAR_MAX_PX)
             .build();
@@ -189,12 +204,13 @@ impl App {
         let window = adw::ApplicationWindow::builder()
             .application(application)
             .title(title)
-            // A clean 16:10 aspect ratio (1488 / 930 = 1.6 exactly). This is
-            // just the starting size - the app never resizes itself afterward
-            // (adding panes tiles them smaller within whatever size the window
-            // already is instead), so the user's own resize is the last word.
-            .default_width(1488)
-            .default_height(930)
+            // Whatever size the last run was left at, defaulting to a clean
+            // 16:10 (1488 / 930 = 1.6 exactly). Only ever a *starting* size: the
+            // app never resizes itself afterward - adding panes tiles them
+            // smaller within whatever size the window already is - so the user's
+            // own resize is always the last word.
+            .default_width(saved.window.width)
+            .default_height(saved.window.height)
             .content(&toasts)
             .build();
 
@@ -236,6 +252,7 @@ impl App {
             last_dir: RefCell::new(cwd.to_string()),
             last_agent_count: Cell::new(1),
             font_scale: Cell::new(1.0),
+            save_queued: Cell::new(false),
             base_title: title.to_string(),
             css_provider,
         }));
@@ -255,7 +272,15 @@ impl App {
         this.install_breakpoint();
         this.wire_signals();
 
-        this.add_project(cwd, "Getting Started".to_string(), "help-about-symbolic");
+        if saved.projects.is_empty() {
+            this.add_project(cwd, "Getting Started".to_string(), "help-about-symbolic");
+        } else {
+            this.restore_session(&saved);
+        }
+        if saved.font_scale > 0.0 {
+            this.set_font_scale(saved.font_scale);
+        }
+        this.save_on_close();
         if std::env::var_os("ATC_SCREENSHOT").is_some() {
             this.0.split.set_show_sidebar(true);
             let tiler = this.add_project(cwd, "agenttilecli".to_string(), "folder-symbolic");
@@ -350,6 +375,117 @@ impl App {
     }
 
 
+    // ── Session ──────────────────────────────────────────────────────────
+
+    /// Reopens the projects a previous run left, in the order it left them.
+    ///
+    /// Without their agents. A project comes back with its layout and an empty
+    /// state telling you what to press, because "I quit with four agents
+    /// running" is not the same statement as "start four agents now" - an agent
+    /// is a process with a token budget attached, and starting one nobody asked
+    /// for is the single thing this app must not do by itself.
+    fn restore_session(&self, saved: &crate::session::Session) {
+        // Ids collected as they are handed out, rather than looked up
+        // afterwards. Two projects can perfectly well share a path - the
+        // first-run project is named for what it holds and opens on whatever
+        // directory the app was launched from, which is very often a directory
+        // the user then opens as a project of its own - so a path is not a key,
+        // and matching on one selected the wrong row.
+        let mut restored = Vec::new();
+        for project in &saved.projects {
+            let tiler = self.add_project(&project.path, project.name.clone(), &project.icon);
+            tiler.restore_layout(
+                project.mode,
+                crate::tiler::LayoutState {
+                    master_ratio: project.master_ratio,
+                    master_count: project.master_count,
+                    focus: 0,
+                },
+            );
+            restored.push(self.0.store.borrow().active());
+        }
+
+        // Selecting it is what makes it visible, and it repaints the header bar
+        // from the restored mode on the way.
+        let active = saved
+            .projects
+            .iter()
+            .position(|p| p.active)
+            .and_then(|i| restored.get(i).copied().flatten())
+            .or_else(|| restored.first().copied().flatten());
+        if let Some(id) = active {
+            self.select(id);
+        }
+    }
+
+    /// What this window would hand to the next one.
+    fn snapshot_session(&self) -> crate::session::Session {
+        let store = self.0.store.borrow();
+        let views = self.0.views.borrow();
+        let active = store.active();
+
+        let projects = store
+            .iter()
+            .map(|project| crate::session::Project {
+                path: project.path.clone(),
+                name: project.name.clone(),
+                icon: project.icon.clone(),
+                mode: project.mode,
+                master_ratio: project.master_ratio,
+                master_count: project.master_count,
+                agents: views
+                    .iter()
+                    .find(|v| v.id == project.id)
+                    .map_or(0, |v| v.tiler.pane_count()),
+                active: active == Some(project.id),
+            })
+            .collect();
+
+        crate::session::Session {
+            window: crate::session::Window {
+                width: self.0.window.default_width(),
+                height: self.0.window.default_height(),
+                sidebar_fraction: self.0.split.sidebar_width_fraction(),
+                sidebar_shown: self.0.split.shows_sidebar(),
+            },
+            font_scale: self.0.font_scale.get(),
+            projects,
+        }
+    }
+
+    /// Writes the session shortly, and only once however many times this is
+    /// called in the meantime.
+    ///
+    /// Debounced because the things worth saving change in bursts: dragging a
+    /// seam reports on every motion event, and resizing a window reports on
+    /// every frame. Saving on each would put a file write in the middle of a
+    /// drag, which is the one place it would be felt.
+    pub(super) fn schedule_save(&self) {
+        if self.0.save_queued.replace(true) {
+            return;
+        }
+        let weak = Rc::downgrade(&self.0);
+        glib::timeout_add_local_once(SAVE_DEBOUNCE, move || {
+            let Some(inner) = weak.upgrade() else { return };
+            let app = App(inner);
+            app.0.save_queued.set(false);
+            let _ = app.snapshot_session().save();
+        });
+    }
+
+    /// The last save, taken while there is still a window to ask.
+    ///
+    /// `close_request` rather than a destroy handler: by the time a window is
+    /// destroyed its size is gone, and a session that remembered every project
+    /// but forgot how big the window was would be the one thing people notice.
+    fn save_on_close(&self) {
+        let this = self.clone();
+        self.0.window.connect_close_request(move |_| {
+            let _ = this.snapshot_session().save();
+            glib::Propagation::Proceed
+        });
+    }
+
     // ── Projects ─────────────────────────────────────────────────────────
 
 
@@ -403,6 +539,7 @@ impl App {
     /// Global rather than per-project, so switching projects never shows a
     /// different zoom level.
     fn set_font_scale(&self, scale: f64) {
+        self.schedule_save();
         self.0.font_scale.set(scale);
         for view in self.0.views.borrow().iter() {
             view.tiler.set_font_scale(scale);
