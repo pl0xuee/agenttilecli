@@ -14,7 +14,10 @@ you want to nudge it.
   Toggle the sidebar with the button at the left of the header bar or
   `Super+Alt+g`, click a row to switch groups, and background groups keep
   their agents running while hidden. Drag a row to reorder it (or
-  `Super+Alt+{` / `}`). Closing a group's row (✕) hangs up every agent in
+  `Super+Alt+{` / `}`), and each row carries a tally of how many agents that
+  project is running — the one thing you can't see about a project you aren't
+  looking at. Drag the seam on the sidebar's right edge to make it wider or
+  narrower. Closing a group's row (✕) hangs up every agent in
   it; the **+** button in the header bar (or `Super+Alt+Return`) opens a new
   project as a new group via a native folder picker, and starts it with as
   many agents as the project you were last working in had running — pick the
@@ -74,13 +77,15 @@ you want to nudge it.
   `Ctrl+C` only copies when there's a selection — with nothing selected it stays
   the interrupt that stops a running agent, so clear the selection (one click)
   if a stale one is in the way.
-- **One-click updates** — **Check for updates**, at the bottom of the sidebar
-  (or `Super+Alt+u`), checks `origin/master` for a newer version, shows you
-  what's new, and can pull and reinstall it for you in a pane so you can watch
-  the build. It only touches your clone if it's a clean checkout of `master` —
-  a dev branch, local commits, or uncommitted changes get reported, never
-  overwritten. The version and commit you're actually running sit right
-  beneath the button.
+- **One-click updates** — **Check for Updates**, in the app menu (or
+  `Super+Alt+u`), checks `origin/master` for a newer version, shows you what's
+  new, and can pull and reinstall it for you in a pane so you can watch the
+  build. It only touches your clone if it's a clean checkout of `master` — a
+  dev branch, local commits, or uncommitted changes get reported, never
+  overwritten. If a check finds something, the menu button stays tinted green
+  and the item renames itself, so dismissing the dialog with "Not now" doesn't
+  also dismiss the fact. The version and commit you're actually running sit at
+  the bottom of the sidebar.
 - **Keyboard shortcuts, in a dialog** — every binding, drawn as real key caps,
   on `Super+Alt+/` or from the menu. It's generated from the same table the
   app matches keypresses against, so it can't drift out of date, and it costs

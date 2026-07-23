@@ -394,8 +394,8 @@ window {
 
 /* The strip itself. The left padding is wide because the rail lives in it. */
 row.sidebar-row {
-  padding: 0.55em 0.7em 0.55em 0.85em;
-  margin: 0.08em 0;
+  padding: 0.85em 0.7em 0.85em 0.9em;
+  margin: 0.14em 0;
   border-radius: 0.25em;
   color: @dim;
   transition: background-color 120ms ease-out, color 120ms ease-out,
@@ -437,7 +437,7 @@ row.sidebar-row:selected:hover {
    shape you can recognise instead of a line you have to parse. */
 .sidebar-row-label {
   font-family: monospace;
-  font-size: 0.88em;
+  font-size: 1.02em;
   font-weight: bold;
   letter-spacing: 0.01em;
 }
@@ -560,6 +560,33 @@ row.sidebar-row.needs-attention .sidebar-row-label {
   color: mix(@tally, @text, 0.55);
 }
 
+/* How many agents this project is running. A tally, not a badge: no pill, no
+   fill, no colour of its own - it sits in the same monospace the rest of the
+   rack is engraved in and reads as a number stamped on the strip.
+
+   It is the answer to the only question you can't ask a project you aren't
+   looking at, which is why it earns room on a row that already carries an icon,
+   a name and a close button. Quiet enough that a rack of them scans as a column
+   of numbers rather than as five things demanding attention. */
+.sidebar-row-count {
+  min-width: 1.2em;
+  color: @faint;
+  font-family: monospace;
+  font-size: 0.9em;
+}
+
+/* The open project's own tally lifts with the rest of its strip. */
+row.sidebar-row:selected .sidebar-row-count {
+  color: @muted;
+}
+
+/* A project calling for you says so with its number too - it is the row's one
+   piece of live information, and leaving it grey while everything around it
+   goes amber reads as a number that stopped updating. */
+row.sidebar-row.needs-attention .sidebar-row-count {
+  color: @tally;
+}
+
 /* ── Drop targets ──────────────────────────────────────────────────────────
    Where a dragged project would land if it were dropped right now. Each strip
    is two drop targets - its top half and its bottom half - and which one the
@@ -627,6 +654,26 @@ row.sidebar-row.drop-below:selected {
   color: @field;
   background-color: @tally;
   animation-name: none;
+}
+
+/* ── The rack's edge ───────────────────────────────────────────────────────
+   The seam between the rack and the panes, and the thing you drag to move it.
+
+   A seam rather than a control: one hairline at rest, exactly like the border
+   the sidebar used to draw there, so nothing new appears in the chrome for a
+   capability that only matters at the moment you reach for it. The pointer
+   turning into a resize cursor over it is the whole of the affordance, which is
+   the same bargain the seams between panes already make.
+
+   It warms under the pointer rather than lighting up: @filament is focus, and a
+   seam you are merely hovering has not been given focus. */
+.sidebar-grip {
+  background-color: @hairline;
+  transition: background-color 120ms ease-out;
+}
+
+.sidebar-grip:hover {
+  background-color: alpha(@filament, 0.35);
 }
 
 /* The list only overflows once there are more projects open than fit, so the

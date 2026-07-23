@@ -83,6 +83,38 @@ const FONT_SCALE_STEP: f64 = 1.05;
 const FONT_SCALE_MIN: f64 = 0.5;
 const FONT_SCALE_MAX: f64 = 3.0;
 
+/// The rack's resize grip: how wide the hit area is, and how far the drag is
+/// allowed to take it. The grip is deliberately narrow - it is a seam, not a
+/// control, and the pointer changing shape over it is what advertises it - but
+/// not so narrow that it takes aim to catch.
+///
+/// The bounds are pixels because that is what the user is dragging, and they
+/// replace the fixed 220-320 the split view was pinned to: project names are the
+/// one thing here whose length isn't the app's to choose.
+const SIDEBAR_GRIP_PX: i32 = 5;
+const SIDEBAR_MIN_PX: f64 = 170.0;
+const SIDEBAR_MAX_PX: f64 = 560.0;
+
+/// What share of a `total`-wide split view the rack should take, given the width
+/// it had when the drag started and how far the pointer has moved since.
+///
+/// `None` when there is no width to divide - a split view that hasn't been
+/// allocated yet reports zero, and dividing by it would hand the property a NaN
+/// that GTK carries silently into a rack of no width at all.
+///
+/// Two clamps, and both are load-bearing. The pixel one is the range a person
+/// dragging expects to be held to. The fraction one is what stops that range
+/// being nonsense on a window narrower than the range itself - 560px of rack in
+/// a 700px window is not a sidebar, it is the whole application - and the panes
+/// are what this is supposed to be sharing with.
+fn sidebar_fraction(start_width: f64, offset_x: f64, total: f64) -> Option<f64> {
+    if total <= 0.0 {
+        return None;
+    }
+    let wanted = (start_width + offset_x).clamp(SIDEBAR_MIN_PX, SIDEBAR_MAX_PX);
+    Some((wanted / total).clamp(0.1, 0.5))
+}
+
 /// Below this width the sidebar stops taking space from the panes and overlays
 /// them instead. Four panes in a grid beside a 16.5em rack is already tight;
 /// much under this and the rack is winning an argument it shouldn't be in.
@@ -112,6 +144,8 @@ struct ProjectView {
     id: ProjectId,
     tiler: Tiler,
     row: gtk4::ListBoxRow,
+    /// How many agents this project is running, shown on its sidebar row.
+    count: gtk4::Label,
     /// Switches between the tiler and the empty state. A project with no panes
     /// used to be impossible (the app opened straight into a help pane), and
     /// now it's the *first* thing a new user sees - so it has to say what to do
@@ -181,10 +215,13 @@ impl App {
             .build();
 
         let toasts = adw::ToastOverlay::new();
+        // The bounds match the grip's, so the split view never clamps a drag
+        // back to somewhere the grip was willing to go - two clamps disagreeing
+        // reads as a rack that refuses to move for no stated reason.
         let split = adw::OverlaySplitView::builder()
             .show_sidebar(false)
-            .min_sidebar_width(220.0)
-            .max_sidebar_width(320.0)
+            .min_sidebar_width(SIDEBAR_MIN_PX)
+            .max_sidebar_width(SIDEBAR_MAX_PX)
             .build();
         toasts.set_child(Some(&split));
 
@@ -277,7 +314,7 @@ impl App {
     // ── Construction ─────────────────────────────────────────────────────
 
     /// The rack: a header, the project rows, and the version beneath them.
-    fn build_sidebar(&self) -> adw::ToolbarView {
+    fn build_sidebar(&self) -> gtk4::Box {
         let header_label = gtk4::Label::builder()
             .label("Projects")
             .css_classes(["sidebar-header-label"])
@@ -336,10 +373,67 @@ impl App {
         let view = adw::ToolbarView::builder()
             .css_classes(["sidebar"])
             .content(&scrolled)
+            .hexpand(true)
             .build();
         view.add_top_bar(&header);
         view.add_bottom_bar(&footer);
-        view
+
+        // The rack and the grip that widens it, side by side, so the split view
+        // gets one widget and the grip lands on the rack's trailing edge.
+        let rack = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .build();
+        rack.append(&view);
+        rack.append(&self.build_sidebar_grip(&view));
+        rack
+    }
+
+    /// The strip you drag to make the rack wider or narrower.
+    ///
+    /// `AdwOverlaySplitView` sizes its sidebar from a fraction of its own width
+    /// and offers no handle for changing it, so this is a handle: a few pixels
+    /// of hit area on the rack's trailing edge that writes that fraction as it
+    /// moves. The fraction, not a width, because the fraction is what the split
+    /// view actually honours - and because a rack set as a share of the window
+    /// keeps its proportions when the window is resized rather than eating an
+    /// ever-larger part of a shrinking one.
+    ///
+    /// Project names are the one thing in this app whose length isn't the app's
+    /// to choose, which is what makes a fixed rack width the wrong call however
+    /// carefully it's picked.
+    fn build_sidebar_grip(&self, rack: &adw::ToolbarView) -> gtk4::Box {
+        let grip = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .width_request(SIDEBAR_GRIP_PX)
+            .css_classes(["sidebar-grip"])
+            .tooltip_text("Drag to resize the sidebar")
+            .build();
+        // The pointer has to say this is draggable before it's dragged - a grip
+        // this thin is invisible until the cursor changes over it.
+        grip.set_cursor_from_name(Some("col-resize"));
+
+        // Where the rack started, captured once at drag-begin: GestureDrag
+        // reports offsets from the press point, so applying them to a width read
+        // live would compound every motion event into a runaway.
+        let start_width = Rc::new(Cell::new(0.0));
+
+        let drag = gtk4::GestureDrag::new();
+        let rack_at_begin = rack.clone();
+        let start = start_width.clone();
+        drag.connect_drag_begin(move |_, _, _| {
+            start.set(f64::from(rack_at_begin.width()));
+        });
+
+        let split = self.0.split.clone();
+        let start = start_width.clone();
+        drag.connect_drag_update(move |_, offset_x, _| {
+            let total = f64::from(split.width());
+            if let Some(fraction) = sidebar_fraction(start.get(), offset_x, total) {
+                split.set_sidebar_width_fraction(fraction);
+            }
+        });
+        grip.add_controller(drag);
+        grip
     }
 
     /// The working half: a header bar that reports where you are and how the
@@ -575,6 +669,7 @@ impl App {
             // over the group you are actually looking at.
             if let Some(inner) = weak.upgrade() {
                 let app = App(inner);
+                app.sync_row_count(id, count);
                 if app.0.store.borrow().active() == Some(id) {
                     app.sync_mode_sensitivity(count);
                     // What the next project gets opened with - see
@@ -649,11 +744,12 @@ impl App {
             }
         });
 
-        let row = self.build_row(id);
+        let (row, count) = self.build_row(id);
         self.0.views.borrow_mut().push(ProjectView {
             id,
             tiler: tiler.clone(),
             row: row.clone(),
+            count,
             view: project_view,
         });
         self.0.list.append(&row);
@@ -719,12 +815,12 @@ impl App {
     /// would have had to remember to touch both. The store is the only place a
     /// project's name, hue and icon are written, so it is the only place they
     /// are read.
-    fn build_row(&self, id: ProjectId) -> gtk4::ListBoxRow {
+    fn build_row(&self, id: ProjectId) -> (gtk4::ListBoxRow, gtk4::Label) {
         let store = self.0.store.borrow();
         let Some(project) = store.get(id) else {
             // Unreachable: the caller adds the project before building its row.
             // A blank row beats a panic in a UI callback either way.
-            return gtk4::ListBoxRow::new();
+            return (gtk4::ListBoxRow::new(), gtk4::Label::new(None));
         };
         let name = project.name.clone();
         let hue = project.hue.clone();
@@ -740,6 +836,18 @@ impl App {
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .css_classes(["sidebar-row-label"])
             .build();
+        // How many agents this project has running. The rack's whole premise is
+        // that a project you aren't looking at keeps working, and until now a
+        // row said nothing about how much was going on behind it - the one
+        // question you'd actually ask of a project you can't see. Blank at zero
+        // rather than "0": a project with nothing running is what the empty
+        // state already says at length the moment you open it, and a column of
+        // zeroes is noise on every other row to say it again.
+        let count = gtk4::Label::builder()
+            .halign(gtk4::Align::End)
+            .css_classes(["sidebar-row-count"])
+            .build();
+
         let close = gtk4::Button::builder()
             .icon_name("window-close-symbolic")
             .css_classes(["flat", "circular", "sidebar-row-close"])
@@ -755,6 +863,7 @@ impl App {
             .build();
         content.append(&row_icon);
         content.append(&label);
+        content.append(&count);
         content.append(&close);
 
         let row = gtk4::ListBoxRow::builder().child(&content).build();
@@ -765,7 +874,7 @@ impl App {
             "{name}\nDrag to reorder (or Super+Alt+Shift+[ / ])"
         )));
         self.install_reorder(&row, id);
-        row
+        (row, count)
     }
 
     /// Makes `row` draggable onto its neighbours, so the sidebar's project order
@@ -1087,6 +1196,25 @@ impl App {
         self.0.syncing_mode.set(false);
     }
 
+    /// Writes `count` onto a project's sidebar row.
+    ///
+    /// Blank at zero rather than "0" - see `build_row`. The row is looked up by
+    /// id rather than captured, because the pane-count callback is registered
+    /// before the row it writes to exists; the very first call finds nothing and
+    /// does nothing, which is correct, since a project with no panes yet has
+    /// nothing to report.
+    fn sync_row_count(&self, id: ProjectId, count: usize) {
+        let views = self.0.views.borrow();
+        let Some(view) = views.iter().find(|v| v.id == id) else {
+            return;
+        };
+        view.count.set_label(&if count == 0 {
+            String::new()
+        } else {
+            count.to_string()
+        });
+    }
+
     /// Dims the mode toggles for a project with no panes.
     ///
     /// A layout mode is an answer to "how should these be arranged", and with
@@ -1166,4 +1294,41 @@ fn set_class(widget: &impl IsA<gtk4::Widget>, class: &str, on: bool) {
 fn clear_drop_classes(row: &gtk4::ListBoxRow) {
     row.remove_css_class(DROP_ABOVE_CLASS);
     row.remove_css_class(DROP_BELOW_CLASS);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The rack follows the pointer between its bounds, and stops at them.
+    #[test]
+    fn dragging_the_rack_edge_stays_inside_its_bounds() {
+        let total = 1488.0;
+        let frac = |offset| sidebar_fraction(300.0, offset, total).unwrap() * total;
+
+        // Straight tracking in the middle of the range.
+        assert!((frac(80.0) - 380.0).abs() < 0.5);
+        assert!((frac(-80.0) - 220.0).abs() < 0.5);
+
+        // And held at the ends, however far the pointer keeps going.
+        assert!((frac(-9000.0) - SIDEBAR_MIN_PX).abs() < 0.5);
+        assert!((frac(9000.0) - SIDEBAR_MAX_PX).abs() < 0.5);
+    }
+
+    /// On a window narrow enough that the pixel bounds are absurd, the fraction
+    /// clamp is what keeps the panes a window of their own.
+    #[test]
+    fn a_narrow_window_never_gives_the_rack_more_than_half() {
+        let total = 700.0;
+        let fraction = sidebar_fraction(300.0, 9000.0, total).unwrap();
+        assert!(fraction <= 0.5, "rack took {fraction} of a narrow window");
+        assert!(fraction * total < SIDEBAR_MAX_PX);
+    }
+
+    /// An unallocated split view reports zero width, and a fraction derived from
+    /// it would be a NaN the property accepts without complaint.
+    #[test]
+    fn an_unallocated_split_view_is_left_alone() {
+        assert_eq!(sidebar_fraction(300.0, 40.0, 0.0), None);
+    }
 }
