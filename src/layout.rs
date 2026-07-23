@@ -1,4 +1,12 @@
-const GAP: i32 = 8;
+/// Half the space between two neighbouring tiles.
+///
+/// `shrink` insets every side of every tile by this, so two tiles sharing a
+/// seam end up `2 * GAP` apart while a tile against the window edge sits `GAP`
+/// in from it. That ratio is right - an edge is one boundary and a seam is two
+/// tiles' worth - but it does mean the number here reads as half of what the
+/// eye actually measures between panes, which is how this came to be twice the
+/// size it wanted to be.
+const GAP: i32 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {

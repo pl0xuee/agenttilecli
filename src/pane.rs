@@ -329,10 +329,21 @@ pub struct Pane {
 }
 
 impl Pane {
-    /// Builds the shared frame/terminal/overlay/close-button scaffold every
-    /// pane needs, handing back the `Overlay` so the caller can add whatever
-    /// further chrome it wants on top of the terminal.
-    fn bare() -> (Frame, Terminal, gtk4::Overlay, gtk4::Button) {
+    /// Builds the shared frame/head/terminal/close-button scaffold every pane
+    /// needs, handing back the head strip so the caller can put whatever else
+    /// belongs to this pane into it.
+    ///
+    /// The strip replaces a `GtkOverlay`. The folder label and the close button
+    /// used to be laid *over* the terminal - top-left and top-right - which put
+    /// two opaque chips on top of the first line the agent wrote and kept them
+    /// there. It costs the pane a row of pixels to move them out, and it buys
+    /// back the row of text they were sitting on, which is the better trade in
+    /// a window whose whole job is showing agent output.
+    ///
+    /// It is also where a per-pane status dot lands once there is an agent
+    /// state to drive it: a strip has somewhere to put one, and a floating chip
+    /// does not.
+    fn bare() -> (Frame, Terminal, gtk4::Box, gtk4::Button) {
         let terminal = Terminal::new();
         terminal.set_hexpand(true);
         terminal.set_vexpand(true);
@@ -350,22 +361,39 @@ impl Pane {
 
         let close_button = gtk4::Button::builder()
             .icon_name("window-close-symbolic")
-            .css_classes(["flat", "circular", "pane-close"])
-            .halign(gtk4::Align::End)
-            .valign(gtk4::Align::Start)
+            .css_classes(["flat", "pane-close"])
             .can_focus(false)
+            .tooltip_text("Close this pane")
             .build();
 
-        let overlay = gtk4::Overlay::new();
-        overlay.set_child(Some(&terminal));
-        overlay.add_overlay(&close_button);
+        let head = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .css_classes(["pane-head"])
+            .build();
+        head.append(&close_button);
+        // Packed last and aligned right, so whatever the caller prepends flows
+        // from the left and the button stays where a close button belongs.
+        //
+        // It must NOT be the one that expands, though. Anything prepended here
+        // is a label, an ellipsizing label's *minimum* width is one ellipsis
+        // wide, and a box hands its spare width to whoever asked to expand - so
+        // a greedy button here squeezes the folder name down to "AGENTT…LECLI"
+        // in a strip with room to spare. The label claims the slack instead.
+        close_button.set_halign(gtk4::Align::End);
+        close_button.set_hexpand(false);
+
+        let body = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .build();
+        body.append(&head);
+        body.append(&terminal);
 
         let frame = Frame::new(None);
         frame.add_css_class("pane");
         frame.set_overflow(gtk4::Overflow::Hidden);
-        frame.set_child(Some(&overlay));
+        frame.set_child(Some(&body));
 
-        (frame, terminal, overlay, close_button)
+        (frame, terminal, head, close_button)
     }
 
     /// The usual pane: `claude`, running in `cwd` - with `BELL_HOOK` installed,
@@ -390,17 +418,22 @@ impl Pane {
     /// button, which runs the pull-and-rebuild script in a pane so its
     /// output is visible rather than hidden behind a spinner.
     pub fn command(cwd: &str, command: &str) -> Self {
-        let (frame, terminal, overlay, close_button) = Self::bare();
+        let (frame, terminal, head, close_button) = Self::bare();
         let pid = Rc::new(Cell::new(None));
 
         let dir_label = gtk4::Label::builder()
             .css_classes(["pane-dir"])
             .halign(gtk4::Align::Start)
-            .valign(gtk4::Align::Start)
+            .hexpand(true)
+            .xalign(0.0)
+            .ellipsize(gtk4::pango::EllipsizeMode::Middle)
             .can_target(false)
             .label(folder_name(cwd))
             .build();
-        overlay.add_overlay(&dir_label);
+        // `can_target(false)` above is what keeps the label out of the way of
+        // the click that focuses this pane: the gesture lives on the frame, and
+        // the label sits between the two.
+        head.prepend(&dir_label);
 
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let argv = [shell.as_str(), "-lc", command];

@@ -219,38 +219,56 @@ window {
   box-shadow: 0 0 0 2px alpha(@filament, 0.13), 0 0 1.6em alpha(@filament, 0.09);
 }
 
-/* Chrome that floats *over* a pane - the close ✕ and the directory label. They
-   share a fill, a rule and a corner radius so they read as one family rather
-   than two separately-invented controls, and the rule is what keeps them legible
-   when they happen to sit over a patch of pale terminal output.
+/* ── The pane's head ───────────────────────────────────────────────────────
+   A strip across the top of each tile carrying the folder its agent is standing
+   in and the button that hangs it up.
 
-   There used to be two more members of this family: a hamburger pinned to the
-   top-left of the workspace and a new-agent button pinned to the bottom-right.
-   Both are in the header bar now, where a control that acts on the whole window
-   belongs - floating them over a pane meant they sat on top of one particular
-   agent's output while having nothing to do with that agent. */
-.pane-close,
-.pane-dir {
-  background-color: alpha(@chip, 0.9);
-  border: 1px solid alpha(@edge, 0.6);
-  border-radius: 0.25em;
-  color: @muted;
+   These used to *float* over the terminal - a chip pinned top-left and another
+   top-right, each with its own fill and rule so it stayed legible against
+   whatever output happened to be underneath. That legibility problem was
+   self-inflicted: they were only ever illegible because they were sitting on
+   the agent's first line of text, permanently, in the one part of the window
+   whose entire job is showing that text. A strip costs a row of pixels and
+   gives the row of text back.
+
+   Two other members of that family are already gone - a hamburger pinned
+   top-left and a new-agent button pinned bottom-right - into the header bar,
+   where a control that acts on the whole window belongs.
+
+   It sits a rung below the tile it heads, the way the rack sits below the
+   panes: chrome recesses, content stands out. */
+.pane-head {
+  padding: 0.1em 0.15em 0.1em 0.5em;
+  background-color: @rack;
+  border-bottom: 1px solid @hairline;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+
+/* The focused tile's strip picks up the same warmth its border does, so the
+   lamp reaches the whole tile rather than stopping at the terminal. Shallow:
+   the border is what says "focused", and this only has to avoid contradicting
+   it by staying conspicuously cold. */
+.pane.focused .pane-head {
+  background-color: mix(@rack, @filament, 0.05);
+  border-bottom-color: mix(@hairline, @filament, 0.18);
 }
 
 .pane-close {
-  margin: 0.4em;
-  min-width: 1.6em;
-  min-height: 1.6em;
-  opacity: 0.55;
-  transition: opacity 120ms ease-out, background-color 120ms ease-out,
-    border-color 120ms ease-out, color 120ms ease-out;
+  min-width: 1.5em;
+  min-height: 1.5em;
+  padding: 0;
+  border-radius: 0.25em;
+  color: @faint;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
 }
 
+/* Only reaches full strength under the pointer. Closing a pane hangs up an
+   agent mid-thought, so the control says so in @hangup at the moment you are
+   actually about to press it - and stays out of the way the rest of the time,
+   which is all of the time. */
 .pane-close:hover {
-  opacity: 1;
   color: @field;
   background-color: @hangup;
-  border-color: @hangup;
 }
 
 /* ── The mode switcher ─────────────────────────────────────────────────────
@@ -290,13 +308,35 @@ window {
    visible in its own output - which directory the agent is actually standing in
    - and it has to say so without competing with a screen full of that agent's
    text, which is why it's the quietest type in the app. */
+/* An engraved equipment label: monospace, small, in caps, and the quietest type
+   in the app. It names the one thing about a pane that isn't visible in its own
+   output - which directory the agent is standing in - and it has to say so
+   without competing with a screen full of that agent's text.
+
+   No `letter-spacing`, which this wants and can't have. Letter spacing isn't
+   counted in an ellipsizing label's size request, so the label is allocated the
+   width of the *un-spaced* string and then ellipsizes the wider text it
+   actually draws down to fit: "AGENTT…LECLI" in a strip with room for three of
+   it. Measured, not guessed - and it happens through a Pango attribute exactly
+   as it does through this property, so there is no way to keep the spacing and
+   the measurement both.
+
+   Dropping the ellipsize instead is worse than it sounds: without it the
+   label's minimum width is the whole folder name, so one deeply-named project
+   would raise the pane's minimum width and through it the window's. Caps,
+   monospace and the small size carry the engraved reading on their own. */
 .pane-dir {
-  margin: 0.4em;
-  padding: 0.15em 0.55em;
+  color: @faint;
   font-family: monospace;
   font-size: 0.72em;
-  letter-spacing: 0.14em;
   text-transform: uppercase;
+}
+
+/* The focused tile names itself a little louder - not as a second focus signal,
+   but because on a screen of four identical strips the one you're typing into
+   is the one whose folder you actually want to be able to read. */
+.pane.focused .pane-dir {
+  color: @muted;
 }
 
 /* ── The rack ──────────────────────────────────────────────────────────────
