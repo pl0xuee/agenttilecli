@@ -367,10 +367,11 @@ window {
    starts where its column starts is a heading; one floating in the middle of a
    narrow rack is a caption for the whole sidebar, which is not what it is. */
 .sidebar-header-label {
-  font-family: monospace;
-  font-size: 0.74em;
+  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-size: 0.8em;
+  font-weight: 600;
   color: @muted;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
@@ -409,9 +410,9 @@ window {
    hierarchy - a rack is a list of places you might go, and the only fact worth
    drawing is which one you're in. */
 row.sidebar-row {
-  padding: 0.8em 0.7em 0.8em 0.95em;
-  margin: 0.1em 0;
-  border-radius: 0.45em;
+  padding: 1.05em 0.7em 1.05em 1em;
+  margin: 0.13em 0;
+  border-radius: 0.5em;
   /* A whisper of surface, and it is the rail that needs it. The rail is an
      inset shadow, so it takes the strip's rounded corners with it - and with
      nothing behind it, a 3px bar with curved ends floating on the rack reads as
@@ -456,19 +457,34 @@ row.sidebar-row:selected:hover {
   transition: color 120ms ease-out;
 }
 
-/* Monospace, like everything else in the chrome and like the panes themselves -
-   this is an app made entirely of terminals, and a proportional sans in the
-   sidebar is the one voice in it that belongs to some other program.
+/* Fira Sans, and it is a pairing rather than a preference.
+   
+   Everything in this app's chrome used to be monospace, on the reasoning that a
+   program made entirely of terminals shouldn't have one proportional voice in it
+   belonging to some other program. That reasoning is right about foreign voices
+   and wrong about this one: Fira Sans is the humanist sans drawn as the
+   companion to Fira Mono, so the rack ends up speaking the same type family as
+   the terminals it indexes - the proportional voice of the same lineage rather
+   than an import from another.
 
-   Bold on every strip, not just the lit one. A project name is the thing you
-   aim at when you come back to this rack, and a column of names at one weight
-   is a column you have to read top-to-bottom to use. Weight makes each one a
-   shape you can recognise instead of a line you have to parse. */
+   And a project name is the one string here that is genuinely prose. Monospace
+   earns its place where columns have to line up (the tally below, the version in
+   the footer, the engraved labels on the panes); a folder called
+   "Lorerim_Autoinstall" is not a column, and setting it in a typewriter face
+   costs a third of the rack's width to no end.
+
+   Cantarell and Noto Sans behind it, both of which ship as a desktop default on
+   the distros in the README's table, so a machine without Fira falls back to a
+   humanist sans rather than to whatever `sans-serif` resolves to.
+
+   Semibold rather than bold: at this size Fira's bold is heavier than a list of
+   names wants, and 600 keeps each name a shape you can recognise without the
+   column shouting. */
 .sidebar-row-label {
-  font-family: monospace;
-  font-size: 1.02em;
-  font-weight: bold;
-  letter-spacing: 0.01em;
+  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-size: 1.18em;
+  font-weight: 600;
+  letter-spacing: 0.005em;
 }
 
 /* ── Tally rails ───────────────────────────────────────────────────────────
@@ -604,11 +620,13 @@ row.sidebar-row.needs-attention .sidebar-row-label {
    looking at, which is why it earns room on a row that already carries an icon,
    a name and a close button. Quiet enough that a rack of them scans as a column
    of numbers rather than as five things demanding attention. */
+/* Monospace, unlike the name beside it, and for the reason monospace is for:
+   these are numbers in a column and they line up. */
 .sidebar-row-count {
   min-width: 1.2em;
   color: @muted;
   font-family: monospace;
-  font-size: 0.9em;
+  font-size: 0.98em;
 }
 
 /* The open project's own tally lifts with the rest of its strip. */
