@@ -153,6 +153,9 @@ struct Inner {
     save_queued: Cell<bool>,
     /// "AgentTileCLI", plus a branch marker on builds that aren't off master.
     base_title: String,
+    /// The find bar, built after the window because it needs it for key
+    /// capture, so it arrives later than everything else here.
+    search: RefCell<Option<crate::search::Search>>,
     /// Holds just the one dynamic `window { font-size: ... }` rule that drives
     /// chrome scaling - reloaded in place on every scale change rather than
     /// recreated, so it keeps sitting at the priority it was added with.
@@ -255,6 +258,7 @@ impl App {
             save_queued: Cell::new(false),
             base_title: title.to_string(),
             css_provider,
+            search: RefCell::new(None),
         }));
 
         // Start listening before the first pane is spawned, so its agent finds a
@@ -268,7 +272,11 @@ impl App {
         });
 
         split.set_sidebar(Some(&this.build_sidebar()));
-        split.set_content(Some(&this.build_content(&title_widget, &sidebar_toggle)));
+        let search = crate::search::Search::new(&this);
+        let content = this.build_content(&title_widget, &sidebar_toggle);
+        content.add_top_bar(search.widget());
+        *this.0.search.borrow_mut() = Some(search);
+        split.set_content(Some(&content));
         this.install_breakpoint();
         this.wire_signals();
 
@@ -521,6 +529,14 @@ impl App {
     }
 
 
+
+    /// Opens the find bar over the focused pane, or closes it again.
+    pub fn toggle_search(&self) {
+        let search = self.0.search.borrow().clone();
+        if let Some(search) = search {
+            search.toggle(self);
+        }
+    }
 
     pub fn check_for_updates(&self) {
         self.0.updates.check();

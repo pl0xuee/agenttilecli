@@ -9,6 +9,7 @@ mod layout;
 mod model;
 mod palette;
 mod pane;
+mod search;
 mod session;
 mod shortcuts;
 #[cfg(test)]

@@ -159,6 +159,10 @@ pub const SECTIONS: &[Section] = &[
                 description: "Show these keyboard shortcuts",
             },
             Binding {
+                accelerator: "<Super><Alt>f",
+                description: "Find in the focused pane",
+            },
+            Binding {
                 accelerator: "<Super><Alt>u",
                 description: "Check for updates",
             },
@@ -234,6 +238,10 @@ pub fn install(window: &impl IsA<gtk4::Widget>, app: &App) {
             }
             gdk::Key::_0 => {
                 app.reset_font_scale();
+                return glib::Propagation::Stop;
+            }
+            gdk::Key::f => {
+                app.toggle_search();
                 return glib::Propagation::Stop;
             }
             gdk::Key::u => {
@@ -319,11 +327,11 @@ mod tests {
             .flat_map(|s| s.bindings)
             .filter(|b| b.accelerator.contains("<Super>"))
             .count();
-        // Return, g, [, ], {, }, =, -, 0, u, /, Shift+Return, j, k, h, l, i, d,
-        // m, Tab, w - the two match blocks in `install`, counted by hand because
-        // a match arm isn't something a test can enumerate.
+        // Return, g, [, ], {, }, =, -, 0, f, u, /, Shift+Return, j, k, h, l, i,
+        // d, m, Tab, w - the two match blocks in `install`, counted by hand
+        // because a match arm isn't something a test can enumerate.
         assert_eq!(
-            advertised, 21,
+            advertised, 22,
             "the matcher and the cheatsheet have drifted apart",
         );
     }

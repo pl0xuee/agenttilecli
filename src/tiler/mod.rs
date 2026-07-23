@@ -255,6 +255,16 @@ impl Tiler {
         }
     }
 
+    /// The terminal of the pane the keyboard is in.
+    pub fn focused_terminal(&self) -> Option<vte4::Terminal> {
+        let focus = self.imp().focus.get();
+        self.imp()
+            .panes
+            .borrow()
+            .get(focus)
+            .map(|pane| pane.terminal.clone())
+    }
+
     /// How this group's panes are currently arranged.
     ///
     /// Public because the mode is no longer only a tiling input: the header bar

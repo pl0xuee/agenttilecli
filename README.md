@@ -115,6 +115,11 @@ you want to nudge it.
   *not* restarted: an agent is a process with a token budget attached, and "I
   quit with four running" is not the same thing as "start four now" — each
   project reopens with its layout and an empty state telling you what to press.
+- **Find in a pane** — `Super+Alt+F` opens a search bar over the focused pane
+  and searches its scrollback, wrapping around, case-insensitively. Enter for
+  the next match, `Shift+Enter` for the previous, `Escape` to close and hand the
+  keyboard back. What you type is taken literally, so a path or an error message
+  pasted straight in finds that line instead of failing to compile as a regex.
 - **Adjustable text size** — enlarge or shrink every pane's terminal text
   together, independent of pane layout.
 
@@ -165,6 +170,7 @@ your desktop environment's own `Super+key` shortcuts.
 | `Tab` | cycle layout mode: grid → master-stack → monocle |
 | `=` / `-` | enlarge / shrink terminal text (all panes) |
 | `0` | reset terminal text size |
+| `f` | find in the focused pane |
 | `/` | show the keyboard shortcuts |
 | `u` | check for updates |
 
