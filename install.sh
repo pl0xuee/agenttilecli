@@ -15,9 +15,9 @@ fi
 
 # Covers pkg-config itself plus the GTK4/VTE4 dev packages below, since every
 # distro bundles them in one install command anyway.
-PKG_HINT="  Arch/CachyOS:   sudo pacman -S pkgconf gtk4 vte4
-  Fedora:         sudo dnf install pkg-config gtk4-devel vte291-gtk4-devel
-  Debian/Ubuntu:  sudo apt install pkg-config libgtk-4-dev libvte-2.91-gtk4-dev"
+PKG_HINT="  Arch/CachyOS:   sudo pacman -S pkgconf gtk4 vte4 libadwaita
+  Fedora:         sudo dnf install pkg-config gtk4-devel vte291-gtk4-devel libadwaita-devel
+  Debian/Ubuntu:  sudo apt install pkg-config libgtk-4-dev libvte-2.91-gtk4-dev libadwaita-1-dev"
 
 if ! have pkg-config; then
     echo "error: pkg-config is not installed." >&2
@@ -39,6 +39,17 @@ if ! pkg-config --atleast-version=0.65 vte-2.91-gtk4 2>/dev/null; then
     echo "$PKG_HINT" >&2
     echo "       Note: this package is fairly recent upstream, so older distro releases" >&2
     echo "       (e.g. Debian 12 bookworm) may not carry it at all." >&2
+    exit 1
+fi
+
+# The app's chrome (header bar, split view, toasts, dialogs) is libadwaita's.
+# 1.5 is the floor the code is written against deliberately - see the comment on
+# the `adw` dependency in Cargo.toml - and every distro in the README's table
+# ships at least that.
+if ! pkg-config --atleast-version=1.5 libadwaita-1 2>/dev/null; then
+    echo "error: libadwaita >= 1.5 development files not found (pkg-config libadwaita-1)." >&2
+    echo "       Install your distro's libadwaita dev package and try again, e.g.:" >&2
+    echo "$PKG_HINT" >&2
     exit 1
 fi
 

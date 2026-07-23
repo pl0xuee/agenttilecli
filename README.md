@@ -11,18 +11,22 @@ you want to nudge it.
 
 - **Project groups in a sidebar** — every project lives in its own group,
   each with its own independent tiling layout and set of agent panes.
-  Toggle the sidebar with the hamburger button (top-left) or `Super+Alt+g`,
-  click a row to switch groups, and background groups keep their agents
-  running while hidden. Closing a group's row (✕) hangs up every agent in
-  it; the floating **+** button (or `Super+Alt+Return`) opens a new project
-  as a new group via a native folder picker, then asks how many agents to
-  start it with (1–4).
+  Toggle the sidebar with the button at the left of the header bar or
+  `Super+Alt+g`, click a row to switch groups, and background groups keep
+  their agents running while hidden. Drag a row to reorder it (or
+  `Super+Alt+{` / `}`). Closing a group's row (✕) hangs up every agent in
+  it; the **+** button in the header bar (or `Super+Alt+Return`) opens a new
+  project as a new group via a native folder picker, and starts it with as
+  many agents as the project you were last working in had running — pick the
+  folder and it opens, with no second dialog asking a question you answer the
+  same way every time. On a narrow window the sidebar stops squeezing the
+  panes and slides over them instead.
 - **Background agents tell you when they want you** — when an agent finishes a
   turn, or stops to ask permission, its group's sidebar row pulses and then
   stays quietly tinted until you open that group, so a finished agent in a
-  project you aren't watching doesn't sit there unnoticed. The hamburger
-  pulses with it, since the sidebar is usually closed — it says *a* project
-  wants you, and the row behind it says which. Panes launch
+  project you aren't watching doesn't sit there unnoticed. The sidebar
+  button pulses with it, since the sidebar is usually closed — it says *a*
+  project wants you, and the row behind it says which. Panes launch
   `claude` with `Stop` and `Notification` hooks that ring the terminal bell;
   they're layered on per-pane via `--settings`, so your `~/.claude` config is
   never modified and your `claude` in other terminals is unaffected. The bell
@@ -32,18 +36,33 @@ you want to nudge it.
   panes, orienting itself to the window's own aspect ratio, and a partial
   last row keeps its panes the same size as every other row rather than
   stretching them to fill the gap.
+- **A grid you've arranged stays arranged** — drag a seam and those
+  proportions survive the window being resized around them, including a
+  resize drastic enough that the grid would otherwise re-orient itself.
+  Dragging is the one explicit thing you say about a layout, so only opening
+  or closing a pane — which genuinely invalidates the arrangement — puts the
+  cells back to equal.
 - **Stays the size you set it** — adding panes never resizes the window;
   they tile smaller within whatever size you've given it.
 - **dwm-style master-stack mode** — one larger master pane + a stack column,
   with a persistent adjustable ratio.
 - **Monocle mode** — fullscreen the focused pane.
+- **A header bar that tells you where you are** — the project you're in and
+  the focused pane's title, and a three-way Grid / Master-stack / Monocle
+  switch that both reports the current mode and changes it. Pressing
+  `Super+Alt+Tab` moves the switch, and clicking the switch is the same as
+  pressing the key; the mode is no longer something you have to infer from
+  the shape of the tiles.
 - **Mouse support** — click any pane to focus it, drag any seam between
-  panes to resize, click the ✕ in a pane's corner to close it, the hamburger
-  (top-left) to toggle the sidebar, or the **new-agent** button
-  (bottom-right) to spawn another pane.
+  panes to resize, click the ✕ in a pane's corner to close it, the sidebar
+  button (header bar, far left) to toggle the sidebar, or the **new-agent**
+  button (header bar, right) to spawn another pane.
 - **Per-project panes** — the **new-agent** button spawns another agent in
   the current group's project directly, no picker. Each pane's corner shows
-  the folder name it's running in.
+  the folder name it's running in. A new pane doesn't take your keyboard:
+  you start a second agent *while* working in the first, and having focus
+  jump mid-sentence sends the rest of that sentence somewhere you weren't
+  looking. Click it, or `Super+Alt+j`, when you actually want it.
 - **Paste, including screenshots** — `Ctrl+V` pastes, and `Ctrl+C` copies the
   selection. If what you copied was an *image*, `Ctrl+V` writes it out as a PNG
   and types its short path (`~/.cache/atc/img/mfd0j1.png`) into the prompt, so
@@ -61,8 +80,10 @@ you want to nudge it.
   a dev branch, local commits, or uncommitted changes get reported, never
   overwritten. The version and commit you're actually running sit right
   beneath the button.
-- **Built-in help pane** — a static cheatsheet of every keybinding, toggle it
-  any time with `Super+Alt+/`.
+- **Keyboard shortcuts, in a dialog** — every binding, drawn as real key caps,
+  on `Super+Alt+/` or from the menu. It's generated from the same table the
+  app matches keypresses against, so it can't drift out of date, and it costs
+  you no pane to read.
 - **Adjustable text size** — enlarge or shrink every pane's terminal text
   together, independent of pane layout.
 
@@ -76,6 +97,7 @@ your desktop environment's own `Super+key` shortcuts.
 | `Return` | open a new project as a new group |
 | `g` | toggle the project sidebar |
 | `[` / `]` | switch to the previous / next group |
+| `{` / `}` | move this project up / down the sidebar |
 | `Shift+Return` | promote focused pane to master (zoom) |
 | `j` / `k` | focus next / previous pane |
 | `w` | close the focused pane |
@@ -85,19 +107,23 @@ your desktop environment's own `Super+key` shortcuts.
 | `Tab` | cycle layout mode: grid → master-stack → monocle |
 | `=` / `-` | enlarge / shrink terminal text (all panes) |
 | `0` | reset terminal text size |
-| `/` | toggle the help pane |
+| `/` | show the keyboard shortcuts |
 | `u` | check for updates |
 
 ## Requirements
 
-- `git`, `pkg-config`, GTK4 (>= 4.12), and the GTK4-flavored VTE terminal
-  widget (>= 0.65), including their dev files:
+- `git`, `pkg-config`, GTK4 (>= 4.12), libadwaita (>= 1.5), and the
+  GTK4-flavored VTE terminal widget (>= 0.65), including their dev files:
 
   | Distro | Install command |
   |---|---|
-  | Arch / CachyOS / Manjaro | `sudo pacman -S git pkgconf gtk4 vte4` |
-  | Fedora | `sudo dnf install git pkg-config gtk4-devel vte291-gtk4-devel` |
-  | Debian / Ubuntu (trixie/24.10+ or newer) | `sudo apt install git pkg-config libgtk-4-dev libvte-2.91-gtk4-dev` |
+  | Arch / CachyOS / Manjaro | `sudo pacman -S git pkgconf gtk4 vte4 libadwaita` |
+  | Fedora | `sudo dnf install git pkg-config gtk4-devel vte291-gtk4-devel libadwaita-devel` |
+  | Debian / Ubuntu (trixie/24.10+ or newer) | `sudo apt install git pkg-config libgtk-4-dev libvte-2.91-gtk4-dev libadwaita-1-dev` |
+
+  The libadwaita floor is 1.5, which is older than every release in the table
+  above — the app deliberately builds against the 1.5 API rather than the
+  newest one so that requiring it costs no distro its place here.
 
   Debian's GTK4-flavored VTE package didn't land until fairly recently, so
   older releases (e.g. Debian 12 "bookworm", which also ships a GTK4 below
@@ -134,8 +160,9 @@ This builds a release binary and installs it to `~/.local/bin/agenttilecli`
 (make sure that's on your `PATH`), plus adds an icon and a desktop entry so
 it shows up in your application launcher.
 
-To update later, open the sidebar (the hamburger, top-left) and click **Check
-for updates** at the bottom of it — or press `Super+Alt+u`. It checks
+To update later, open the sidebar (the button at the left of the header bar)
+and click **Check for updates** at the bottom of it — or press `Super+Alt+u`,
+or pick it from the app menu. It checks
 `origin/master`, shows you what's new, and runs the pull and reinstall in a
 pane. Or do it by hand: `git pull && ./install.sh`.
 

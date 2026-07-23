@@ -17,7 +17,7 @@ const CWD_POLL_INTERVAL: Duration = Duration::from_millis(1000);
 /// The shell one-liner claude runs when it finishes a turn (`Stop`) or stops
 /// to ask for something (`Notification`) - the two moments a watching human
 /// would want to know about, and the two this app repaints a sidebar row for
-/// (see `Groups::flash_row`). All it does is ring the pane's bell, which VTE
+/// (see `App::flash_row`). All it does is ring the pane's bell, which VTE
 /// reports as the `bell` signal and `Tiler` forwards on as "this group wants
 /// you".
 ///
@@ -74,13 +74,13 @@ fn rgb(hex: &str) -> palette::Rgb {
 }
 
 /// The 16-colour ANSI palette for a pane painted in `surface`. Loosely "One
-/// Dark", so `ls --color` and git diffs still read well against the graphite.
+/// Dark", so `ls --color` and git diffs still read well against the gunmetal.
 ///
 /// Split out from `apply_theme` so it can be checked without a display - it's
 /// the only place the terminal-only hexes are written, and `rgb` panics on a
 /// malformed one.
 fn ansi_palette(surface: palette::Rgb) -> [palette::Rgb; 16] {
-    // ANSI 0 and 7 sit on the graphite ramp rather than being literal black
+    // ANSI 0 and 7 sit on the gunmetal ramp rather than being literal black
     // and white: programs paint "black" backgrounds and "white" text far more
     // often than they mean the actual colours, so anything else leaves
     // rectangles of a foreign grey in the middle of the pane. 0 tracks the
@@ -100,7 +100,7 @@ fn ansi_palette(surface: palette::Rgb) -> [palette::Rgb; 16] {
         rgb("#74b8ea"),             // blue
         rgb("#bf93d6"),             // magenta
         rgb("#5cc4c0"),             // cyan
-        rgb("#d6dde3"),             // white
+        rgb("#d7dde0"),             // white
         palette::color("faint"),    // bright black - the footnote grey
         rgb("#ef8a8a"),             // bright red
         rgb("#a8d795"),             // bright green
@@ -108,7 +108,7 @@ fn ansi_palette(surface: palette::Rgb) -> [palette::Rgb; 16] {
         rgb("#96cbf0"),             // bright blue
         rgb("#d3ade4"),             // bright magenta
         rgb("#82d0cf"),             // bright cyan
-        rgb("#f4f7fa"),             // bright white
+        rgb("#f4f8f9"),             // bright white
     ]
 }
 
@@ -247,264 +247,6 @@ mod theme_tests {
     }
 }
 
-/// The help pane speaks in two colours and no more, which is the same rule the
-/// chrome follows: white for the things you press, amber for the signposts
-/// between them, and everything else in the terminal's own foreground or dimmed
-/// out of the way. A cheatsheet painted in five colours is a cheatsheet where
-/// none of them mean anything.
-const RESET: &str = "\x1b[0m";
-const DIM: &str = "\x1b[2m";
-const BOLD_YELLOW: &str = "\x1b[1;33m";
-const BOLD_WHITE: &str = "\x1b[1;37m";
-
-fn sgr(code: &str, s: &str) -> String {
-    format!("{code}{s}{RESET}")
-}
-
-/// A `key   description` row, aligned to a fixed key-column width so every
-/// row's description lines up regardless of key length.
-fn row(keys: &str, desc: &str) -> String {
-    format!("  {}  {}", sgr(BOLD_WHITE, &format!("{keys:<14}")), desc)
-}
-
-fn section(title: &str, rows: &[(&str, &str)]) -> String {
-    let mut s = format!("  {}\r\n", sgr(BOLD_YELLOW, title));
-    for (keys, desc) in rows {
-        s.push_str(&row(keys, desc));
-        s.push_str("\r\n");
-    }
-    s
-}
-
-/// On-screen character count of a line that may contain ANSI SGR color
-/// codes (`\x1b[...m`), which have zero display width. Lets `side_by_side`
-/// pad columns to line up regardless of the color codes baked into them.
-fn visible_len(s: &str) -> usize {
-    let mut len = 0;
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            for esc in chars.by_ref() {
-                if esc == 'm' {
-                    break;
-                }
-            }
-        } else {
-            len += 1;
-        }
-    }
-    len
-}
-
-/// Lays two multi-line blocks side by side as one column pair, padding every
-/// left-block line to the widest line in that block (plus `gap` spaces) so
-/// the right block starts in a straight column regardless of left content.
-/// Shorter block is padded with blank rows to match the taller one's height.
-fn side_by_side(left: &str, right: &str, gap: usize) -> String {
-    let left_lines: Vec<&str> = left.trim_end_matches("\r\n").split("\r\n").collect();
-    let right_lines: Vec<&str> = right.trim_end_matches("\r\n").split("\r\n").collect();
-    let col_width = left_lines.iter().map(|l| visible_len(l)).max().unwrap_or(0);
-    let rows = left_lines.len().max(right_lines.len());
-    let mut out = String::new();
-    for i in 0..rows {
-        let l = left_lines.get(i).copied().unwrap_or("");
-        let r = right_lines.get(i).copied().unwrap_or("");
-        out.push_str(l);
-        if !r.is_empty() {
-            out.push_str(&" ".repeat(col_width - visible_len(l) + gap));
-            out.push_str(r);
-        }
-        out.push_str("\r\n");
-    }
-    out
-}
-
-/// A numbered "1. do the thing" step, indented to sit under its heading.
-fn step(n: usize, text: &str) -> String {
-    format!("  {} {}", sgr(BOLD_WHITE, &format!("{n}.")), text)
-}
-
-/// Blank-pads `block` out to `height` lines. Used to make the first section
-/// in every help column the same height, so the second section in each
-/// column starts on the same row across all three - otherwise each column's
-/// second heading lands at a different y and the page reads as ragged.
-fn pad_to(block: &str, height: usize) -> String {
-    let lines = block.trim_end_matches("\r\n").split("\r\n").count();
-    let mut out = block.trim_end_matches("\r\n").to_string();
-    for _ in lines..height {
-        out.push_str("\r\n");
-    }
-    out
-}
-
-/// A dim "· fact" bullet, one self-contained fact per line - short enough to
-/// scan rather than hard-wrapped into a paragraph nobody reads.
-fn bullet(text: &str) -> String {
-    sgr(DIM, &format!("  \u{b7} {text}"))
-}
-
-fn help_text() -> String {
-    // A nameplate rather than a drawn box. There isn't a rounded frame left
-    // anywhere in this app's chrome, and a box around the title is a second,
-    // softer shape saying nothing the rule doesn't already say. The letters are
-    // opened up with spaces for the same reason the sidebar's own labels are
-    // letter-spaced in CSS: at this size it reads as engraved rather than
-    // typed, and it makes the one line of branding in the app look deliberate.
-    let nameplate = format!(
-        "  {name}  {rule}  {tagline}",
-        name = sgr(BOLD_WHITE, "A G E N T T I L E C L I"),
-        rule = sgr(DIM, &"\u{2500}".repeat(40)),
-        tagline = sgr(DIM, "dynamic tiling for AI CLI sessions"),
-    );
-
-    // Numbered steps rather than a wrapped paragraph: the reader wants to
-    // know what to press first, not to read prose.
-    let getting_started = format!(
-        "  {header}\r\n\r\n{s1}\r\n{s2}\r\n{s3}\r\n\r\n{after}",
-        header = sgr(BOLD_YELLOW, "\u{25b8} GETTING STARTED"),
-        s1 = step(
-            1,
-            &format!(
-                "Press {key}  (or click {hamburger} top-left, then {plus} in the sidebar)",
-                key = sgr(BOLD_WHITE, "Super+Alt+Return"),
-                hamburger = sgr(BOLD_WHITE, "\u{2630}"),
-                plus = sgr(BOLD_WHITE, "+"),
-            )
-        ),
-        s2 = step(2, "Pick the project folder to work in"),
-        s3 = step(
-            3,
-            &format!(
-                "Choose how many agents to start with ({counts}) \u{2014} claude launches right there",
-                counts = sgr(BOLD_WHITE, "1-4"),
-            )
-        ),
-        after = sgr(
-            DIM,
-            "  Cancel either dialog and nothing is created. Once a project is open, the\r\n  \
-             new-agent button (bottom-right) adds another agent to it \u{2014} no picker.",
-        ),
-    );
-
-    let panes = section(
-        "PANES",
-        &[
-            ("Shift+Return", "promote to master (zoom)"),
-            ("j  /  k", "focus next / previous pane"),
-            ("w", "close the focused pane"),
-        ],
-    );
-    let text_size = section(
-        "TEXT SIZE",
-        &[
-            ("=  /  -", "enlarge / shrink text (whole app)"),
-            ("0", "reset text size"),
-        ],
-    );
-    // The one section whose keys aren't Super+Alt anything - they're the
-    // terminal's own clipboard keys, so they're spelled out in full and the
-    // heading says so, rather than being silently exempted from the Super+Alt
-    // line above them.
-    let clipboard = section(
-        "CLIPBOARD (no Super+Alt)",
-        &[
-            ("Ctrl+V", "paste (an image if one's copied)"),
-            ("Shift+Insert", "paste the text, never the image"),
-            (
-                "Ctrl+C",
-                "copy \u{2014} or interrupt, if nothing's selected",
-            ),
-        ],
-    );
-    let layout = section(
-        "LAYOUT",
-        &[
-            ("h  /  l", "shrink / grow master column"),
-            ("i  /  d", "more / fewer master panes"),
-            ("m", "toggle monocle (fullscreen)"),
-            ("Tab", "cycle grid \u{2192} master-stack \u{2192} monocle"),
-        ],
-    );
-    let groups = section(
-        "GROUPS",
-        &[
-            ("Return", "new project as a new group"),
-            ("g", "toggle the project sidebar"),
-            ("[  /  ]", "previous / next group"),
-            ("{  /  }", "move this group up / down"),
-        ],
-    );
-    let mouse = section(
-        "MOUSE",
-        &[
-            ("click pane", "focus it"),
-            ("drag a seam", "resize panes on either side"),
-            ("click \u{2715}", "close that pane"),
-            ("click \u{2630}", "toggle the project sidebar"),
-            ("sidebar +", "open a new project as a new group"),
-            ("sidebar row", "switch to that group"),
-            ("drag a row", "reorder the projects"),
-            ("sidebar \u{21bb}", "check GitHub for a newer version"),
-            ("new-agent btn", "spawn another agent in this group"),
-        ],
-    );
-    let help = section(
-        "HELP",
-        &[("/", "toggle this help pane"), ("u", "check for updates")],
-    );
-
-    // Built as three full-height columns fed through one `side_by_side`
-    // chain, rather than as separate side-by-side *rows* stacked up: a row
-    // pads only to its own widest line, so stacked rows would each land
-    // their columns at a different x. One chain over whole columns keeps
-    // every section's key/description gutters aligned down the whole page.
-    // Each column's first section is padded to a common height (see
-    // `pad_to`) so the second one starts on the same row in all three.
-    let top_height = [&panes, &layout, &mouse]
-        .iter()
-        .map(|s| s.trim_end_matches("\r\n").split("\r\n").count())
-        .max()
-        .unwrap_or(0);
-    let col_a = format!(
-        "{}\r\n\r\n{text_size}\r\n{clipboard}",
-        pad_to(&panes, top_height)
-    );
-    let col_b = format!("{}\r\n\r\n{groups}", pad_to(&layout, top_height));
-    let col_c = format!("{}\r\n\r\n{help}", pad_to(&mouse, top_height));
-    let keys = side_by_side(&side_by_side(&col_a, &col_b, 6), &col_c, 6);
-
-    let tips = [
-        bullet("Panes auto re-tile on spawn/close/promote, and every grid cell is the same size."),
-        bullet("Drag any seam to size panes by hand; master-stack keeps its divider where you put it."),
-        bullet("Adding panes never resizes the window \u{2014} they tile smaller inside the size you set."),
-        bullet("A pane's corner label tracks its real directory, not claude's own /cd."),
-        bullet("Ctrl+V saves a copied image as a PNG and types its short path in for you \u{2014} claude reads the picture from there."),
-        bullet("Ctrl+C only copies when something is selected; with nothing selected it's the usual interrupt."),
-        bullet("Switching groups doesn't stop the others' agents; closing a group's \u{2715} hangs up every agent in it."),
-        bullet("This help pane has no process behind it \u{2014} close it like any other, with Super+Alt+w."),
-    ]
-    .join("\r\n");
-
-    // Two blank rows before anything is printed. The sidebar-toggle button
-    // floats over the top-left corner of whichever pane is there, and the help
-    // pane is the one pane whose first line is content rather than a prompt -
-    // so without them the ☰ sits on top of the nameplate. Two rows because the
-    // button is sized in `em` against the same font the terminal is scaled by,
-    // which keeps it about a line and a half tall at every text size.
-    format!(
-        "\r\n\r\n{nameplate}\r\n\r\n\
-         {getting_started}\r\n\r\n\
-         {modifier}\r\n\r\n\
-         {keys}\r\n\
-         {tips_header}\r\n{tips}\r\n",
-        modifier = sgr(
-            BOLD_YELLOW,
-            "  \u{25b8} Every keybinding below is held together with Super+Alt",
-        ),
-        tips_header = sgr(BOLD_YELLOW, "  GOOD TO KNOW"),
-    )
-}
-
 /// The `--settings` layer every claude pane is launched with: `BELL_HOOK`,
 /// wired to the two events worth interrupting someone for.
 ///
@@ -571,16 +313,14 @@ mod settings_tests {
     }
 }
 
-/// A single tile: a bordered frame containing a VTE terminal. Most panes run
-/// `claude` via the user's login shell (so PATH/nvm/aliases resolve the same
-/// way an interactive terminal would); the help pane instead just has static
-/// text fed directly into it, with no child process at all.
+/// A single tile: a bordered frame containing a VTE terminal, running `claude`
+/// (or, for the update pane, a build script) via the user's login shell - so
+/// PATH/nvm/aliases resolve the same way an interactive terminal would.
 pub struct Pane {
     pub frame: Frame,
     pub terminal: Terminal,
     pub close_button: gtk4::Button,
     pid: Rc<Cell<Option<libc::pid_t>>>,
-    is_help: bool,
     /// What `apply_theme` was last called with, so `set_focused` can skip the
     /// repaint when nothing changed. `Tiler::update_focus_style` runs over
     /// every pane after any pane operation, and all but one of those panes
@@ -590,25 +330,22 @@ pub struct Pane {
 
 impl Pane {
     /// Builds the shared frame/terminal/overlay/close-button scaffold every
-    /// pane needs. Returns the `Overlay` (rather than baking in every
-    /// possible overlay child) so callers add only the extra chrome they
-    /// actually need - e.g. `new()` adds a directory label but `help()`
-    /// doesn't, instead of `help()` having to receive and discard one.
+    /// pane needs, handing back the `Overlay` so the caller can add whatever
+    /// further chrome it wants on top of the terminal.
     fn bare() -> (Frame, Terminal, gtk4::Overlay, gtk4::Button) {
         let terminal = Terminal::new();
         terminal.set_hexpand(true);
         terminal.set_vexpand(true);
         apply_theme(&terminal, false);
         // An agent's bell is this app's "the agent wants you" signal - it's
-        // what lights up the group's sidebar row (see `Groups::flash_row`).
+        // what lights up the group's sidebar row (see `App::flash_row`).
         // Turning the *audible* half off keeps that a visual notification
         // rather than a room-filling one, which matters when several agents
         // are working at once. VTE still emits the `bell` signal either way;
         // this only suppresses the beep.
         terminal.set_audible_bell(false);
         // VTE has no clipboard keybindings of its own, so without this a pane
-        // can't be pasted into at all. Installed here rather than per pane kind
-        // so the help pane can be copied *out of* too.
+        // can't be pasted into at all.
         crate::clipboard::install(&terminal);
 
         let close_button = gtk4::Button::builder()
@@ -707,21 +444,6 @@ impl Pane {
             terminal,
             close_button,
             pid,
-            is_help: false,
-            focused: Cell::new(false),
-        }
-    }
-
-    /// A static cheatsheet pane: no PTY, no child process, just fed text.
-    pub fn help() -> Self {
-        let (frame, terminal, _overlay, close_button) = Self::bare();
-        terminal.feed(help_text().as_bytes());
-        Pane {
-            frame,
-            terminal,
-            close_button,
-            pid: Rc::new(Cell::new(None)),
-            is_help: true,
             focused: Cell::new(false),
         }
     }
@@ -740,14 +462,6 @@ impl Pane {
         if self.focused.replace(focused) != focused {
             apply_theme(&self.terminal, focused);
         }
-    }
-
-    /// Whether this is the static help pane (as opposed to a real `claude`
-    /// pane). Note this is *not* simply "no pid yet" - a freshly spawned
-    /// claude pane also has no pid for a moment, since spawn_async's
-    /// callback (which records it) runs asynchronously on the main loop.
-    pub fn is_help(&self) -> bool {
-        self.is_help
     }
 
     /// Politely ask the child (shell + claude) to exit, mirroring how a real

@@ -1,18 +1,21 @@
+mod app;
 mod clipboard;
-mod groups;
 mod keybindings;
 mod layout;
+mod model;
 mod palette;
 mod pane;
+mod shortcuts;
 #[cfg(test)]
 mod testing;
 mod tiler;
 mod update;
+mod updates;
 
-use gtk4::prelude::*;
-use gtk4::{gdk, glib, Application, ApplicationWindow, CssProvider};
+use adw::prelude::*;
+use gtk4::{gdk, glib, CssProvider};
 
-use groups::Groups;
+use app::App;
 
 const APP_ID: &str = "dev.agenttilecli.AgentTileCli";
 
@@ -40,10 +43,22 @@ fn main() -> glib::ExitCode {
     // `update::remember_exe`.
     update::remember_exe();
 
-    let app = Application::builder().application_id(app_id()).build();
-    app.connect_startup(|_| load_css());
-    app.connect_activate(build_window);
-    app.run()
+    let application = adw::Application::builder()
+        .application_id(app_id())
+        .build();
+    application.connect_startup(|_| {
+        load_css();
+        // This app has exactly one palette, and it is a dark one - the graphite
+        // ramp, the warm focus lamp and the ANSI colours inside every pane are
+        // all built against each other and against a dark surface. Letting
+        // libadwaita follow the desktop's light/dark preference would repaint
+        // its own widgets light while every terminal stayed dark, which is not
+        // a light theme - it's a broken dark one. A real light variant means a
+        // second ramp, and that is its own piece of work.
+        adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
+    });
+    application.connect_activate(build_window);
+    application.run()
 }
 
 /// The window title's base text - "AgentTileCLI", with a "[branch]"
@@ -68,49 +83,16 @@ fn load_css() {
     );
 }
 
-fn build_window(app: &Application) {
+fn build_window(application: &adw::Application) {
     gtk4::Window::set_default_icon_name("agenttilecli");
 
     let cwd = std::env::current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "/".to_string());
 
-    let groups = Groups::new(&cwd);
-
-    // A clean 16:10 aspect ratio (1488 / 930 = 1.6 exactly). At this size the
-    // default monospace font gives the help pane roughly 183x47 cells to
-    // work with; its help_text() is laid out three-wide to actually use that
-    // space (widest line 157 columns, across 41 lines) rather than leaving
-    // most of the window blank. This is just the starting size - the app
-    // never resizes itself afterward (adding panes tiles them smaller
-    // within whatever size the window already is instead), so the user's
-    // own resize is the last word on how big it gets.
-    let window = ApplicationWindow::builder()
-        .application(app)
-        .title(base_title())
-        .default_width(1488)
-        .default_height(930)
-        .child(groups.widget())
-        .build();
-
-    let window_weak = window.downgrade();
-    groups.set_title_callback(move |title| {
-        if let Some(window) = window_weak.upgrade() {
-            let title = if title.is_empty() {
-                base_title()
-            } else {
-                format!("{} — {title}", base_title())
-            };
-            window.set_title(Some(&title));
-        }
-    });
-
-    keybindings::install(&window, &groups);
-
-    if let Some(tiler) = groups.active_tiler() {
-        tiler.toggle_help();
-    }
-    window.present();
+    let app = App::new(application, &cwd, &base_title());
+    keybindings::install(app.window(), &app);
+    app.present();
 }
 
 #[cfg(test)]

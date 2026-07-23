@@ -61,15 +61,22 @@ mod layout_imp {
         /// stays the same size regardless of pane count; a partial row's
         /// unused trailing ratios just correspond to empty space rather
         /// than to a pane. Regenerated to all-equal whenever the pane count
-        /// changes underneath them, or whenever the resolved (cols, rows)
-        /// shape itself flips - e.g. the window being resized from wide to
-        /// tall re-orients the grid from side-by-side to stacked - since
-        /// the whole grid shape is recomputed from `n` and the available
-        /// area at that point anyway.
+        /// changes underneath them, since the whole grid shape is recomputed
+        /// from `n` and the available area at that point anyway - and, for a
+        /// grid nobody has dragged, whenever the resolved (cols, rows) shape
+        /// flips, e.g. the window being resized from wide to tall re-orients
+        /// the grid from side-by-side to stacked. Once a seam *has* been
+        /// dragged (`ratios_customized`) that second trigger is off: see
+        /// `ensure_grid_ratios`.
         pub row_ratios: RefCell<Vec<f64>>,
         pub col_ratios: RefCell<Vec<Vec<f64>>>,
         pub grid_shape_n: Cell<usize>,
         pub grid_shape_dims: Cell<(usize, usize)>,
+        /// Whether the ratios above are the user's rather than this module's -
+        /// set the moment a grid seam is dragged, cleared whenever they're
+        /// regenerated. It is what `ensure_grid_ratios` reads to tell a layout
+        /// somebody arranged from one that merely happened.
+        pub ratios_customized: Cell<bool>,
     }
 
     impl Default for TilerLayout {
@@ -83,6 +90,7 @@ mod layout_imp {
                 col_ratios: RefCell::new(Vec::new()),
                 grid_shape_n: Cell::new(usize::MAX),
                 grid_shape_dims: Cell::new((0, 0)),
+                ratios_customized: Cell::new(false),
             }
         }
     }
@@ -96,7 +104,26 @@ mod layout_imp {
         /// only reorients the whole grid when the new shape is a clear
         /// improvement, not just a marginally squarer one - see
         /// `GRID_STABILITY_BIAS`.
-        fn ensure_grid_ratios(&self, n: usize, width: i32, height: i32) {
+        // `pub(super)` for the tests in this file, which drive it directly:
+        // reaching it through `allocate` would mean real panes, and a pane is a
+        // PTY with a shell in it.
+        pub(super) fn ensure_grid_ratios(&self, n: usize, width: i32, height: i32) {
+            // A grid whose seams have been dragged keeps both its proportions
+            // and its shape for as long as the pane count holds, whatever the
+            // window does around it.
+            //
+            // Re-orienting can't preserve a drag even in principle: the ratios
+            // are shaped to the grid (one weight per row, one per column within
+            // each row), so a 2x2 becoming a 1x4 has nowhere to put the four
+            // column weights it was holding. Re-orienting *is* discarding them.
+            // Dragging a seam is the one unambiguous statement the user makes
+            // about this layout, and resizing a window is not a retraction of
+            // it - so the drag outranks the reflow, and only opening or closing
+            // a pane (which genuinely invalidates the arrangement) resets it.
+            if self.ratios_customized.get() && self.grid_shape_n.get() == n {
+                return;
+            }
+
             let prev_cols =
                 (self.grid_shape_n.get() != usize::MAX).then(|| self.grid_shape_dims.get().0);
             let shape = layout::grid_shape(n, width, height, prev_cols);
@@ -108,6 +135,8 @@ mod layout_imp {
             *self.col_ratios.borrow_mut() = vec![vec![1.0; cols]; rows];
             self.grid_shape_n.set(n);
             self.grid_shape_dims.set(shape);
+            // Regenerated, so whatever was arranged here is gone with them.
+            self.ratios_customized.set(false);
         }
     }
 
@@ -121,6 +150,26 @@ mod layout_imp {
     impl ObjectImpl for TilerLayout {}
 
     impl LayoutManagerImpl for TilerLayout {
+        /// Sizes exactly as the default does, and reports no baseline.
+        ///
+        /// GTK warns ("reported a horizontal baseline") when a widget hands back
+        /// a baseline for a horizontal measurement, which is meaningless - a
+        /// baseline is the line text sits on, so only the vertical measurement
+        /// has one. The default aggregates its children's, and a VTE terminal
+        /// has a real baseline to give, so the tiler was passing one along in
+        /// both directions and being told off for it three times a launch.
+        ///
+        /// Panes are tiled rectangles rather than a row of labels to be aligned
+        /// with each other, so there is nothing here for a baseline to mean in
+        /// either direction. The minimum and natural sizes are deliberately left
+        /// to the parent: they are what stops the window shrinking smaller than
+        /// the panes can render into, and silencing a warning is no reason to
+        /// change how the window resizes.
+        fn measure(&self, widget: &Widget, orientation: gtk4::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            let (minimum, natural, _, _) = self.parent_measure(widget, orientation, for_size);
+            (minimum, natural, -1, -1)
+        }
+
         fn allocate(&self, widget: &Widget, width: i32, height: i32, _baseline: i32) {
             let mut children = Vec::new();
             let mut next = widget.first_child();
@@ -184,6 +233,24 @@ impl TilerLayout {
 // its own `panes` Vec.
 // ---------------------------------------------------------------------
 
+/// Everything about how a group is arranged that isn't the mode - reported out
+/// to whoever is keeping the model in step, via `Tiler::set_layout_callback`.
+///
+/// These used to be readable only from inside the layout manager, which meant
+/// the app could tile by them but never report or save them. They are still
+/// *owned* here rather than read back out of the model on every allocation:
+/// `TilerLayout::allocate` runs inside GTK's layout pass, and reaching into a
+/// `RefCell` the same pass may already have borrowed is a re-entrancy bug
+/// waiting to happen. So the tiler stays the source and pushes changes out,
+/// exactly as `mode` already does.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct LayoutState {
+    pub master_ratio: f64,
+    pub master_count: usize,
+    /// Index of the focused pane within this group's pane order.
+    pub focus: usize,
+}
+
 mod imp {
     use super::*;
 
@@ -196,6 +263,15 @@ mod imp {
         /// Invoked when a pane in this group wants the user - see
         /// `Tiler::set_attention_callback`.
         pub attention_cb: RefCell<Option<Box<dyn Fn()>>>,
+        /// Invoked whenever the layout mode changes, however it changed - see
+        /// `Tiler::set_mode_callback`.
+        pub mode_cb: RefCell<Option<Box<dyn Fn(Mode)>>>,
+        /// Invoked whenever the master ratio, master count or focus index
+        /// changes - see `Tiler::set_layout_callback`.
+        pub layout_cb: RefCell<Option<Box<dyn Fn(LayoutState)>>>,
+        /// Invoked with the new pane count whenever a pane is attached or
+        /// removed - see `Tiler::set_pane_count_callback`.
+        pub count_cb: RefCell<Option<Box<dyn Fn(usize)>>>,
         pub resizing: Cell<bool>,
         pub drag_start_ratio: Cell<f64>,
         pub drag_start_width: Cell<i32>,
@@ -403,6 +479,11 @@ impl Tiler {
                     .master_ratio
                     .set(ratio.clamp(0.1, 0.9));
                 this.queue_allocate();
+                // Every write site reports, including this one - a ratio the
+                // user dragged to is as real as one they pressed a key for, and
+                // a drag that ended anywhere but where the model thinks it did
+                // is a session that restores to the wrong shape.
+                this.notify_layout();
                 return;
             }
 
@@ -443,6 +524,10 @@ impl Tiler {
                 }
                 Handle::Master => {}
             }
+            // From here this grid is arranged rather than merely laid out, and
+            // a window resize stops being allowed to undo it - see
+            // `TilerLayout::ensure_grid_ratios`.
+            lm.imp().ratios_customized.set(true);
             this.queue_allocate();
         });
 
@@ -479,6 +564,7 @@ impl Tiler {
         self.update_focus_style();
         self.relayout();
         self.grab_focus_on_current();
+        self.notify_layout();
     }
 
     /// Push this widget's focus index into the layout manager and request a
@@ -519,9 +605,14 @@ impl Tiler {
         }
     }
 
+    /// How many panes this group is currently running.
+    pub fn pane_count(&self) -> usize {
+        self.imp().panes.borrow().len()
+    }
+
     /// Spawns a pane in this group's project directory (the one it was
     /// created with) - no dialog. Opening a *different* project happens by
-    /// creating a whole new group (see `crate::groups::Groups::new_group`)
+    /// creating a whole new project (see `crate::app::App::new_project`)
     /// rather than mixing an unrelated project's panes into this grid.
     pub fn spawn_pane_here(&self) {
         let cwd = self.imp().cwd.borrow().clone();
@@ -613,22 +704,6 @@ impl Tiler {
         pane
     }
 
-    /// Toggle a static cheatsheet pane on/off: closes it if one is already
-    /// open, otherwise spawns one (with no child process, just fed text).
-    pub fn toggle_help(&self) {
-        let existing = self
-            .imp()
-            .panes
-            .borrow()
-            .iter()
-            .find(|p| p.is_help())
-            .cloned();
-        match existing {
-            Some(pane) => self.remove_pane(&pane),
-            None => self.attach_pane(Rc::new(Pane::help())),
-        }
-    }
-
     fn attach_pane(&self, pane: Rc<Pane>) {
         pane.frame.set_parent(self);
         pane.terminal.set_font_scale(self.imp().font_scale.get());
@@ -666,7 +741,40 @@ impl Tiler {
 
         self.imp().panes.borrow_mut().push(pane);
         let pane_count = self.imp().panes.borrow().len();
-        self.set_focus(pane_count - 1);
+        if pane_count == 1 {
+            // The first pane in an empty group has to take focus: nothing else
+            // is holding it, and a group whose only terminal doesn't accept
+            // typing is just broken.
+            self.set_focus(0);
+        } else {
+            // After that, spawning is a background act. You start another agent
+            // *while* working in one, and having the keyboard yank itself into
+            // a fresh pane mid-sentence sends the rest of that sentence
+            // somewhere you weren't looking. The new pane is on screen and one
+            // click (or Super+Alt+j) away, which is enough of an invitation.
+            //
+            // Still a re-tile and a restyle, though: the grid has one more cell
+            // in it, and the new pane has to be painted as the unfocused one it
+            // is rather than inherit the focused frame.
+            self.update_focus_style();
+            self.relayout();
+        }
+        self.notify_pane_count();
+    }
+
+    /// Registers a callback invoked with the pane count whenever it changes.
+    /// Drives the empty state: a project with nothing running shows what to do
+    /// about that rather than a blank rectangle.
+    pub fn set_pane_count_callback(&self, f: impl Fn(usize) + 'static) {
+        *self.imp().count_cb.borrow_mut() = Some(Box::new(f));
+        self.notify_pane_count();
+    }
+
+    fn notify_pane_count(&self) {
+        let count = self.imp().panes.borrow().len();
+        if let Some(cb) = self.imp().count_cb.borrow().as_ref() {
+            cb(count);
+        }
     }
 
     fn remove_pane(&self, pane: &Rc<Pane>) {
@@ -687,17 +795,16 @@ impl Tiler {
         let len = self.imp().panes.borrow().len();
         let focus = self.imp().focus.get();
         self.set_focus(if len == 0 { 0 } else { focus.min(len - 1) });
+        self.notify_pane_count();
     }
 
-    /// Hangs up every real (non-help) pane in this group, without waiting
-    /// for their `child-exited` signals - used when the whole group is being
-    /// torn down (see `Groups::remove_group`), so the caller can drop this
-    /// `Tiler` right away instead of waiting on each pane individually.
+    /// Hangs up every pane in this project, without waiting for their
+    /// `child-exited` signals - used when the whole project is being torn down
+    /// (see `App::remove_project`), so the caller can drop this `Tiler` right
+    /// away instead of waiting on each pane individually.
     pub fn close_all_panes(&self) {
         for pane in self.imp().panes.borrow().iter() {
-            if !pane.is_help() {
-                pane.hangup();
-            }
+            pane.hangup();
         }
     }
 
@@ -709,14 +816,9 @@ impl Tiler {
     }
 
     /// Close a specific pane regardless of focus (e.g. from its own X button).
+    /// Removal happens asynchronously via the `child-exited` signal.
     fn close_pane(&self, pane: &Rc<Pane>) {
-        if pane.is_help() {
-            // No process to wait on - remove immediately.
-            self.remove_pane(pane);
-        } else {
-            // Removal happens asynchronously via the `child-exited` signal.
-            pane.hangup();
-        }
+        pane.hangup();
     }
 
     pub fn focus_next(&self) {
@@ -751,6 +853,7 @@ impl Tiler {
         let r = (lm.imp().master_ratio.get() + 0.05).min(0.9);
         lm.imp().master_ratio.set(r);
         self.queue_allocate();
+        self.notify_layout();
     }
 
     pub fn dec_master_ratio(&self) {
@@ -758,6 +861,7 @@ impl Tiler {
         let r = (lm.imp().master_ratio.get() - 0.05).max(0.1);
         lm.imp().master_ratio.set(r);
         self.queue_allocate();
+        self.notify_layout();
     }
 
     pub fn inc_master_count(&self) {
@@ -766,6 +870,7 @@ impl Tiler {
         let c = (lm.imp().master_count.get() + 1).min(len);
         lm.imp().master_count.set(c);
         self.queue_allocate();
+        self.notify_layout();
     }
 
     pub fn dec_master_count(&self) {
@@ -773,11 +878,12 @@ impl Tiler {
         let c = (lm.imp().master_count.get().max(2)) - 1;
         lm.imp().master_count.set(c);
         self.queue_allocate();
+        self.notify_layout();
     }
 
     /// Apply `scale` to every current pane's terminal (new panes pick up
     /// whatever `font_scale` holds at attach time, in `attach_pane`). Text
-    /// size is a global setting (see `Groups::inc_font_scale`), which calls
+    /// size is a global setting (see `App::inc_font_scale`), which calls
     /// this on every group's `Tiler` in lockstep - not just the active
     /// one - so switching groups never shows a different zoom level.
     pub(crate) fn set_font_scale(&self, scale: f64) {
@@ -787,24 +893,73 @@ impl Tiler {
         }
     }
 
-    pub fn cycle_mode(&self) {
+    /// How this group's panes are currently arranged.
+    ///
+    /// Public because the mode is no longer only a tiling input: the header bar
+    /// reports it, so it has to be readable from outside the layout manager it
+    /// used to be sealed inside. Pressing the cycle key and learning nothing was
+    /// the whole problem with keeping it private.
+    pub fn mode(&self) -> Mode {
+        self.layout_mgr().imp().mode.get()
+    }
+
+    /// The one place the mode is written, so `mode_cb` cannot be bypassed - a
+    /// header bar showing a mode the tiler isn't in is worse than one showing
+    /// nothing.
+    pub fn set_mode(&self, mode: Mode) {
         let lm = self.layout_mgr();
-        let m = lm.imp().mode.get().next();
-        lm.imp().mode.set(m);
+        if lm.imp().mode.get() == mode {
+            return;
+        }
+        lm.imp().mode.set(mode);
         self.queue_allocate();
+        if let Some(cb) = self.imp().mode_cb.borrow().as_ref() {
+            cb(mode);
+        }
+    }
+
+    /// Registers a callback invoked whenever this group's layout mode changes,
+    /// by any route - the keybinding, the header bar, or the monocle toggle.
+    pub fn set_mode_callback(&self, f: impl Fn(Mode) + 'static) {
+        *self.imp().mode_cb.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// How this group is arranged, beyond the mode.
+    pub fn layout_state(&self) -> LayoutState {
+        let lm = self.layout_mgr();
+        LayoutState {
+            master_ratio: lm.imp().master_ratio.get(),
+            master_count: lm.imp().master_count.get(),
+            focus: self.imp().focus.get(),
+        }
+    }
+
+    /// Registers a callback invoked whenever the master ratio, master count or
+    /// focus changes - by keybinding or by dragging the master seam.
+    pub fn set_layout_callback(&self, f: impl Fn(LayoutState) + 'static) {
+        *self.imp().layout_cb.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Reports the current arrangement outward. Called from every site that
+    /// writes one of those three, so the model cannot silently fall behind.
+    fn notify_layout(&self) {
+        if let Some(cb) = self.imp().layout_cb.borrow().as_ref() {
+            cb(self.layout_state());
+        }
+    }
+
+    pub fn cycle_mode(&self) {
+        self.set_mode(self.mode().next());
     }
 
     /// Jump straight to Monocle (focused pane fullscreen), or back to
     /// MasterStack if already in Monocle.
     pub fn toggle_monocle(&self) {
-        let lm = self.layout_mgr();
-        let m = if lm.imp().mode.get() == Mode::Monocle {
+        self.set_mode(if self.mode() == Mode::Monocle {
             Mode::MasterStack
         } else {
             Mode::Monocle
-        };
-        lm.imp().mode.set(m);
-        self.queue_allocate();
+        });
     }
 
     fn grab_focus_on_current(&self) {
@@ -858,5 +1013,143 @@ impl Tiler {
         if let Some(cb) = self.imp().title_cb.borrow().as_ref() {
             cb(&title);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::gtk_test;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// The layout callback is the only route by which the master ratio and the
+    /// focus index reach the model - `TilerLayout`'s cells are private and its
+    /// allocation pass is the wrong place to read them from. So a write that
+    /// forgets to report is a group that tiles correctly and saves wrong, which
+    /// is invisible until a session is restored.
+    #[test]
+    fn every_master_ratio_change_is_reported_outward() {
+        gtk_test(|| {
+            let tiler = Tiler::new("/tmp".to_string());
+            let seen: Rc<RefCell<Vec<LayoutState>>> = Rc::new(RefCell::new(Vec::new()));
+
+            let sink = seen.clone();
+            tiler.set_layout_callback(move |state| sink.borrow_mut().push(state));
+
+            tiler.inc_master_ratio();
+            tiler.inc_master_ratio();
+            tiler.dec_master_ratio();
+
+            let seen = seen.borrow();
+            assert_eq!(seen.len(), 3, "one report per write, no more and no fewer");
+            // 0.55 is the starting ratio; the step is 0.05.
+            let ratios: Vec<f64> = seen.iter().map(|s| s.master_ratio).collect();
+            for (got, want) in ratios.iter().zip([0.60, 0.65, 0.60]) {
+                assert!(
+                    (got - want).abs() < 1e-9,
+                    "reported ratios {ratios:?}, expected 0.60 / 0.65 / 0.60",
+                );
+            }
+            assert_eq!(
+                seen.last().map(|s| s.master_ratio),
+                Some(tiler.layout_state().master_ratio),
+                "the last thing reported is what the tiler actually holds",
+            );
+        });
+    }
+
+    /// A grid the user has arranged by dragging its seams must survive the
+    /// window being resized around it - including a resize drastic enough that
+    /// a from-scratch pick would choose a different shape entirely.
+    ///
+    /// This is the regression that motivated the flag: the old code regenerated
+    /// all-equal ratios whenever the resolved shape changed, so dragging a seam
+    /// and then making the window taller silently threw the drag away.
+    #[test]
+    fn a_dragged_grid_survives_a_window_resize() {
+        gtk_test(|| {
+            let lm = TilerLayout::new();
+            let imp = lm.imp();
+
+            // Four panes in a wide area: some shape, all-equal ratios.
+            imp.ensure_grid_ratios(4, 1600, 900);
+            let wide_shape = imp.grid_shape_dims.get();
+            assert!(imp.row_ratios.borrow().iter().all(|r| *r == 1.0));
+            assert!(!imp.ratios_customized.get(), "nothing dragged yet");
+
+            // The user drags a seam.
+            imp.row_ratios.borrow_mut()[0] = 1.6;
+            imp.ratios_customized.set(true);
+            let dragged = imp.row_ratios.borrow().clone();
+
+            // Now the window turns tall and narrow - the shape a fresh pick
+            // would want is not the one on screen.
+            imp.ensure_grid_ratios(4, 600, 1600);
+            assert_eq!(
+                imp.grid_shape_dims.get(),
+                wide_shape,
+                "the arranged shape holds, because re-orienting *is* discarding",
+            );
+            assert_eq!(*imp.row_ratios.borrow(), dragged, "the drag survives");
+
+            // Opening a pane genuinely invalidates the arrangement, so that -
+            // and only that - resets it.
+            imp.ensure_grid_ratios(5, 600, 1600);
+            assert!(!imp.ratios_customized.get());
+            assert!(
+                imp.row_ratios.borrow().iter().all(|r| *r == 1.0),
+                "a new pane count starts from equal cells again",
+            );
+        });
+    }
+
+    /// The flag only protects a grid somebody actually arranged. An untouched
+    /// one still re-orients itself to the window, which is the behaviour the
+    /// README advertises and the reason the flag exists rather than a blanket
+    /// "never reorient".
+    #[test]
+    fn an_untouched_grid_still_reorients_with_the_window() {
+        gtk_test(|| {
+            let lm = TilerLayout::new();
+            let imp = lm.imp();
+
+            imp.ensure_grid_ratios(3, 1600, 400);
+            let wide = imp.grid_shape_dims.get();
+
+            imp.ensure_grid_ratios(3, 400, 1600);
+            let tall = imp.grid_shape_dims.get();
+
+            assert_ne!(
+                wide, tall,
+                "a wide window wants columns and a tall one wants rows",
+            );
+        });
+    }
+
+    /// The ratio is clamped inside the tiler rather than by whoever stores it,
+    /// so the clamp has to be visible in what gets reported - a model that
+    /// records 1.4 restores a master column wider than the window.
+    #[test]
+    fn a_reported_ratio_is_the_clamped_one() {
+        gtk_test(|| {
+            let tiler = Tiler::new("/tmp".to_string());
+            let seen = Rc::new(RefCell::new(Vec::new()));
+
+            let sink = seen.clone();
+            tiler.set_layout_callback(move |state: LayoutState| {
+                sink.borrow_mut().push(state.master_ratio)
+            });
+
+            for _ in 0..20 {
+                tiler.inc_master_ratio();
+            }
+            assert_eq!(seen.borrow().last().copied(), Some(0.9));
+
+            for _ in 0..40 {
+                tiler.dec_master_ratio();
+            }
+            assert_eq!(seen.borrow().last().copied(), Some(0.1));
+        });
     }
 }

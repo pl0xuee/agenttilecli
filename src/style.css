@@ -1,5 +1,5 @@
 /* ── Palette ──────────────────────────────────────────────────────────────
-   Cool graphite surfaces, one warm light.
+   Dark gunmetal surfaces, one warm light.
 
    Two rules hold the whole scheme together, and everything below is derived
    from them:
@@ -15,15 +15,24 @@
    amber that an agent wants you, green that an update landed, red that this
    destroys something, and five identity colours for the projects themselves.
 
-   The surfaces are one graphite ladder, defined once. Depth reads as depth
+   The surfaces are one gunmetal ladder, defined once. Depth reads as depth
    because a pane sits *above* the window by being several rungs lighter, not
    because it happens to be a different near-black. The rungs are spaced widely
    enough to survive a dim laptop panel, which is where flat-looking dark
    themes usually come apart - and widely enough to carry the separation on
    their own, since nothing in this app casts a shadow.
 
-   The cool cast widens as the ladder climbs (6 points of red-to-blue spread at
-   the floor, 20 at the top): a fixed offset is a smaller and smaller fraction
+   What makes it gunmetal rather than graphite is a faint *teal* cast: green
+   sits one to two points above the midpoint of red and blue on every rung.
+   A ramp whose green sits exactly on that midpoint is a neutral blue-grey, and
+   it reads as ink - a colour of absence. Blued steel is a material, and it has
+   that trace of teal in it, which is what makes @chip land within a point of
+   canonical gunmetal (#2a3439). The whole ladder also sits a few points off
+   the floor for the same reason: a surface that bottoms out at near-black
+   stops looking like metal and starts looking like a hole.
+
+   The cool cast widens as the ladder climbs (9 points of red-to-blue spread at
+   the floor, 23 at the top): a fixed offset is a smaller and smaller fraction
    of the channel values as they lighten, so holding it flat would let the cast
    drain out of the top of the ramp.
 
@@ -33,26 +42,32 @@
    `the_stylesheet_parses_without_errors`, which is what stops an unsupported
    colour function being silently dropped. */
 
-@define-color field    #0c0f12; /* the window's own panel, the floor */
-@define-color rack     #11151a; /* sidebar - recessed below the panes */
-@define-color tile     #191e24; /* pane body: graphite proper */
-@define-color tile-lit #1e2329; /* the focused pane, same graphite lit */
-@define-color chip     #252c33; /* small controls sitting on a pane */
-@define-color hairline #2b333b; /* rules inside the chrome */
-@define-color edge     #39434d; /* pane borders, the strongest rule */
+@define-color field    #0e1317; /* the window's own panel, the floor */
+@define-color rack     #131a1f; /* sidebar - recessed below the panes */
+@define-color tile     #1c242a; /* pane body: gunmetal proper */
+@define-color tile-lit #212a30; /* the focused pane, same gunmetal lit */
+@define-color chip     #29333a; /* small controls sitting on a pane */
+@define-color hairline #323d45; /* rules inside the chrome */
+@define-color edge     #43505a; /* pane borders, the strongest rule */
 
-@define-color text  #e8edf2; /* the thing being read */
-@define-color dim   #aeb8c2; /* secondary labels */
-@define-color muted #7f8b96; /* icons, quiet controls */
-@define-color faint #5d6873; /* footnotes and rack engraving */
+@define-color text  #e9eef1; /* the thing being read */
+@define-color dim   #aeb8be; /* secondary labels */
+@define-color muted #7d8890; /* icons, quiet controls */
+@define-color faint #5b666d; /* footnotes and rack engraving */
 
 /* The lamp, and the three things worth saying in colour. @filament is warm on
    purpose - a neutral white lights nothing, it just looks like a brighter grey,
    and the whole point of the focus treatment is that the active tile looks
-   *lit* rather than *ticked*. */
+   *lit* rather than *ticked*.
+
+   @fresh is a warm, yellow-leaning green rather than the cooler one a green
+   signal reaches for by default. That is the ramp's doing: against a gunmetal
+   ground with teal in it, a blue-green reads as one more rung of the surface
+   instead of as news. Pulling it toward yellow is what buys the separation
+   back, and it costs nothing - there is no other yellow-green in the app. */
 @define-color filament #f2e7d3; /* focus, selection, cursor - the light */
 @define-color tally    #f0a93c; /* an agent wants you */
-@define-color fresh    #79c58c; /* an update is available */
+@define-color fresh    #86c97e; /* an update is available */
 @define-color hangup   #e06c60; /* close, hang up, destroy */
 
 /* Per-project identity colours, assigned to sidebar rows by hashing the project
@@ -68,12 +83,73 @@
    other, so no project reads as louder than its neighbours. Five means a sixth
    project repeats a colour - a collision costs a little distinctness and
    nothing else, which is why it isn't worth a bigger palette of muddier hues.
-   Blue is available again now that focus doesn't use it. */
+   Blue is available again now that focus doesn't use it.
+
+   The teal carries more chroma than the other four, which looks like an
+   inconsistency and isn't: it is the one hue the gunmetal ramp shares a cast
+   with, so at rail width it has a fainter version of itself to be told apart
+   from. The extra saturation is what puts it back on equal footing with the
+   four hues the surface says nothing about. */
 @define-color hue-1 #6bb2e8; /* blue   */
-@define-color hue-2 #46c7ba; /* teal   */
+@define-color hue-2 #3ad0c0; /* teal   */
 @define-color hue-3 #a9cf5b; /* lime   */
 @define-color hue-4 #ae8fe6; /* violet */
 @define-color hue-5 #e58fb8; /* pink   */
+
+/* ── Adwaita, told which palette it's in ───────────────────────────────────
+   libadwaita ships a complete stylesheet of its own, and its widgets paint
+   themselves from *its* named colours rather than from anything above. Left
+   alone, the header bar and the sidebar arrive in stock Adwaita grey with a
+   stock blue accent, sitting a few pixels from panes built on the ramp - which
+   reads as two applications sharing a window.
+
+   So the ramp is aliased onto Adwaita's names. This is the supported way to
+   theme it, and it means one edit above still moves everything: there is no
+   second set of values here to fall out of step, only pointers.
+
+   These lines are also, deliberately, invisible to `palette.rs`. Its parser
+   takes `@define-color <name> <#rrggbb>` and returns `None` for anything whose
+   value isn't a hex literal, so every alias below is skipped rather than
+   mis-parsed. That is why they're aliases and not copies. */
+@define-color window_bg_color @field;
+@define-color window_fg_color @text;
+@define-color view_bg_color @tile;
+@define-color view_fg_color @text;
+@define-color headerbar_bg_color @rack;
+@define-color headerbar_fg_color @text;
+@define-color headerbar_border_color @hairline;
+@define-color headerbar_backdrop_color @field;
+@define-color sidebar_bg_color @rack;
+@define-color sidebar_fg_color @text;
+@define-color sidebar_backdrop_color @rack;
+@define-color sidebar_border_color @hairline;
+@define-color secondary_sidebar_bg_color @rack;
+@define-color card_bg_color @chip;
+@define-color card_fg_color @text;
+@define-color dialog_bg_color @tile;
+@define-color dialog_fg_color @text;
+@define-color popover_bg_color @tile;
+@define-color popover_fg_color @text;
+
+/* The lamp is the accent, which keeps "the thing you're about to act on" and
+   "the thing the keyboard is in" the same colour across chrome and panes alike.
+   Its foreground is the floor, not white: @filament is a near-white, and white
+   text on it would be unreadable. */
+@define-color accent_bg_color @filament;
+@define-color accent_fg_color @field;
+@define-color accent_color @filament;
+@define-color destructive_bg_color @hangup;
+@define-color destructive_fg_color @field;
+@define-color destructive_color @hangup;
+@define-color success_bg_color @fresh;
+@define-color success_fg_color @field;
+@define-color success_color @fresh;
+@define-color warning_bg_color @tally;
+@define-color warning_fg_color @field;
+@define-color warning_color @tally;
+@define-color error_bg_color @hangup;
+@define-color error_fg_color @field;
+@define-color error_color @hangup;
 
 /* Flat, and deliberately so. The gutters between tiles are the app's own
    diagram - which panes are where, at what size - and a gradient across the
@@ -93,13 +169,26 @@ window {
 
 /* A tile is cut, not dropped: a 3px radius that reads as a machined corner
    rather than a soft card, a single hairline, and no shadow at all. What lifts
-   it off the backdrop is tone - @tile sits a full 13 points above @field, which
+   it off the backdrop is tone - @tile sits a full 14 points above @field, which
    is a wider gap than any shadow was carrying - and keeping the lift in the
    fill means it survives at any window size, on any panel, at any gutter width.
-   Nothing in this app floats except the pane the keyboard is talking to. */
+   Nothing in this app floats except the pane the keyboard is talking to.
+
+   The top edge is lighter than the other three. Machined gunmetal catches the
+   light on its chamfer, and one brighter rule along the top is the whole of
+   what makes these read as milled plate rather than as rectangles - the same
+   trick a bevel plays, for a fraction of the ink.
+
+   It has to live on the *border* rather than on an inset box-shadow, which is
+   the obvious way to draw it and does not work here: GTK paints background and
+   box-shadow before it paints children, and the terminal clears the frame's
+   whole content box opaquely on top of both (see `.pane.focused` below, which
+   has the same problem and solves it in pane.rs). The border ring is the one
+   part of the frame the terminal never reaches. */
 .pane {
   background-color: @tile;
   border: 1px solid @edge;
+  border-top-color: mix(@edge, @filament, 0.22);
   border-radius: 0.25em;
   transition: border-color 120ms ease-out, box-shadow 120ms ease-out,
     background-color 120ms ease-out;
@@ -130,13 +219,17 @@ window {
   box-shadow: 0 0 0 2px alpha(@filament, 0.13), 0 0 1.6em alpha(@filament, 0.09);
 }
 
-/* Chrome that floats *over* a pane - the close ✕, the hamburger, the new-agent
-   button, the directory label. They share a fill, a rule and a corner radius so
-   they read as one family of controls rather than four separately-invented
-   buttons, and the rule is what keeps them legible when they happen to sit over
-   a patch of pale terminal output. */
+/* Chrome that floats *over* a pane - the close ✕ and the directory label. They
+   share a fill, a rule and a corner radius so they read as one family rather
+   than two separately-invented controls, and the rule is what keeps them legible
+   when they happen to sit over a patch of pale terminal output.
+
+   There used to be two more members of this family: a hamburger pinned to the
+   top-left of the workspace and a new-agent button pinned to the bottom-right.
+   Both are in the header bar now, where a control that acts on the whole window
+   belongs - floating them over a pane meant they sat on top of one particular
+   agent's output while having nothing to do with that agent. */
 .pane-close,
-.add-pane,
 .pane-dir {
   background-color: alpha(@chip, 0.9);
   border: 1px solid alpha(@edge, 0.6);
@@ -160,30 +253,36 @@ window {
   border-color: @hangup;
 }
 
-.add-pane {
-  min-width: 2.3em;
-  min-height: 2.3em;
-  opacity: 0.5;
-  transition: opacity 120ms ease-out, background-color 120ms ease-out,
-    border-color 120ms ease-out, color 120ms ease-out;
+/* ── The mode switcher ─────────────────────────────────────────────────────
+   Three linked toggles in the header bar, one per layout mode. This is the app
+   finally saying out loud something it always knew: cycling modes used to change
+   the tiling and leave the only evidence in the shape of the panes, which is
+   readable with four of them open and a guess with one.
+
+   The active one takes the lamp, at the low alpha the sidebar's selected strip
+   uses rather than a solid fill. It is reporting a state, not asking to be
+   pressed, and a filled button in the header bar would be the brightest thing on
+   screen - competing with the focused pane, which is the one thing that is
+   allowed to look lit. */
+.mode-switcher button {
+  min-width: 2em;
+  min-height: 1.8em;
+  color: @muted;
+  transition: color 120ms ease-out, background-color 120ms ease-out;
 }
 
-/* The one place the light is borrowed by something other than a pane: these two
-   buttons are how you *make* a pane, so the hover reads as the lamp coming on
-   ahead of the thing it's about to light. */
-.add-pane:hover {
-  opacity: 1;
-  color: @field;
-  background-color: @filament;
-  border-color: @filament;
+.mode-switcher button:hover {
+  color: @text;
+  background-color: alpha(@text, 0.06);
 }
 
-.floating-bottom-right {
-  margin: 0 1.4em 1.4em 0;
+.mode-switcher button:checked {
+  color: @filament;
+  background-color: alpha(@filament, 0.12);
 }
 
-.floating-top-left {
-  margin: 1.4em 0 0 1.4em;
+.mode-switcher button:checked:hover {
+  background-color: alpha(@filament, 0.16);
 }
 
 /* An engraved equipment label rather than a caption: monospace, small, in caps
@@ -204,11 +303,15 @@ window {
    The sidebar is a rack of channel strips: every open project gets a strip,
    every strip carries a tally rail in that project's own colour, and exactly
    one of them is lit. It sits a rung below the window's own panel, because the
-   panes stand out from it. */
+   panes stand out from it.
+
+   Neither its width nor its right-hand edge is set here any more. The split view
+   owns the first (it clamps the sidebar between a min and a max, and collapses it
+   to an overlay below a breakpoint), and draws the second itself - a `min-width`
+   fighting the clamp, or a border doubling the separator, is the kind of seam
+   that only shows up at one particular window size. */
 .sidebar {
-  min-width: 16.5em;
   background-color: @rack;
-  border-right: 1px solid @hairline;
 }
 
 /* No bottom border, unlike the footer: monospace caps at this tracking already
@@ -453,60 +556,37 @@ row.sidebar-row.drop-below:selected {
   border-top: 1px solid @hairline;
 }
 
-/* Same padding, radius and monospace as a strip: it sits in the same column, at
-   the same indent, and lining the two up is what stops the footer looking
-   bolted on. No rail, though - it isn't a channel. */
-.sidebar-footer-button {
-  padding: 0.55em 0.7em;
-  border-radius: 0.25em;
-  color: @dim;
-  font-family: monospace;
-  font-size: 0.82em;
-  transition: background-color 120ms ease-out, color 120ms ease-out;
-}
-
-.sidebar-footer-button:hover {
-  color: @text;
-  background-color: alpha(@text, 0.06);
-}
-
-.sidebar-footer-icon {
-  color: @muted;
-}
-
-.sidebar-footer-button:hover .sidebar-footer-icon {
-  color: @filament;
-}
+/* The footer is the version line alone now. The update button that used to sit
+   above it - and the padding, radius and monospace that lined it up with the
+   strips above - went to the app menu, which is reachable without opening the
+   sidebar at all. */
 
 /* The same signal as the flashing strip, carried out to where it can actually
    be seen. The sidebar starts collapsed, so most of the time the strip that lit
-   up is behind it - and a notification nobody can see isn't one. The hamburger
-   is what's on screen at that moment: it says "one of your projects wants you",
-   and the strip behind it says which. It stays lit until the last flagged group
-   has been looked at.
+   up is behind it - and a notification nobody can see isn't one. The sidebar
+   toggle is what's on screen at that moment: it says "one of your projects wants
+   you", and the strip behind it says which. It stays lit until the last flagged
+   project has been looked at.
 
-   Brighter than the strip's tint, because it's carrying the message alone, and
-   because it sits over pane content rather than the rack's flat backdrop. */
-@keyframes hamburger-attention {
-  from { background-color: alpha(@chip, 0.9); }
+   Brighter than the strip's tint, because it's carrying the message alone. */
+@keyframes toggle-attention {
+  from { background-color: alpha(@tally, 0); }
   50%  { background-color: alpha(@tally, 0.85); }
-  to   { background-color: alpha(@chip, 0.9); }
+  to   { background-color: alpha(@tally, 0); }
 }
 
-.add-pane.needs-attention {
+.sidebar-toggle.needs-attention {
   color: @tally;
-  border-color: alpha(@tally, 0.5);
-  opacity: 1;
-  animation-name: hamburger-attention;
+  animation-name: toggle-attention;
   animation-duration: 900ms;
   animation-iteration-count: 3;
   animation-timing-function: ease-in-out;
 }
 
-.add-pane.needs-attention:hover {
+.sidebar-toggle.needs-attention:hover {
   color: @field;
   background-color: @tally;
-  border-color: @tally;
+  animation-name: none;
 }
 
 /* The list only overflows once there are more projects open than fit, so the
@@ -547,52 +627,43 @@ row.sidebar-row.drop-below:selected {
   color: #ffffff;
 }
 
-/* Left on the button once a check has actually found something, so dismissing
-   the dialog with "Not now" doesn't also dismiss the fact. */
-.sidebar-footer-button.update-available,
-.sidebar-footer-button.update-available .sidebar-footer-icon {
-  color: @fresh;
-}
+/* ── An update is waiting ──────────────────────────────────────────────────
+   Left on the app-menu button once a check has actually found something, so
+   dismissing the dialog with "Not now" doesn't also dismiss the fact. The menu
+   item behind it says so in words; this is what makes the shut menu say it.
 
-/* And pulsing, so it reads as news rather than as one more dim thing in the
-   footer. The green alone is easy to walk past - it's a colour change on a
-   control the eye has already learned to ignore, in the corner of a sidebar
-   that's usually shut.
+   Green rather than amber, and three beats rather than the sidebar's: @tally
+   means an agent is asking for you and @fresh means a build is waiting, and the
+   two must not be answered in the same way. This one is housekeeping - it can
+   wait for the end of a thought, so it gets said once and then sits still.
 
-   The pulse runs for as long as the update is pending, rather than the few
-   beats a flashing strip gets, because unlike a strip this button is never on
-   screen at the moment it starts: an available update always arrives with the
-   dialog on top of it, so a burst of three would play out behind that dialog
-   and be over before the button was ever looked at. What has to still be moving
-   is the button someone finds later, when they next open the sidebar - which is
-   the only time this animation costs anything to run, since a collapsed
-   sidebar's Revealer unmaps the footer and GTK stops ticking it.
-
-   Slow and shallow on purpose: it sits a few pixels from the project list the
-   user is actually trying to read, and this is housekeeping, not an alarm. */
+   The pulse is a burst rather than the indefinite one this had while it lived
+   in the sidebar footer. That argument was explicitly that the footer button is
+   never on screen when a check finishes - the sidebar is usually shut, so a
+   burst would play out unseen behind the dialog. The header bar is not shut,
+   which retires the argument along with the button: the burst now happens where
+   it can actually be seen, and a control that keeps blinking forever in the
+   corner of the chrome is an alarm, which this isn't. */
 @keyframes update-available-pulse {
   from { background-color: alpha(@fresh, 0); }
-  50%  { background-color: alpha(@fresh, 0.24); }
+  50%  { background-color: alpha(@fresh, 0.5); }
   to   { background-color: alpha(@fresh, 0); }
 }
 
-.sidebar-footer-button.update-available {
+.app-menu.update-available {
+  color: @fresh;
   animation-name: update-available-pulse;
-  animation-duration: 1600ms;
-  animation-iteration-count: infinite;
+  animation-duration: 1200ms;
+  animation-iteration-count: 3;
   animation-timing-function: ease-in-out;
 }
 
-/* Hovering the button is the user answering it, so it stops pulsing under the
-   pointer and settles into the solid hover fill. Without the reset the
-   animation would keep overpainting `background-color` - animations outrank
-   plain declarations - and the hover state would flicker instead of landing. */
-.sidebar-footer-button.update-available:hover {
+/* Hovering it is the user answering it, so it settles into the solid fill.
+   Without the reset the animation would keep overpainting `background-color` -
+   animations outrank plain declarations - and the hover would flicker instead
+   of landing. */
+.app-menu.update-available:hover {
   color: @field;
   background-color: @fresh;
   animation-name: none;
-}
-
-.sidebar-footer-button.update-available:hover .sidebar-footer-icon {
-  color: @field;
 }

@@ -148,11 +148,67 @@ mod tests {
         assert_eq!(
             color("tile"),
             Rgb {
-                r: 0x19,
-                g: 0x1e,
-                b: 0x24
+                r: 0x1c,
+                g: 0x24,
+                b: 0x2a
             },
         );
+    }
+
+    /// The surfaces, floor to top rung, in the order they're meant to climb.
+    const LADDER: [&str; 7] = [
+        "field", "rack", "tile", "tile-lit", "chip", "hairline", "edge",
+    ];
+
+    /// What makes the ramp gunmetal rather than graphite, stated as arithmetic
+    /// so it survives someone "tidying" a hex.
+    ///
+    /// The cast is the whole of it. Green sitting exactly on the midpoint of red
+    /// and blue is a neutral blue-grey - it reads as ink, a colour of absence.
+    /// Blued steel keeps a trace of teal, green a point or two *above* that
+    /// midpoint, and that difference is the entire reason the surfaces read as a
+    /// material. It is also invisible in a diff: every rung here is a plausible
+    /// dark grey, and nothing but this test says which ones are the right dark
+    /// greys.
+    ///
+    /// The ladder also has to keep climbing, and the cast has to keep widening as
+    /// it does. A fixed red-to-blue offset is a smaller and smaller fraction of
+    /// the channel values as they lighten, so holding it flat would let the cast
+    /// drain out of the top of the ramp and leave `@edge` a neutral grey rule
+    /// against six tinted surfaces below it.
+    #[test]
+    fn the_ramp_is_gunmetal_all_the_way_up() {
+        let mut previous_spread = 0i16;
+        let mut previous_light = -1i16;
+
+        for name in LADDER {
+            let c = color(name);
+            let (r, g, b) = (i16::from(c.r), i16::from(c.g), i16::from(c.b));
+
+            // The teal cast: 2g - (r + b) is twice the distance above the
+            // midpoint, so >= 1 is "at least half a point of green".
+            assert!(
+                2 * g - (r + b) >= 1,
+                "@{name} ({c:?}) has no teal in it - green sits at or below the \
+                 midpoint of red and blue, which is graphite, not gunmetal",
+            );
+
+            let spread = b - r;
+            assert!(
+                spread >= previous_spread,
+                "@{name} ({c:?}) narrows the cool cast to {spread} from {previous_spread} \
+                 on the rung below - the cast has to widen as the ladder climbs, or it \
+                 drains out of the light end",
+            );
+            previous_spread = spread;
+
+            assert!(
+                r > previous_light,
+                "@{name} ({c:?}) is not lighter than the rung below it - the ladder \
+                 has to climb, or depth stops reading as depth",
+            );
+            previous_light = r;
+        }
     }
 
     /// The focused pane is meant to read as lit, which it can't if the two

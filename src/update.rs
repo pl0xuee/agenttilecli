@@ -365,7 +365,52 @@ pub fn relaunch_command(pid: u32, exe: &str) -> String {
     )
 }
 
-/// The running build, for the "you're up to date" dialog: `0.2.0 (0603294)`,
+/// Starts the shell that relaunches us once we're gone - and, crucially, starts
+/// it somewhere it will survive our own death.
+///
+/// Spawning it as a plain child looks like it should work (orphans are
+/// reparented to init, so nothing is left to kill it) and doesn't, because a
+/// desktop session doesn't launch a `.desktop` app as a bare process any more:
+/// it launches it as a systemd user service, `app-<app-id>@<random>.service`.
+/// Every child we fork lands in that unit's cgroup, and when our main process
+/// exits systemd stops the unit and SIGTERMs whatever is left in it. The
+/// watcher - and then the app it has just exec'd - is exactly what's left in it.
+/// The user gets the shutdown and never gets the restart.
+///
+/// So the watcher has to be started by something that isn't us. `systemd-run
+/// --user` asks the *user manager* to run it, in a transient unit of its own,
+/// out of reach of ours as ours goes down. `--collect` has that unit tidied away
+/// once the relaunched app eventually exits, rather than left behind.
+///
+/// The plain child stays as the fallback, for anywhere `systemd-run` isn't (a
+/// session that isn't systemd-managed, a build run straight from a terminal):
+/// there's no unit to be torn down there, so orphan-to-init is the whole
+/// mechanism rather than a hope.
+pub fn spawn_relaunch(command: &str) -> Result<(), String> {
+    let unit = format!("agenttilecli-restart-{}", std::process::id());
+    let handed_off = Command::new("systemd-run")
+        .args(["--user", "--quiet", "--collect"])
+        .arg(format!("--unit={unit}"))
+        // The app keeps the directory it was launched from (the first pane's
+        // cwd is seeded with it); a transient unit would otherwise start in
+        // $HOME.
+        .arg("--same-dir")
+        .args(["--", "sh", "-c", command])
+        .status();
+
+    if matches!(&handed_off, Ok(status) if status.success()) {
+        return Ok(());
+    }
+
+    Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("couldn't start the relaunch: {e}"))
+}
+
+/// The running build, for the "you're up to date" report: `0.2.0 (0603294)`,
 /// or just the version when the commit isn't known.
 pub fn version() -> String {
     let version = env!("CARGO_PKG_VERSION");
