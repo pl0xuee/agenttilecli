@@ -67,11 +67,6 @@ mod layout_imp {
         pub col_ratios: RefCell<Vec<Vec<f64>>>,
         pub grid_shape_n: Cell<usize>,
         pub grid_shape_dims: Cell<(usize, usize)>,
-        /// Whether the ratios above are the user's rather than this module's -
-        /// set the moment a grid seam is dragged, cleared whenever they're
-        /// regenerated. It is what `ensure_grid_ratios` reads to tell a layout
-        /// somebody arranged from one that merely happened.
-        pub ratios_customized: Cell<bool>,
     }
 
     impl Default for TilerLayout {
@@ -85,44 +80,45 @@ mod layout_imp {
                 col_ratios: RefCell::new(Vec::new()),
                 grid_shape_n: Cell::new(usize::MAX),
                 grid_shape_dims: Cell::new((0, 0)),
-                ratios_customized: Cell::new(false),
             }
         }
     }
 
     impl TilerLayout {
-        /// Regenerate all-equal Grid ratios if `n` doesn't match what the
-        /// current ratios were built for, or if the ideal (cols, rows) shape
-        /// for `n` panes in a `width`x`height` area has flipped since (the
-        /// window changed enough to favor the other orientation). Passes the
-        /// currently-in-use column count into `grid_shape` so a spawn/close
-        /// only reorients the whole grid when the new shape is a clear
-        /// improvement, not just a marginally squarer one - see
-        /// `GRID_STABILITY_BIAS`.
-        // `pub(super)` for the tests in this file, which drive it directly:
+        /// Regenerate all-equal Grid ratios when the shape they were built for
+        /// no longer matches - either because the pane count changed, or because
+        /// the window changed enough to want a different (cols, rows).
+        ///
+        /// The stability bias is handed to `grid_shape` only when the *pane
+        /// count* changed. That is what the bias is for: a spawn or a close
+        /// picking a fresh column count from scratch reshuffles every pane on
+        /// screen for a reason the user can't see. A resize is the opposite
+        /// case - the window is the thing that moved, the shape it wants is the
+        /// shape it should get, and biasing against that is what left three
+        /// panes standing in a wide window as three tall slivers instead of
+        /// re-laying them two-over-one. Applied to both, the bias was strong
+        /// enough that a window could be dragged from landscape to portrait
+        /// without the grid re-orienting once.
+        ///
+        /// A grid whose seams have been dragged keeps them for as long as its
+        /// shape holds, which the early return below covers: same pane count,
+        /// same shape, nothing regenerated. It does *not* keep them across a
+        /// re-orientation, because it cannot - the ratios are shaped to the grid
+        /// (one weight per row, one per column within each row), so a 2x2
+        /// becoming a 1x4 has nowhere to put the four column weights it was
+        /// holding. Re-orienting is discarding them either way, and cells at
+        /// twice the aspect ratio they should be is the worse of the two.
+        // `pub(crate)` for the tests in `tiler/mod.rs`, which drive it directly:
         // reaching it through `allocate` would mean real panes, and a pane is a
         // PTY with a shell in it.
         pub(crate) fn ensure_grid_ratios(&self, n: usize, width: i32, height: i32) {
-            // A grid whose seams have been dragged keeps both its proportions
-            // and its shape for as long as the pane count holds, whatever the
-            // window does around it.
-            //
-            // Re-orienting can't preserve a drag even in principle: the ratios
-            // are shaped to the grid (one weight per row, one per column within
-            // each row), so a 2x2 becoming a 1x4 has nowhere to put the four
-            // column weights it was holding. Re-orienting *is* discarding them.
-            // Dragging a seam is the one unambiguous statement the user makes
-            // about this layout, and resizing a window is not a retraction of
-            // it - so the drag outranks the reflow, and only opening or closing
-            // a pane (which genuinely invalidates the arrangement) resets it.
-            if self.ratios_customized.get() && self.grid_shape_n.get() == n {
-                return;
-            }
-
+            let known = self.grid_shape_n.get() != usize::MAX;
+            let pane_count_changed = self.grid_shape_n.get() != n;
             let prev_cols =
-                (self.grid_shape_n.get() != usize::MAX).then(|| self.grid_shape_dims.get().0);
+                (known && pane_count_changed).then(|| self.grid_shape_dims.get().0);
+
             let shape = layout::grid_shape(n, width, height, prev_cols);
-            if self.grid_shape_n.get() == n && self.grid_shape_dims.get() == shape {
+            if !pane_count_changed && self.grid_shape_dims.get() == shape {
                 return;
             }
             let (cols, rows) = shape;
@@ -130,8 +126,6 @@ mod layout_imp {
             *self.col_ratios.borrow_mut() = vec![vec![1.0; cols]; rows];
             self.grid_shape_n.set(n);
             self.grid_shape_dims.set(shape);
-            // Regenerated, so whatever was arranged here is gone with them.
-            self.ratios_customized.set(false);
         }
     }
 

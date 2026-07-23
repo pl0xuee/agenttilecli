@@ -421,44 +421,28 @@ mod tests {
         });
     }
 
-    /// A grid the user has arranged by dragging its seams must survive the
-    /// window being resized around it - including a resize drastic enough that
-    /// a from-scratch pick would choose a different shape entirely.
-    ///
-    /// This is the regression that motivated the flag: the old code regenerated
-    /// all-equal ratios whenever the resolved shape changed, so dragging a seam
-    /// and then making the window taller silently threw the drag away.
+    /// A grid the user has arranged by dragging its seams keeps those
+    /// proportions for as long as its shape holds - which is every resize that
+    /// doesn't want a different (cols, rows), and every one that does not touch
+    /// the pane count.
     #[test]
-    fn a_dragged_grid_survives_a_window_resize() {
+    fn a_dragged_grid_survives_a_resize_that_keeps_its_shape() {
         gtk_test(|| {
             let lm = TilerLayout::new();
             let imp = lm.imp();
 
-            // Four panes in a wide area: some shape, all-equal ratios.
             imp.ensure_grid_ratios(4, 1600, 900);
-            let wide_shape = imp.grid_shape_dims.get();
-            assert!(imp.row_ratios.borrow().iter().all(|r| *r == 1.0));
-            assert!(!imp.ratios_customized.get(), "nothing dragged yet");
-
-            // The user drags a seam.
+            let shape = imp.grid_shape_dims.get();
             imp.row_ratios.borrow_mut()[0] = 1.6;
-            imp.ratios_customized.set(true);
             let dragged = imp.row_ratios.borrow().clone();
 
-            // Now the window turns tall and narrow - the shape a fresh pick
-            // would want is not the one on screen.
-            imp.ensure_grid_ratios(4, 600, 1600);
-            assert_eq!(
-                imp.grid_shape_dims.get(),
-                wide_shape,
-                "the arranged shape holds, because re-orienting *is* discarding",
-            );
+            // A resize the shape is happy with changes nothing underneath it.
+            imp.ensure_grid_ratios(4, 1500, 880);
+            assert_eq!(imp.grid_shape_dims.get(), shape);
             assert_eq!(*imp.row_ratios.borrow(), dragged, "the drag survives");
 
-            // Opening a pane genuinely invalidates the arrangement, so that -
-            // and only that - resets it.
-            imp.ensure_grid_ratios(5, 600, 1600);
-            assert!(!imp.ratios_customized.get());
+            // Opening a pane genuinely invalidates the arrangement.
+            imp.ensure_grid_ratios(5, 1500, 880);
             assert!(
                 imp.row_ratios.borrow().iter().all(|r| *r == 1.0),
                 "a new pane count starts from equal cells again",
@@ -466,26 +450,28 @@ mod tests {
         });
     }
 
-    /// The flag only protects a grid somebody actually arranged. An untouched
-    /// one still re-orients itself to the window, which is the behaviour the
-    /// README advertises and the reason the flag exists rather than a blanket
-    /// "never reorient".
+    /// The shape follows the window, and it follows it on a plain resize - no
+    /// pane opened or closed.
+    ///
+    /// This is what stops three panes in a wide window standing as three tall
+    /// slivers after it has been dragged narrow. The stability bias that used to
+    /// apply here was strong enough to hold a landscape shape through the whole
+    /// journey to portrait.
     #[test]
-    fn an_untouched_grid_still_reorients_with_the_window() {
+    fn the_grid_reorients_on_a_plain_resize() {
         gtk_test(|| {
             let lm = TilerLayout::new();
             let imp = lm.imp();
 
-            imp.ensure_grid_ratios(3, 1600, 400);
+            imp.ensure_grid_ratios(3, 1600, 500);
             let wide = imp.grid_shape_dims.get();
 
-            imp.ensure_grid_ratios(3, 400, 1600);
+            imp.ensure_grid_ratios(3, 500, 1600);
             let tall = imp.grid_shape_dims.get();
 
-            assert_ne!(
-                wide, tall,
-                "a wide window wants columns and a tall one wants rows",
-            );
+            assert_ne!(wide, tall, "a window turned on its side wants a new shape");
+            assert!(wide.0 > wide.1, "wide window: more columns than rows");
+            assert!(tall.1 > tall.0, "tall window: more rows than columns");
         });
     }
 

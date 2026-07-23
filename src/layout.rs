@@ -201,12 +201,21 @@ fn grid(n: usize, width: i32, height: i32) -> Vec<Rect> {
 const GRID_STABILITY_BIAS: f64 = 1.0;
 
 /// How strongly `grid_shape` penalizes empty cells (a partial last row/
-/// column) relative to squareness. Weighted well above the typical
-/// aspect-ratio penalty (`cell_ratio.ln().abs()`, usually well under 1 for
-/// any reasonably-shaped window) so a shape that actually packs every pane
-/// in wins over a squarer one that leaves cells empty, unless the packed
-/// shape's cells would come out badly elongated to do it.
-const WASTE_WEIGHT: f64 = 0.5;
+/// column) relative to squareness.
+///
+/// Set so that a packed shape wins on equal terms but does not win when it
+/// would have to elongate its cells to pack. At 0.5 it did: three panes in a
+/// wide window packed into 3x1 - three tall slots 412px wide against 860px of
+/// height - because one empty cell cost more than doubling the cells' aspect
+/// ratio. 2x2 with the spare cell centred gives 618x430 instead.
+///
+/// 0.25 is where the curve flattens. Swept against "how far is the shape we
+/// picked from the squarest one available", the worst case across every pane
+/// count and window shape worth checking improves from 1.91x at 0.5 to 1.64x
+/// here, and 0.2 buys 0.01 more for three additional stranded cells. Centring a
+/// partial row (see `centering_offset`) is what makes the trade affordable at
+/// all: an empty cell reads as a margin now rather than as a hole.
+const WASTE_WEIGHT: f64 = 0.25;
 
 /// The (columns, rows) shape `grid`/`grid_weighted` use for `n` panes,
 /// chosen so cells stay as close to square as possible for the given
@@ -421,6 +430,52 @@ mod tests {
         for r in &rects[1..] {
             assert_eq!(r.width, rects[0].width);
             assert_eq!(r.height, rects[0].height);
+        }
+    }
+
+    /// No arrangement is allowed to be much worse-proportioned than the best one
+    /// available for that many panes in that window.
+    ///
+    /// This is the property the whole `grid_shape` scorer exists to hold, and
+    /// the one it was quietly failing: three panes in a wide window packed into
+    /// 3x1 - three slivers 412px wide against 860px of height - because a single
+    /// empty cell was scored as costing more than doubling every cell's aspect
+    /// ratio.
+    ///
+    /// The bound is a ratio against the squarest shape rather than an absolute,
+    /// because some of the skew is the window's own: one pane in a 1600x700
+    /// window is 1600x700 and no scorer can help that.
+    #[test]
+    fn no_grid_is_far_worse_proportioned_than_it_had_to_be() {
+        const WINDOWS: &[(i32, i32)] = &[
+            (1235, 860),
+            (900, 860),
+            (600, 1200),
+            (1600, 700),
+            (1000, 1000),
+            (1400, 600),
+            (700, 1400),
+            (1920, 1080),
+            (1235, 500),
+        ];
+        let skew = |cols: usize, rows: usize, w: i32, h: i32| {
+            let ar = (f64::from(w) / cols as f64) / (f64::from(h) / rows as f64);
+            ar.max(1.0 / ar)
+        };
+
+        for &(w, h) in WINDOWS {
+            for n in 1..=8usize {
+                let (cols, rows) = grid_shape(n, w, h, None);
+                let got = skew(cols, rows, w, h);
+                let best = (1..=n)
+                    .map(|c| skew(c, n.div_ceil(c), w, h))
+                    .fold(f64::MAX, f64::min);
+                assert!(
+                    got <= best * 1.7,
+                    "{n} panes in {w}x{h} chose {cols}x{rows} (skew {got:.2}) \
+                     when {best:.2} was available",
+                );
+            }
         }
     }
 

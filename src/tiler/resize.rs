@@ -215,10 +215,6 @@ impl Tiler {
                 }
                 Handle::Master => {}
             }
-            // From here this grid is arranged rather than merely laid out, and
-            // a window resize stops being allowed to undo it - see
-            // `TilerLayout::ensure_grid_ratios`.
-            lm.imp().ratios_customized.set(true);
             this.queue_allocate();
         });
 
