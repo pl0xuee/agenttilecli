@@ -1,5 +1,7 @@
 mod app;
 mod clipboard;
+mod hooks;
+mod ipc;
 mod keybindings;
 mod layout;
 mod model;
@@ -38,6 +40,16 @@ fn app_id() -> String {
 }
 
 fn main() -> glib::ExitCode {
+    // Before anything else at all: this process may not be a window. claude runs
+    // `agenttilecli --hook <event>` from inside a pane, and that invocation has
+    // to do its one small job and get out of the way - no GTK, no application
+    // id, no single-instance handshake that would hand the work to the running
+    // window and wait for it.
+    if let Some(event) = hook_event() {
+        report_hook(event);
+        return glib::ExitCode::SUCCESS;
+    }
+
     // Before anything else, and in particular before an update can overwrite the
     // file we're running from - which is what makes its path unreadable. See
     // `update::remember_exe`.
@@ -81,6 +93,43 @@ fn load_css() {
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+}
+
+/// The event named by `--hook <event>`, if this process was launched as one.
+fn hook_event() -> Option<hooks::Event> {
+    let mut args = std::env::args().skip(1);
+    if args.next()? != "--hook" {
+        return None;
+    }
+    hooks::Event::parse(&args.next()?)
+}
+
+/// Tells the window what just happened in this pane, and returns.
+///
+/// Every path here is infallible by construction, because the caller is claude
+/// and the cost of failing is claude's. A window that has closed, a socket that
+/// was never created, a hook environment that isn't there: all of them mean the
+/// same thing - nobody is listening - and the answer to that is to exit
+/// quietly. The bell hook on `Stop` and `Notification` is what still gets
+/// through when this doesn't (see `hooks::settings_json`).
+fn report_hook(event: hooks::Event) {
+    let (Ok(pane), Ok(socket)) = (
+        std::env::var(ipc::ENV_PANE),
+        std::env::var(ipc::ENV_SOCKET),
+    ) else {
+        return;
+    };
+
+    // claude hands the hook a JSON object on stdin. The only field this app has
+    // a use for is which tool is about to run - and reading it is best-effort
+    // for the same reason as everything else here: an event with no tool name
+    // is still worth reporting.
+    let tool = std::io::read_to_string(std::io::stdin())
+        .ok()
+        .and_then(|input| serde_json::from_str::<serde_json::Value>(&input).ok())
+        .and_then(|v| v["tool_name"].as_str().map(str::to_string));
+
+    let _ = ipc::send(&socket, &ipc::Message { pane, event, tool });
 }
 
 fn build_window(application: &adw::Application) {

@@ -13,9 +13,53 @@ use gtk4::{gdk, GestureClick, PropagationPhase};
 use vte4::prelude::*;
 
 use super::Tiler;
+use crate::hooks;
+use crate::ipc;
+use crate::model::PaneState;
 use crate::pane::Pane;
 
 impl Tiler {
+    /// Applies an agent's report to whichever of this group's panes sent it.
+    ///
+    /// Returns whether it landed *and* changed something - the caller uses that
+    /// to decide whether the sidebar needs repainting, and a turn produces far
+    /// more events than it does state changes.
+    ///
+    /// Every group is asked in turn until one claims the message, because a pane
+    /// id is unique across the window rather than within a group, and a message
+    /// naming a pane that has since been closed is simply claimed by nobody.
+    pub fn apply_agent_event(&self, message: &ipc::Message) -> bool {
+        let panes = self.imp().panes.borrow();
+        let Some(pane) = panes.iter().find(|p| p.id == message.pane) else {
+            return false;
+        };
+        let next = hooks::advance(&pane.state(), message.event, message.tool.as_deref());
+        let changed = pane.set_state(next);
+        drop(panes);
+        if changed {
+            // An agent that wants you is worth saying so about, exactly as the
+            // bell already does - this is the same news arriving by a route that
+            // knows which pane it came from.
+            if message.event == crate::hooks::Event::Notification {
+                self.notify_attention();
+            }
+        }
+        changed
+    }
+
+    /// How many of this group's panes are in each state worth counting.
+    pub fn agent_tally(&self) -> Tally {
+        let mut tally = Tally::default();
+        for pane in self.imp().panes.borrow().iter() {
+            match pane.state() {
+                PaneState::Working { .. } => tally.working += 1,
+                PaneState::Waiting => tally.waiting += 1,
+                _ => tally.other += 1,
+            }
+        }
+        tally
+    }
+
     /// How many panes this group is currently running.
     pub fn pane_count(&self) -> usize {
         self.imp().panes.borrow().len()
@@ -230,5 +274,21 @@ impl Tiler {
     /// Removal happens asynchronously via the `child-exited` signal.
     fn close_pane(&self, pane: &Rc<Pane>) {
         pane.hangup();
+    }
+}
+
+/// What a group's agents are up to, counted.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct Tally {
+    pub working: usize,
+    pub waiting: usize,
+    /// Starting, idle, or gone - everything that isn't a claim on your
+    /// attention or a sign of progress.
+    pub other: usize,
+}
+
+impl Tally {
+    pub fn total(self) -> usize {
+        self.working + self.waiting + self.other
     }
 }

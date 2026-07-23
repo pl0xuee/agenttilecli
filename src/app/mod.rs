@@ -240,6 +240,16 @@ impl App {
             css_provider,
         }));
 
+        // Start listening before the first pane is spawned, so its agent finds a
+        // socket in its environment. A window that can't open one still works;
+        // its panes just fall back to the bell (see `hooks::settings_json`).
+        let weak = Rc::downgrade(&this.0);
+        crate::ipc::listen(move |message| {
+            if let Some(inner) = weak.upgrade() {
+                App(inner).on_agent_event(&message);
+            }
+        });
+
         split.set_sidebar(Some(&this.build_sidebar()));
         split.set_content(Some(&this.build_content(&title_widget, &sidebar_toggle)));
         this.install_breakpoint();

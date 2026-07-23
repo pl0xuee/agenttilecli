@@ -24,6 +24,15 @@ you want to nudge it.
   folder and it opens, with no second dialog asking a question you answer the
   same way every time. On a narrow window the sidebar stops squeezing the
   panes and slides over them instead.
+- **Every pane says what its agent is doing** — a dot in each pane's head
+  strip: hollow while it starts, green while it works (hover it to see which
+  tool), amber when it stops to ask you something, red when it has exited. The
+  sidebar tally takes the most urgent answer in the group, so a project whose
+  agent is blocked on a permission prompt says so in amber from across the
+  window. It comes from claude's own hooks over a private socket rather than
+  from the terminal output, so it knows *which* pane and *which* tool — and if
+  the socket can't be opened, panes fall back to the bell below and nothing
+  breaks.
 - **Background agents tell you when they want you** — when an agent finishes a
   turn, or stops to ask permission, its group's sidebar row pulses and then
   stays quietly tinted until you open that group, so a finished agent in a

@@ -415,23 +415,35 @@ impl App {
         }
     }
 
-    /// Writes `count` onto a project's sidebar row.
+    /// Writes a project's agent tally onto its sidebar row.
+    ///
+    /// The number is how many agents; the colour is what they are doing, and it
+    /// takes the most urgent answer in the group. Amber if any of them is asking
+    /// you something, green if any is working, quiet otherwise - the same three
+    /// meanings those colours carry everywhere else in this window.
     ///
     /// Blank at zero rather than "0" - see `build_row`. The row is looked up by
     /// id rather than captured, because the pane-count callback is registered
     /// before the row it writes to exists; the very first call finds nothing and
     /// does nothing, which is correct, since a project with no panes yet has
     /// nothing to report.
-    pub(super) fn sync_row_count(&self, id: ProjectId, count: usize) {
+    pub(super) fn refresh_row_tally(&self, id: ProjectId) {
         let views = self.0.views.borrow();
         let Some(view) = views.iter().find(|v| v.id == id) else {
             return;
         };
-        view.count.set_label(&if count == 0 {
+        let tally = view.tiler.agent_tally();
+        view.count.set_label(&if tally.total() == 0 {
             String::new()
         } else {
-            count.to_string()
+            tally.total().to_string()
         });
+        set_class(&view.count, "tally-waiting", tally.waiting > 0);
+        set_class(
+            &view.count,
+            "tally-working",
+            tally.waiting == 0 && tally.working > 0,
+        );
     }
 }
 

@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -8,6 +8,7 @@ use gtk4::prelude::*;
 use gtk4::{gdk, Frame};
 use vte4::{prelude::*, PtyFlags, Terminal};
 
+use crate::model::PaneState;
 use crate::palette;
 
 /// How often to re-check a pane's current directory. Cheap (a single
@@ -52,6 +53,46 @@ fn foreground_cwd(terminal: &Terminal) -> Option<String> {
     }
     let link = std::fs::read_link(format!("/proc/{pgrp}/cwd")).ok()?;
     Some(folder_name(&link.to_string_lossy()))
+}
+
+/// Every class `set_state` might put on the dot, so it can take the previous
+/// one off without knowing which it was.
+const STATUS_CLASSES: [&str; 5] = [
+    "starting", "working", "idle", "waiting", "exited",
+];
+
+fn status_class(state: &PaneState) -> &'static str {
+    match state {
+        PaneState::Starting => "starting",
+        PaneState::Working { .. } => "working",
+        PaneState::Idle => "idle",
+        PaneState::Waiting => "waiting",
+        PaneState::Exited => "exited",
+    }
+}
+
+/// What the dot says when you rest on it. The tool name is the whole reason
+/// `Working` carries one - "working" is a colour, "running Bash" is an answer.
+fn status_tooltip(state: &PaneState) -> String {
+    match state {
+        PaneState::Starting => "Starting\u{2026}".to_string(),
+        PaneState::Working { tool: Some(tool) } => format!("Working \u{b7} {tool}"),
+        PaneState::Working { tool: None } => "Working".to_string(),
+        PaneState::Idle => "Waiting for you".to_string(),
+        PaneState::Waiting => "Asking for permission".to_string(),
+        PaneState::Exited => "The agent has exited".to_string(),
+    }
+}
+
+/// A name for the next pane, unique within this process.
+///
+/// A counter rather than anything derived from the pty or the pid: the id has
+/// to exist *before* the process it identifies does, because it goes into that
+/// process's environment.
+fn next_pane_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    format!("p{}", NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
 /// The last path component of `path` ("/" if the path itself is root), with
@@ -256,15 +297,7 @@ mod theme_tests {
 /// inside single quotes differ from POSIX sh's, which is precisely enough to
 /// turn the hook's `printf '\a'` into a hook that prints the letter "a". A
 /// file has no quoting layers to get wrong.
-fn claude_settings_json() -> String {
-    // The hook is a shell one-liner full of quotes and a backslash, going into
-    // a JSON string: escape both, in that order.
-    let hook = BELL_HOOK.replace('\\', r"\\").replace('"', "\\\"");
-    let entry = format!(r#"[{{"hooks":[{{"type":"command","command":"{hook}"}}]}}]"#);
-    format!(r#"{{"hooks":{{"Stop":{entry},"Notification":{entry}}}}}"#)
-}
-
-/// Writes `claude_settings_json` under the user's cache directory and returns
+/// Writes the hook settings under the user's cache directory and returns
 /// its path, or `None` if it couldn't be written - in which case panes fall
 /// back to a plain, bell-less `claude` rather than failing to start.
 ///
@@ -279,47 +312,25 @@ fn claude_settings_file() -> Option<String> {
     std::fs::create_dir_all(&dir).ok()?;
 
     let path = dir.join("claude-settings.json");
-    std::fs::write(&path, claude_settings_json()).ok()?;
+    let hook_bin = crate::update::exe().ok()?;
+    std::fs::write(&path, crate::hooks::settings_json(&hook_bin, BELL_HOOK)).ok()?;
     Some(path.to_string_lossy().into_owned())
-}
-
-#[cfg(test)]
-mod settings_tests {
-    use super::*;
-
-    /// The hook is a shell one-liner embedded in a JSON string, so every
-    /// character in it crosses two escaping layers. A single backslash lost on
-    /// the way turns `printf '\a'` - the entire point of the hook - into one
-    /// that prints the letter "a", and *nothing downstream would say so*:
-    /// claude runs it happily, the pane quietly prints an "a", and the sidebar
-    /// row just never lights up.
-    #[test]
-    fn bell_hook_survives_json_escaping() {
-        let json = claude_settings_json();
-
-        // The bell byte, still an escape sequence after JSON encoding rather
-        // than a stray backslash that ate the "a".
-        assert!(
-            json.contains(r#"printf '\\a'"#),
-            "bell byte mangled: {json}"
-        );
-        // The hook's own double quotes, escaped instead of ending the JSON
-        // string early.
-        assert!(json.contains(r#"\"$PTY\""#), "shell quotes mangled: {json}");
-
-        // Both moments worth interrupting someone for: finished, and asking.
-        assert!(json.contains(r#""Stop""#));
-        assert!(json.contains(r#""Notification""#));
-    }
 }
 
 /// A single tile: a bordered frame containing a VTE terminal, running `claude`
 /// (or, for the update pane, a build script) via the user's login shell - so
 /// PATH/nvm/aliases resolve the same way an interactive terminal would.
 pub struct Pane {
+    /// What this pane's agent calls itself when it reports in. Unique for the
+    /// life of the process, which is the life of the socket it reports over.
+    pub id: String,
     pub frame: Frame,
     pub terminal: Terminal,
     pub close_button: gtk4::Button,
+    /// The dot in the head strip, repainted by `set_state`.
+    status: gtk4::Box,
+    /// What this pane's agent is doing, as far as its hooks have said.
+    state: RefCell<PaneState>,
     pid: Rc<Cell<Option<libc::pid_t>>>,
     /// What `apply_theme` was last called with, so `set_focused` can skip the
     /// repaint when nothing changed. `Tiler::update_focus_style` runs over
@@ -343,7 +354,7 @@ impl Pane {
     /// It is also where a per-pane status dot lands once there is an agent
     /// state to drive it: a strip has somewhere to put one, and a floating chip
     /// does not.
-    fn bare() -> (Frame, Terminal, gtk4::Box, gtk4::Button) {
+    fn bare() -> (Frame, Terminal, gtk4::Box, gtk4::Box, gtk4::Button) {
         let terminal = Terminal::new();
         terminal.set_hexpand(true);
         terminal.set_vexpand(true);
@@ -366,10 +377,26 @@ impl Pane {
             .tooltip_text("Close this pane")
             .build();
 
+        // The slot the head strip was built for. It is the only thing in this
+        // window that says what an agent is *doing* rather than that something
+        // happened, and it wants to be first in the strip: the eye reads left
+        // to right, and "is this one working" is the question you have before
+        // "which folder is it in".
+        // Painted with its starting class here rather than left to `set_state`,
+        // which repaints only on a *change* - so a dot that never changed would
+        // otherwise sit unstyled, and "nothing has reported yet" would look
+        // exactly like "idle".
+        let status = gtk4::Box::builder()
+            .css_classes(["pane-status", status_class(&PaneState::Starting)])
+            .valign(gtk4::Align::Center)
+            .tooltip_text(&status_tooltip(&PaneState::Starting))
+            .build();
+
         let head = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .css_classes(["pane-head"])
             .build();
+        head.append(&status);
         head.append(&close_button);
         // Packed last and aligned right, so whatever the caller prepends flows
         // from the left and the button stays where a close button belongs.
@@ -393,7 +420,7 @@ impl Pane {
         frame.set_overflow(gtk4::Overflow::Hidden);
         frame.set_child(Some(&body));
 
-        (frame, terminal, head, close_button)
+        (frame, terminal, head, status, close_button)
     }
 
     /// The usual pane: `claude`, running in `cwd` - with `BELL_HOOK` installed,
@@ -418,8 +445,9 @@ impl Pane {
     /// button, which runs the pull-and-rebuild script in a pane so its
     /// output is visible rather than hidden behind a spinner.
     pub fn command(cwd: &str, command: &str) -> Self {
-        let (frame, terminal, head, close_button) = Self::bare();
+        let (frame, terminal, head, status, close_button) = Self::bare();
         let pid = Rc::new(Cell::new(None));
+        let id = next_pane_id();
 
         let dir_label = gtk4::Label::builder()
             .css_classes(["pane-dir"])
@@ -430,19 +458,35 @@ impl Pane {
             .can_target(false)
             .label(folder_name(cwd))
             .build();
-        // `can_target(false)` above is what keeps the label out of the way of
-        // the click that focuses this pane: the gesture lives on the frame, and
-        // the label sits between the two.
-        head.prepend(&dir_label);
+        // After the dot, before the close button.
+        head.insert_child_after(&dir_label, Some(&status));
 
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let argv = [shell.as_str(), "-lc", command];
+
+        // What the agent's hooks need to find their way back here: which pane
+        // is reporting, where to report it, and which binary to run to do so.
+        // Absent when the socket couldn't be opened, in which case the hooks
+        // find nothing, exit quietly, and the bell carries the signal as it
+        // always did.
+        //
+        // VTE *adds* these to the environment the child would otherwise have
+        // inherited rather than replacing it, so a pane still gets the user's
+        // PATH, their editor and everything else their shell profile sets up.
+        let mut env = Vec::new();
+        if let (Some(socket), Ok(bin)) = (crate::ipc::socket(), crate::update::exe()) {
+            env.push(format!("{}={id}", crate::ipc::ENV_PANE));
+            env.push(format!("{}={socket}", crate::ipc::ENV_SOCKET));
+            env.push(format!("{}={bin}", crate::ipc::ENV_BIN));
+        }
+        let envv: Vec<&str> = env.iter().map(String::as_str).collect();
+
         let pid_slot = pid.clone();
         terminal.spawn_async(
             PtyFlags::DEFAULT,
             Some(cwd),
             &argv,
-            &[],
+            &envv,
             gtk4::glib::SpawnFlags::DEFAULT,
             || {},
             -1,
@@ -473,15 +517,42 @@ impl Pane {
         });
 
         Pane {
+            id: id.clone(),
             frame,
             terminal,
             close_button,
+            status,
+            state: RefCell::new(PaneState::Starting),
             pid,
             focused: Cell::new(false),
         }
     }
 
     /// Repaints the terminal in the focused or unfocused surface, to match the
+    /// What this pane's agent is doing.
+    pub fn state(&self) -> PaneState {
+        self.state.borrow().clone()
+    }
+
+    /// Moves the dot, and says whether anything actually changed.
+    ///
+    /// The answer matters to the caller: a turn produces a `PostToolUse` for
+    /// every tool an agent runs, and repainting a sidebar tally on each of them
+    /// is work nobody asked for. Only a state that moved is news.
+    pub fn set_state(&self, state: PaneState) -> bool {
+        if *self.state.borrow() == state {
+            return false;
+        }
+        for class in STATUS_CLASSES {
+            self.status.remove_css_class(class);
+        }
+        self.status.add_css_class(status_class(&state));
+        self.status
+            .set_tooltip_text(Some(&status_tooltip(&state)));
+        *self.state.borrow_mut() = state;
+        true
+    }
+
     /// `.focused` CSS class `Tiler::update_focus_style` sets on the frame at
     /// the same moment.
     ///

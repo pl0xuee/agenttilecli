@@ -50,7 +50,7 @@ impl App {
             // over the group you are actually looking at.
             if let Some(inner) = weak.upgrade() {
                 let app = App(inner);
-                app.sync_row_count(id, count);
+                app.refresh_row_tally(id);
                 if app.0.store.borrow().active() == Some(id) {
                     app.sync_mode_sensitivity(count);
                     // What the next project gets opened with - see
@@ -206,6 +206,25 @@ impl App {
 
         if let Some(fallback) = fallback {
             self.select(fallback);
+        }
+    }
+
+    /// Hands an agent's report to whichever project owns the pane that sent it.
+    ///
+    /// Asked of every group rather than routed, because a pane id is unique
+    /// across the window and a group is the only thing that knows which panes it
+    /// holds. A message for a pane that has since been closed is claimed by
+    /// nobody, which is the correct outcome and needs no special case.
+    pub(super) fn on_agent_event(&self, message: &crate::ipc::Message) {
+        let hit = {
+            let views = self.0.views.borrow();
+            views
+                .iter()
+                .find(|v| v.tiler.apply_agent_event(message))
+                .map(|v| v.id)
+        };
+        if let Some(id) = hit {
+            self.refresh_row_tally(id);
         }
     }
 

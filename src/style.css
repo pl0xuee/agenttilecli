@@ -640,6 +640,60 @@ row.sidebar-row.needs-attention .sidebar-row-count {
   color: @tally;
 }
 
+/* ── What an agent is doing ────────────────────────────────────────────────
+   A dot at the head of every pane, and the same three meanings on the sidebar
+   tally beside a project's name.
+
+   The colours are the app's existing vocabulary, not a new one: @tally is "an
+   agent wants you" wherever it appears, @fresh is progress, @faint is a thing
+   that is simply there. An agent asking for permission and a sidebar row
+   flashing amber are the same fact reported at two scales, which is the whole
+   point of having a palette with meanings attached.
+
+   Idle is deliberately the quietest of the three. Most agents most of the time
+   are idle, and a rack of tiles each carrying a lit dot is a rack that has
+   stopped distinguishing anything. */
+.pane-status {
+  min-width: 0.55em;
+  min-height: 0.55em;
+  margin-right: 0.55em;
+  border-radius: 50%;
+  background-color: @faint;
+  transition: background-color 160ms ease-out;
+}
+
+/* Not yet heard from - it has been up for a fraction of a second. Hollow
+   rather than filled, so "nothing known" doesn't read as a state of its own. */
+.pane-status.starting {
+  background-color: transparent;
+  box-shadow: inset 0 0 0 1px @faint;
+}
+
+.pane-status.working  { background-color: @fresh; }
+.pane-status.waiting  { background-color: @tally; }
+.pane-status.idle     { background-color: @faint; }
+.pane-status.exited   { background-color: @hangup; }
+
+/* The tally takes the most urgent answer in its group. A project with one agent
+   waiting on you and three working is a project you need to go to, and the
+   number alone cannot say so.
+
+   Both selectors, and the `:selected` one is not redundant. The open project's
+   tally is set by `row.sidebar-row:selected .sidebar-row-count`, which carries
+   one more class than a bare `.sidebar-row-count.tally-waiting` does and would
+   therefore win on specificity alone - leaving the tally grey on exactly one
+   row in the rack: the project you currently have open, which is also the one
+   whose agents you are most likely to be watching. */
+row.sidebar-row .sidebar-row-count.tally-working,
+row.sidebar-row:selected .sidebar-row-count.tally-working {
+  color: @fresh;
+}
+
+row.sidebar-row .sidebar-row-count.tally-waiting,
+row.sidebar-row:selected .sidebar-row-count.tally-waiting {
+  color: @tally;
+}
+
 /* ── Drop targets ──────────────────────────────────────────────────────────
    Where a dragged project would land if it were dropped right now. Each strip
    is two drop targets - its top half and its bottom half - and which one the
