@@ -81,6 +81,11 @@ const FONT_SCALE_MAX: f64 = 3.0;
 
 
 
+/// How much of the window the rack takes before anyone drags it. libadwaita
+/// defaults to a quarter, which on a wide window is a great deal of room for a
+/// column of folder names.
+const SIDEBAR_DEFAULT_FRACTION: f64 = 0.17;
+
 /// Below this width the sidebar stops taking space from the panes and overlays
 /// them instead. Four panes in a grid beside a 16.5em rack is already tight;
 /// much under this and the rack is winning an argument it shouldn't be in.
@@ -168,8 +173,14 @@ impl App {
         // The bounds match the grip's, so the split view never clamps a drag
         // back to somewhere the grip was willing to go - two clamps disagreeing
         // reads as a rack that refuses to move for no stated reason.
+        // Narrower than libadwaita's own default quarter-of-the-window. The rack
+        // is an index, not a second workspace: it holds a folder name, a tally
+        // and a close button per row, and a quarter of a wide window is far more
+        // than those need - width the panes have a better use for. The grip is
+        // there for a project whose name wants more.
         let split = adw::OverlaySplitView::builder()
             .show_sidebar(false)
+            .sidebar_width_fraction(SIDEBAR_DEFAULT_FRACTION)
             .min_sidebar_width(sidebar::SIDEBAR_MIN_PX)
             .max_sidebar_width(sidebar::SIDEBAR_MAX_PX)
             .build();

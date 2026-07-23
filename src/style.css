@@ -484,7 +484,6 @@ row.sidebar-row:selected:hover {
   font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
   font-size: 1.18em;
   font-weight: 600;
-  letter-spacing: 0.005em;
 }
 
 /* ── Tally rails ───────────────────────────────────────────────────────────
@@ -757,7 +756,6 @@ row.sidebar-row.drop-below:selected {
   padding: 0.2em 0.7em;
   font-family: monospace;
   font-size: 0.72em;
-  letter-spacing: 0.06em;
   color: @faint;
 }
 

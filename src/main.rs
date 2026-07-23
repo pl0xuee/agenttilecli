@@ -98,6 +98,42 @@ fn build_window(application: &adw::Application) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every label in this app that ellipsizes, by CSS class. Kept here rather
+    /// than derived, because the property that matters is one a reader of
+    /// `style.css` cannot see: whether the widget wearing that class was built
+    /// with `EllipsizeMode` set on it.
+    const ELLIPSIZING_LABELS: &[&str] = &[".pane-dir", ".sidebar-row-label", ".sidebar-version"];
+
+    /// An ellipsizing label must not be given `letter-spacing`.
+    ///
+    /// GTK leaves letter-spacing out of a label's size request, so the label is
+    /// allocated the width of the *un-spaced* string and then ellipsizes the
+    /// wider text it actually draws down to fit inside it. The result is a name
+    /// cut short in a row with obvious room to spare - "Getting Start…" in a
+    /// sidebar half empty - and nothing about it points at the spacing.
+    ///
+    /// This has now been introduced three separate times, twice after being
+    /// fixed, which is what this test is for. A Pango attribute does not dodge
+    /// it either; the spacing simply cannot be had on a label that ellipsizes,
+    /// and dropping the ellipsize instead means one long project name setting
+    /// the minimum width of the whole window.
+    #[test]
+    fn an_ellipsizing_label_is_never_letter_spaced() {
+        let css = include_str!("style.css");
+        for class in ELLIPSIZING_LABELS {
+            let start = css
+                .find(&format!("\n{class} {{"))
+                .unwrap_or_else(|| panic!("{class} has no rule in style.css - has it been renamed?"));
+            let body = &css[start..];
+            let body = &body[..body.find('}').expect("an unterminated rule")];
+            assert!(
+                !body.contains("letter-spacing"),
+                "{class} both ellipsizes and is letter-spaced, so it will \
+                 ellipsize text that would otherwise have fitted",
+            );
+        }
+    }
     use crate::testing::gtk_test;
     use std::cell::RefCell;
     use std::rc::Rc;
