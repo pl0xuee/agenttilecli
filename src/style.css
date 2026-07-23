@@ -360,13 +360,16 @@ window {
    to do - fencing a clickable control off from the list of strips above it,
    which no amount of typography does on its own. */
 .sidebar-header {
-  padding: 1em 0.55em 0.6em 0.95em;
+  padding: 1em 0.55em 0.7em 1.05em;
 }
 
+/* Aligned with the strips below rather than centred over them: a heading that
+   starts where its column starts is a heading; one floating in the middle of a
+   narrow rack is a caption for the whole sidebar, which is not what it is. */
 .sidebar-header-label {
   font-family: monospace;
-  font-size: 0.72em;
-  color: @faint;
+  font-size: 0.74em;
+  color: @muted;
   letter-spacing: 0.22em;
   text-transform: uppercase;
 }
@@ -408,9 +411,12 @@ window {
    that moment and shove every strip below it down a line. Only its colour
    moves. */
 row.sidebar-row {
-  padding: 0.8em 0.7em 0.8em 0.85em;
+  padding: 0.8em 0.7em 0.8em 0.95em;
   margin: 0.14em 0;
   border: 1px solid @hairline;
+  /* The same chamfer a tile catches on its top edge, for the same reason: a
+     plate is milled, not dropped. */
+  border-top-color: mix(@hairline, @filament, 0.16);
   border-radius: 0.25em;
   background-color: @tile;
   color: @dim;
@@ -488,11 +494,11 @@ row.sidebar-row:selected:hover {
    five different *kinds* of item - a status list - and the quieter ones lose
    contrast against the rack. Half-mixed, the strip still says which project it
    is while every name stays the same brightness as every other. */
-row.sidebar-row.hue-1 { box-shadow: inset 0.16em 0 0 0 alpha(@hue-1, 0.35); }
-row.sidebar-row.hue-2 { box-shadow: inset 0.16em 0 0 0 alpha(@hue-2, 0.35); }
-row.sidebar-row.hue-3 { box-shadow: inset 0.16em 0 0 0 alpha(@hue-3, 0.35); }
-row.sidebar-row.hue-4 { box-shadow: inset 0.16em 0 0 0 alpha(@hue-4, 0.35); }
-row.sidebar-row.hue-5 { box-shadow: inset 0.16em 0 0 0 alpha(@hue-5, 0.35); }
+row.sidebar-row.hue-1 { box-shadow: inset 0.2em 0 0 0 alpha(@hue-1, 0.6); }
+row.sidebar-row.hue-2 { box-shadow: inset 0.2em 0 0 0 alpha(@hue-2, 0.6); }
+row.sidebar-row.hue-3 { box-shadow: inset 0.2em 0 0 0 alpha(@hue-3, 0.6); }
+row.sidebar-row.hue-4 { box-shadow: inset 0.2em 0 0 0 alpha(@hue-4, 0.6); }
+row.sidebar-row.hue-5 { box-shadow: inset 0.2em 0 0 0 alpha(@hue-5, 0.6); }
 
 row.sidebar-row.hue-1 .sidebar-row-icon  { color: @hue-1; }
 row.sidebar-row.hue-2 .sidebar-row-icon  { color: @hue-2; }
@@ -500,28 +506,35 @@ row.sidebar-row.hue-3 .sidebar-row-icon  { color: @hue-3; }
 row.sidebar-row.hue-4 .sidebar-row-icon  { color: @hue-4; }
 row.sidebar-row.hue-5 .sidebar-row-icon  { color: @hue-5; }
 
-row.sidebar-row.hue-1 .sidebar-row-label { color: mix(@hue-1, @text, 0.5); }
-row.sidebar-row.hue-2 .sidebar-row-label { color: mix(@hue-2, @text, 0.5); }
-row.sidebar-row.hue-3 .sidebar-row-label { color: mix(@hue-3, @text, 0.5); }
-row.sidebar-row.hue-4 .sidebar-row-label { color: mix(@hue-4, @text, 0.5); }
-row.sidebar-row.hue-5 .sidebar-row-label { color: mix(@hue-5, @text, 0.5); }
+/* The name is a name. It used to be mixed halfway to the project's own hue, on
+   the reasoning that a strip should say which project it is in every element it
+   has - but half-mixed hues on a gunmetal ground come out pastel, and a column
+   of bold pastel names reads as washed-out rather than colour-coded. Worse, two
+   projects whose names happen to hash near each other produce two near-identical
+   tints, so the one thing the colour was supposed to buy - telling them apart at
+   a glance - is exactly what it stops doing.
+
+   The rail and the icon are dedicated identity carriers and are better at it: a
+   solid bar of pure hue against a neutral surface separates far harder than a
+   letterform tinted 50% toward the same colour. So the hue goes there at full
+   strength, and the type stays legible. */
 
 /* Lit. The open project's rail goes to full strength - the one channel with its
    lamp on - while its name and icon drop the identity colour for plain white:
    there is only ever one open project, and it needs to look like the answer to
    "where am I" rather than like one more colour in the rack. */
-row.sidebar-row.hue-1:selected { box-shadow: inset 0.16em 0 0 0 @hue-1; }
-row.sidebar-row.hue-2:selected { box-shadow: inset 0.16em 0 0 0 @hue-2; }
-row.sidebar-row.hue-3:selected { box-shadow: inset 0.16em 0 0 0 @hue-3; }
-row.sidebar-row.hue-4:selected { box-shadow: inset 0.16em 0 0 0 @hue-4; }
-row.sidebar-row.hue-5:selected { box-shadow: inset 0.16em 0 0 0 @hue-5; }
+row.sidebar-row.hue-1:selected { box-shadow: inset 0.2em 0 0 0 @hue-1; }
+row.sidebar-row.hue-2:selected { box-shadow: inset 0.2em 0 0 0 @hue-2; }
+row.sidebar-row.hue-3:selected { box-shadow: inset 0.2em 0 0 0 @hue-3; }
+row.sidebar-row.hue-4:selected { box-shadow: inset 0.2em 0 0 0 @hue-4; }
+row.sidebar-row.hue-5:selected { box-shadow: inset 0.2em 0 0 0 @hue-5; }
 
 row.sidebar-row:selected .sidebar-row-icon {
   color: @text;
 }
 
 row.sidebar-row:selected .sidebar-row-label {
-  color: #ffffff;
+  color: @text;
 }
 
 .sidebar-row-close {
@@ -600,14 +613,14 @@ row.sidebar-row.needs-attention .sidebar-row-label {
    of numbers rather than as five things demanding attention. */
 .sidebar-row-count {
   min-width: 1.2em;
-  color: @faint;
+  color: @muted;
   font-family: monospace;
   font-size: 0.9em;
 }
 
 /* The open project's own tally lifts with the rest of its strip. */
 row.sidebar-row:selected .sidebar-row-count {
-  color: @muted;
+  color: @dim;
 }
 
 /* A project calling for you says so with its number too - it is the row's one

@@ -337,7 +337,10 @@ impl App {
         new_project.connect_clicked(move |_| this.new_project());
 
         let header = adw::HeaderBar::builder()
-            .title_widget(&header_label)
+            // An empty title, with the real one packed at the start below: an
+            // AdwHeaderBar centres whatever it's given as a title, and a heading
+            // centred over a left-aligned column doesn't head it.
+            .title_widget(&gtk4::Box::new(gtk4::Orientation::Horizontal, 0))
             // The content side carries the window controls; two sets of them,
             // one either side of the split, reads as two windows. Both ends have
             // to be turned off to mean that: the start side is where the window
@@ -347,6 +350,7 @@ impl App {
             .show_end_title_buttons(false)
             .show_start_title_buttons(false)
             .build();
+        header.pack_start(&header_label);
         header.pack_end(&new_project);
 
         let scrolled = gtk4::ScrolledWindow::builder()
