@@ -33,8 +33,8 @@ if ! pkg-config --atleast-version=4.12 gtk4 2>/dev/null; then
     exit 1
 fi
 
-if ! pkg-config --atleast-version=0.65 vte-2.91-gtk4 2>/dev/null; then
-    echo "error: VTE4 >= 0.65 (the GTK4-flavored VTE terminal widget) not found (pkg-config vte-2.91-gtk4)." >&2
+if ! pkg-config --atleast-version=0.70 vte-2.91-gtk4 2>/dev/null; then
+    echo "error: VTE4 >= 0.70 (the GTK4-flavored VTE terminal widget) not found (pkg-config vte-2.91-gtk4)." >&2
     echo "       Install your distro's GTK4-flavored VTE dev package and try again, e.g.:" >&2
     echo "$PKG_HINT" >&2
     echo "       Note: this package is fairly recent upstream, so older distro releases" >&2

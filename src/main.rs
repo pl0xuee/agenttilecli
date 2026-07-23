@@ -4,6 +4,7 @@ mod config;
 mod hooks;
 mod ipc;
 mod keybindings;
+mod links;
 mod layout;
 mod model;
 mod palette;

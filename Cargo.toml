@@ -13,7 +13,14 @@ gtk4 = { version = "0.11", features = ["v4_12"] }
 # ToggleButton row instead of AdwToggleGroup (1.7), GtkShortcutsWindow instead
 # of AdwShortcutsDialog (1.8).
 adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
-vte4 = { version = "0.10" }
+# `v0_70` is for `check_match_at`, which is the only way this binding offers to
+# ask "is there a link under this pointer" - and without it, clickable URLs
+# would be limited to OSC 8 hyperlinks, which is a small fraction of the links
+# an agent actually prints. It raises the runtime floor from VTE 0.65 to 0.70
+# (September 2022), which costs nothing real: the GTK4 flavour of VTE this app
+# needs is itself recent enough that every distro in the README's install table
+# ships 0.76 or newer.
+vte4 = { version = "0.10", features = ["v0_70"] }
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

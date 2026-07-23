@@ -76,6 +76,14 @@ you want to nudge it.
   you start a second agent *while* working in the first, and having focus
   jump mid-sentence sends the rest of that sentence somewhere you weren't
   looking. Click it, or `Super+Alt+j`, when you actually want it.
+- **Clickable links** — `Ctrl`-click a URL an agent printed and it opens in your
+  browser. Both kinds work: OSC 8 hyperlinks, where the program says outright
+  that some text is a link, and ordinary URLs found in plain output. `Ctrl`
+  rather than a plain click on purpose — an ordinary click already means "focus
+  this pane, put the cursor here", and a terminal where a stray click can launch
+  a browser is one you get wary of clicking in. The pointer changes shape over a
+  link to say it's there. Only `http`, `https` and `ftp` are ever handed to the
+  desktop; terminal output isn't a trustworthy source of URIs.
 - **Paste, including screenshots** — `Ctrl+V` pastes, and `Ctrl+C` copies the
   selection. If what you copied was an *image*, `Ctrl+V` writes it out as a PNG
   and types its short path (`~/.cache/atc/img/mfd0j1.png`) into the prompt, so
@@ -163,7 +171,7 @@ your desktop environment's own `Super+key` shortcuts.
 ## Requirements
 
 - `git`, `pkg-config`, GTK4 (>= 4.12), libadwaita (>= 1.5), and the
-  GTK4-flavored VTE terminal widget (>= 0.65), including their dev files:
+  GTK4-flavored VTE terminal widget (>= 0.70), including their dev files:
 
   | Distro | Install command |
   |---|---|

@@ -372,6 +372,7 @@ impl Pane {
         // VTE has no clipboard keybindings of its own, so without this a pane
         // can't be pasted into at all.
         crate::clipboard::install(&terminal);
+        crate::links::install(&terminal);
 
         let close_button = gtk4::Button::builder()
             .icon_name("window-close-symbolic")
