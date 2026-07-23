@@ -287,7 +287,7 @@ impl App {
         this.wire_signals();
 
         if saved.projects.is_empty() {
-            this.add_project(cwd, "Getting Started".to_string(), "help-about-symbolic");
+            this.add_project(cwd, "Getting Started".to_string(), crate::model::WELCOME_ICON);
         } else {
             this.restore_session(&saved);
         }

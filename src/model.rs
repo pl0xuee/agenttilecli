@@ -82,6 +82,17 @@ pub enum PaneState {
 /// How many `hue-N` classes `style.css` defines for sidebar rows.
 const HUE_COUNT: u64 = 5;
 
+/// The icon the welcome entry wears, and the marker that it is not a project
+/// with an identity of its own. A folder someone opened is `folder-symbolic`;
+/// this one is the info glyph, and it gets the neutral rail `hue_class` hands
+/// out for it rather than a colour off the wheel - see `NEUTRAL_HUE`.
+pub const WELCOME_ICON: &str = "help-about-symbolic";
+
+/// The rail class for a row that carries no project identity. The welcome entry
+/// is the only thing that uses it: it is a home screen occupying a row, not one
+/// of your projects, and a project colour would say it was.
+pub const NEUTRAL_HUE: &str = "hue-neutral";
+
 /// The identity colour class for a project called `name` - `hue-1` through
 /// `hue-{HUE_COUNT}`, matching the rules in `style.css`.
 ///
@@ -137,10 +148,18 @@ pub struct Project {
 
 impl Project {
     fn new(id: ProjectId, path: &str, name: String, icon: &str) -> Self {
+        // The welcome entry gets a neutral rail rather than an identity colour:
+        // it is not a project, and two purple rails where one is the home screen
+        // and one is a real project reads as two projects that happen to match.
+        let hue = if icon == WELCOME_ICON {
+            NEUTRAL_HUE.to_string()
+        } else {
+            hue_class(&name)
+        };
         Project {
             id,
             path: path.to_string(),
-            hue: hue_class(&name),
+            hue,
             name,
             icon: icon.to_string(),
             mode: Mode::default(),

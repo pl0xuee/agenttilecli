@@ -502,6 +502,14 @@ row.sidebar-row:selected:hover {
    five different *kinds* of item - a status list - and the quieter ones lose
    contrast against the rack. Half-mixed, the strip still says which project it
    is while every name stays the same brightness as every other. */
+/* The welcome entry's rail. Neutral on purpose - it is a home screen occupying
+   a row, not a project, and it carries the app's own quiet grey rather than a
+   colour off the identity wheel. Dimmer than any hue, so it recedes behind the
+   projects that are actually yours. */
+row.sidebar-row.hue-neutral { box-shadow: inset 0.2em 0 0 0 alpha(@muted, 0.4); }
+row.sidebar-row.hue-neutral:selected { box-shadow: inset 0.2em 0 0 0 @muted; }
+row.sidebar-row.hue-neutral .sidebar-row-icon { color: @muted; }
+
 row.sidebar-row.hue-1 { box-shadow: inset 0.2em 0 0 0 alpha(@hue-1, 0.6); }
 row.sidebar-row.hue-2 { box-shadow: inset 0.2em 0 0 0 alpha(@hue-2, 0.6); }
 row.sidebar-row.hue-3 { box-shadow: inset 0.2em 0 0 0 alpha(@hue-3, 0.6); }
