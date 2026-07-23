@@ -393,7 +393,7 @@ impl Pane {
         let status = gtk4::Box::builder()
             .css_classes(["pane-status", status_class(&PaneState::Starting)])
             .valign(gtk4::Align::Center)
-            .tooltip_text(&status_tooltip(&PaneState::Starting))
+            .tooltip_text(status_tooltip(&PaneState::Starting))
             .build();
 
         let head = gtk4::Box::builder()
@@ -581,9 +581,9 @@ impl Pane {
     /// via the `child-exited` signal the caller wires up separately.
     ///
     /// Clears the recorded pid immediately (rather than waiting for
-    /// `child-exited`) so the cwd-polling loop stops touching it right away
-    /// - otherwise a pid the OS recycles for an unrelated process in the
-    /// gap before `child-exited` fires could get its cwd read and briefly
+    /// `child-exited`) so the cwd-polling loop stops touching it right away.
+    /// Otherwise a pid the OS recycles for an unrelated process in the gap
+    /// before `child-exited` fires could get its cwd read and briefly
     /// misattributed to this (closing) pane.
     pub fn hangup(&self) {
         if let Some(pid) = self.pid.take() {

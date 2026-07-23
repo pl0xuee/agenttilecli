@@ -54,10 +54,10 @@ fn main() {
     }
     // ...and when merging into the branch that's already checked out, which
     // updates the branch's ref rather than HEAD itself.
-    if !branch.is_empty() {
-        if let Some(branch_ref) = git_path(&format!("refs/heads/{branch}")) {
-            println!("cargo:rerun-if-changed={branch_ref}");
-        }
+    if !branch.is_empty()
+        && let Some(branch_ref) = git_path(&format!("refs/heads/{branch}"))
+    {
+        println!("cargo:rerun-if-changed={branch_ref}");
     }
     if let Some(packed) = git_path("packed-refs") {
         println!("cargo:rerun-if-changed={packed}");

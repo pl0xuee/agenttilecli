@@ -157,10 +157,10 @@ pub fn listen(on_message: impl Fn(Message) + 'static) -> Option<PathBuf> {
             let _connection = connection;
             // One line is the whole protocol, so there is nothing to loop over
             // and nothing to keep the connection open for.
-            if let Ok(Some(line)) = reader.read_line_future(glib::Priority::DEFAULT).await {
-                if let Some(message) = Message::parse(&String::from_utf8_lossy(&line)) {
-                    on_message(message);
-                }
+            if let Ok(Some(line)) = reader.read_line_future(glib::Priority::DEFAULT).await
+                && let Some(message) = Message::parse(&String::from_utf8_lossy(&line))
+            {
+                on_message(message);
             }
         });
         // Handled: no other listener needs to see this connection.

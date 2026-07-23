@@ -85,10 +85,10 @@ pub fn install(terminal: &Terminal) {
 /// match is this file's opinion about a piece of text. Where both have
 /// something to say, the declaration wins.
 fn uri_at(terminal: &Terminal, x: f64, y: f64) -> Option<String> {
-    if let Some(uri) = terminal.hyperlink_hover_uri() {
-        if !uri.is_empty() {
-            return Some(uri.to_string());
-        }
+    if let Some(uri) = terminal.hyperlink_hover_uri()
+        && !uri.is_empty()
+    {
+        return Some(uri.to_string());
     }
     let (matched, _tag) = terminal.check_match_at(x, y);
     matched.map(|m| m.to_string()).filter(|m| !m.is_empty())

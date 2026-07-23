@@ -10,17 +10,12 @@ fn gap() -> i32 {
     crate::config::get().gap.clamp(0, 40)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mode {
     MasterStack,
     Monocle,
+    #[default]
     Grid,
-}
-
-impl Default for Mode {
-    fn default() -> Self {
-        Mode::Grid
-    }
 }
 
 impl Mode {
@@ -142,10 +137,10 @@ fn master_stack(n: usize, master_count: usize, master_ratio: f64, width: i32, he
 /// the left.
 ///
 /// Only a partial last row is ever off-centre, and only because the cells it
-/// isn't using are all at one end. Every cell keeps the size it would have had
-/// - stretching the survivors to fill the gap is the thing this layout
+/// isn't using are all at one end. Every cell keeps the size it would have had:
+/// stretching the survivors to fill the gap is the thing this layout
 /// deliberately doesn't do, since it would make a lone third pane twice the
-/// size of the two above it - so the leftover width is real either way. Putting
+/// size of the two above it, so the leftover width is real either way. Putting
 /// half of it on each side turns it from a hole in the corner into a margin,
 /// which is what stops three panes reading as "four panes, one missing".
 fn centering_offset(spans: &[(i32, i32)], used: usize, width: i32) -> i32 {
