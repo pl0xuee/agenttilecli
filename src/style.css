@@ -411,14 +411,20 @@ window {
 row.sidebar-row {
   padding: 0.8em 0.7em 0.8em 0.95em;
   margin: 0.1em 0;
-  border-radius: 0.5em;
+  border-radius: 0.45em;
+  /* A whisper of surface, and it is the rail that needs it. The rail is an
+     inset shadow, so it takes the strip's rounded corners with it - and with
+     nothing behind it, a 3px bar with curved ends floating on the rack reads as
+     a detached sliver rather than as the edge of anything. Sat on even this
+     much fill it becomes what it is: a coloured edge on a strip. */
+  background-color: alpha(@text, 0.032);
   color: @dim;
   transition: background-color 120ms ease-out, color 120ms ease-out,
     box-shadow 120ms ease-out;
 }
 
 row.sidebar-row:hover {
-  background-color: alpha(@text, 0.05);
+  background-color: alpha(@text, 0.075);
   color: @text;
 }
 
