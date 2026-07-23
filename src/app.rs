@@ -107,6 +107,14 @@ const SIDEBAR_MAX_PX: f64 = 560.0;
 /// being nonsense on a window narrower than the range itself - 560px of rack in
 /// a 700px window is not a sidebar, it is the whole application - and the panes
 /// are what this is supposed to be sharing with.
+/// Where the pointer is horizontally, in the window surface's own coordinates.
+///
+/// Surface coordinates rather than widget ones because the widget being dragged
+/// is the edge being moved - see `build_sidebar_grip`. The surface stays put.
+fn pointer_x(gesture: &gtk4::GestureDrag) -> Option<f64> {
+    gesture.current_event()?.position().map(|(x, _)| x)
+}
+
 fn sidebar_fraction(start_width: f64, offset_x: f64, total: f64) -> Option<f64> {
     if total <= 0.0 {
         return None;
@@ -412,24 +420,50 @@ impl App {
         // this thin is invisible until the cursor changes over it.
         grip.set_cursor_from_name(Some("col-resize"));
 
-        // Where the rack started, captured once at drag-begin: GestureDrag
-        // reports offsets from the press point, so applying them to a width read
-        // live would compound every motion event into a runaway.
+        // The rack's width and the pointer's position when the drag began.
+        //
+        // Both are needed, and the pointer one is why this doesn't use the
+        // offset `GestureDrag` hands to `drag_update`. That offset is measured
+        // in *widget* coordinates, and this widget is attached to the very edge
+        // being dragged - so every frame moves the grip out from under the
+        // pointer, which changes the reported offset even when the hand holding
+        // the mouse is perfectly still. The next frame reads that as further
+        // movement and widens again. What you see is the rack juddering between
+        // two widths, several times per second, ghosting as it goes.
+        //
+        // Measuring against the window surface instead fixes it at the source:
+        // the surface doesn't move when the sidebar resizes, so a still hand
+        // produces a still number.
         let start_width = Rc::new(Cell::new(0.0));
+        let start_pointer = Rc::new(Cell::new(0.0));
 
         let drag = gtk4::GestureDrag::new();
         let rack_at_begin = rack.clone();
-        let start = start_width.clone();
-        drag.connect_drag_begin(move |_, _, _| {
-            start.set(f64::from(rack_at_begin.width()));
+        let width_at_begin = start_width.clone();
+        let pointer_at_begin = start_pointer.clone();
+        drag.connect_drag_begin(move |gesture, _, _| {
+            width_at_begin.set(f64::from(rack_at_begin.width()));
+            if let Some(x) = pointer_x(gesture) {
+                pointer_at_begin.set(x);
+            }
         });
 
         let split = self.0.split.clone();
-        let start = start_width.clone();
-        drag.connect_drag_update(move |_, offset_x, _| {
+        let width_at_begin = start_width.clone();
+        let pointer_at_begin = start_pointer.clone();
+        drag.connect_drag_update(move |gesture, _, _| {
+            let Some(now) = pointer_x(gesture) else {
+                return;
+            };
+            let travelled = now - pointer_at_begin.get();
             let total = f64::from(split.width());
-            if let Some(fraction) = sidebar_fraction(start.get(), offset_x, total) {
-                split.set_sidebar_width_fraction(fraction);
+            if let Some(fraction) = sidebar_fraction(width_at_begin.get(), travelled, total) {
+                // Only when it actually moves. The property notifies and
+                // relayouts on every set, and a drag delivers motion events far
+                // faster than the rack can change by a whole pixel.
+                if (fraction - split.sidebar_width_fraction()).abs() > f64::EPSILON {
+                    split.set_sidebar_width_fraction(fraction);
+                }
             }
         });
         grip.add_controller(drag);

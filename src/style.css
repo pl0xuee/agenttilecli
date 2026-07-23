@@ -392,33 +392,63 @@ window {
   padding: 0.15em 0.4em;
 }
 
-/* The strip itself. The left padding is wide because the rail lives in it. */
+/* The strip itself, built exactly the way a pane is: a surface one rung above
+   the thing it sits on, inside a hairline, with the rail living in the wide left
+   padding.
+
+   That construction is the point. A pane is @tile on @field inside a 1px rule;
+   a strip is @tile on @rack inside the same. Before this the workspace was
+   assembled hardware and the rack was a list of words on a background - two
+   vocabularies in one window, and the strips were the half that didn't look
+   like it stood for anything. Now each strip is a scale model of the project it
+   opens, and the rack reads as a legend for the workspace.
+
+   The border is on every strip in every state, which is what makes it safe:
+   a rule that appeared on hover or selection would change the strip's height at
+   that moment and shove every strip below it down a line. Only its colour
+   moves. */
 row.sidebar-row {
-  padding: 0.85em 0.7em 0.85em 0.9em;
+  padding: 0.8em 0.7em 0.8em 0.85em;
   margin: 0.14em 0;
+  border: 1px solid @hairline;
   border-radius: 0.25em;
+  background-color: @tile;
   color: @dim;
-  transition: background-color 120ms ease-out, color 120ms ease-out,
-    box-shadow 120ms ease-out;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out,
+    color 120ms ease-out, box-shadow 120ms ease-out;
 }
 
+/* Hover lifts the plate rather than washing it: the same surface, a touch
+   warmer, and the edge brought up to the one a pane wears. One mechanism for
+   "the pointer is here", not a fill layered over a surface. */
 row.sidebar-row:hover {
-  background-color: alpha(@text, 0.045);
+  background-color: mix(@tile, @filament, 0.04);
+  border-color: @edge;
   color: @text;
 }
 
-/* The lit strip: a warm bed, a white name, and (from the rules below) its rail
-   at full strength. Bed *and* rail, because the bed alone would have to carry
-   the selection on brightness - which is exactly what a hover also does, and
-   what the attention flash also does, leaving three states separated only by
-   how bright the same rectangle is. */
+/* The lit strip: the focused pane's own lift, at strip scale. @tile-lit is the
+   surface a pane takes when the keyboard is in it, and the open project is the
+   rack's answer to the same question - so it is the same rung, reached the same
+   way, and the eye only has to learn it once.
+
+   Its edge warms toward @filament without reaching it. The full lamp - filament
+   border and bloom - stays the focused *pane's* alone: two lit things at once
+   and neither is the answer to "where is the keyboard". A strip is raised, not
+   lit.
+
+   Surface *and* rail, because the surface alone would have to carry the
+   selection on brightness - which is exactly what hover also does, and what the
+   attention flash also does, leaving three states separated only by how bright
+   the same rectangle is. */
 row.sidebar-row:selected {
-  background-color: alpha(@filament, 0.08);
+  background-color: @tile-lit;
+  border-color: mix(@edge, @filament, 0.4);
   color: @text;
 }
 
 row.sidebar-row:selected:hover {
-  background-color: alpha(@filament, 0.12);
+  background-color: mix(@tile-lit, @filament, 0.05);
 }
 
 .sidebar-row-icon {
