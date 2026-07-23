@@ -1,5 +1,6 @@
 mod app;
 mod clipboard;
+mod config;
 mod hooks;
 mod ipc;
 mod keybindings;
@@ -55,6 +56,11 @@ fn main() -> glib::ExitCode {
     // file we're running from - which is what makes its path unreadable. See
     // `update::remember_exe`.
     update::remember_exe();
+
+    // Read before the window is built: the config sets the window's own opening
+    // size indirectly (through the session), what its panes run, and how much
+    // air there is between them.
+    config::install(config::Config::load());
 
     let application = adw::Application::builder()
         .application_id(app_id())
@@ -143,6 +149,13 @@ fn build_window(application: &adw::Application) {
     let app = App::new(application, &cwd, &base_title());
     keybindings::install(app.window(), &app);
     app.present();
+
+    // After presenting, so the dialog has a window to sit on. Someone typed
+    // that file; a mistake in it gets said out loud rather than silently
+    // replaced with defaults.
+    if let Some(problem) = config::problem() {
+        app.report_config_problem(problem);
+    }
 }
 
 #[cfg(test)]

@@ -110,6 +110,33 @@ you want to nudge it.
 - **Adjustable text size** — enlarge or shrink every pane's terminal text
   together, independent of pane layout.
 
+## Configuration
+
+Optional. Everything has a working default, and the file doesn't exist until
+you make it:
+
+```toml
+# ~/.config/agenttilecli/config.toml
+
+command = "claude"      # what each pane runs
+agents = 1              # agents a newly-opened project starts with
+restore_agents = false  # reopen a saved session's agents too?
+gap = 4                 # half the space between tiles, in pixels
+scrollback = 10000      # lines of scrollback per pane
+```
+
+A mistake in it — a typo'd key, broken TOML — is reported when the app starts,
+with the line and column, rather than silently ignored.
+
+`restore_agents` is off on purpose. An agent is a process with a token budget
+attached, so reopening a project restores its *layout* and leaves the panes to
+you; turn this on if you'd rather it started them.
+
+Your session (which projects are open, their order, each one's layout mode and
+ratios, the window size) is remembered separately in
+`~/.local/state/agenttilecli/session.json`. That one is machine-managed — you
+shouldn't need to touch it.
+
 ## Keybindings
 
 All bindings are held with **Super+Alt** together, so they never collide with

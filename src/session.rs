@@ -131,10 +131,6 @@ impl Session {
         std::fs::rename(&temporary, &path)
     }
 
-    /// The project that should be showing, if it is still there.
-    pub fn active(&self) -> Option<&Project> {
-        self.projects.iter().find(|p| p.active)
-    }
 }
 
 /// `$XDG_STATE_HOME/agenttilecli/session.json`.
@@ -199,7 +195,13 @@ mod tests {
         let back: Session = serde_json::from_str(&text).unwrap();
         let names: Vec<_> = back.projects.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["work", "other"]);
-        assert_eq!(back.active().map(|p| p.name.as_str()), Some("work"));
+        let active: Vec<_> = back
+            .projects
+            .iter()
+            .filter(|p| p.active)
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(active, ["work"], "exactly one project comes back active");
     }
 
     /// A state file from an older version - or a corrupted one - must not stop

@@ -1,12 +1,14 @@
 /// Half the space between two neighbouring tiles.
 ///
 /// `shrink` insets every side of every tile by this, so two tiles sharing a
-/// seam end up `2 * GAP` apart while a tile against the window edge sits `GAP`
+/// seam end up `2 * gap()` apart while a tile against the window edge sits `gap()`
 /// in from it. That ratio is right - an edge is one boundary and a seam is two
 /// tiles' worth - but it does mean the number here reads as half of what the
 /// eye actually measures between panes, which is how this came to be twice the
 /// size it wanted to be.
-const GAP: i32 = 4;
+fn gap() -> i32 {
+    crate::config::get().gap.clamp(0, 40)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mode {
@@ -40,11 +42,12 @@ pub struct Rect {
 }
 
 fn shrink(r: Rect) -> Rect {
+    let gap = gap();
     Rect {
-        x: r.x + GAP,
-        y: r.y + GAP,
-        width: (r.width - 2 * GAP).max(0),
-        height: (r.height - 2 * GAP).max(0),
+        x: r.x + gap,
+        y: r.y + gap,
+        width: (r.width - 2 * gap).max(0),
+        height: (r.height - 2 * gap).max(0),
     }
 }
 
@@ -353,24 +356,24 @@ mod tests {
         let rects = compute(3, 0, Mode::MasterStack, 1, 0.5, 1000, 600);
         assert_eq!(rects.len(), 3);
         // master column
-        assert_eq!(rects[0].x, GAP);
-        assert_eq!(rects[0].width, 500 - 2 * GAP);
-        assert_eq!(rects[0].height, 600 - 2 * GAP);
+        assert_eq!(rects[0].x, gap());
+        assert_eq!(rects[0].width, 500 - 2 * gap());
+        assert_eq!(rects[0].height, 600 - 2 * gap());
         // stack column, two panes stacked vertically
-        assert_eq!(rects[1].x, 500 + GAP);
-        assert_eq!(rects[2].x, 500 + GAP);
-        assert_eq!(rects[1].y, GAP);
+        assert_eq!(rects[1].x, 500 + gap());
+        assert_eq!(rects[2].x, 500 + gap());
+        assert_eq!(rects[1].y, gap());
         assert!(rects[2].y > rects[1].y);
         // stack panes fill the full stack height between them
-        assert_eq!(rects[1].height + rects[2].height, 600 - 4 * GAP);
+        assert_eq!(rects[1].height + rects[2].height, 600 - 4 * gap());
     }
 
     #[test]
     fn master_stack_no_stack_uses_full_width() {
         let rects = compute(2, 0, Mode::MasterStack, 2, 0.55, 800, 600);
         assert_eq!(rects.len(), 2);
-        assert_eq!(rects[0].width, 800 - 2 * GAP);
-        assert_eq!(rects[1].width, 800 - 2 * GAP);
+        assert_eq!(rects[0].width, 800 - 2 * gap());
+        assert_eq!(rects[1].width, 800 - 2 * gap());
     }
 
     #[test]
@@ -513,7 +516,7 @@ mod tests {
         assert_eq!(rects.len(), 4);
         assert_eq!(rects[0].x, rects[2].x, "columns line up down the grid");
         assert_eq!(rects[1].x, rects[3].x);
-        assert_eq!(rects[0].x, GAP, "and the first column keeps its margin");
+        assert_eq!(rects[0].x, gap(), "and the first column keeps its margin");
     }
 
     #[test]

@@ -250,7 +250,7 @@ impl App {
             syncing_mode: Cell::new(false),
             sidebar_toggle: sidebar_toggle.clone(),
             last_dir: RefCell::new(cwd.to_string()),
-            last_agent_count: Cell::new(1),
+            last_agent_count: Cell::new(crate::config::get().agents.max(1)),
             font_scale: Cell::new(1.0),
             save_queued: Cell::new(false),
             base_title: title.to_string(),
@@ -402,6 +402,13 @@ impl App {
                     focus: 0,
                 },
             );
+            // Off unless asked for. See this method's doc comment, and
+            // `session`'s header, for why the default is not to.
+            if crate::config::get().restore_agents {
+                for _ in 0..project.agents {
+                    tiler.spawn_pane_here();
+                }
+            }
             restored.push(self.0.store.borrow().active());
         }
 

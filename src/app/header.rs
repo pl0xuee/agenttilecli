@@ -264,6 +264,15 @@ impl App {
         self.0.window.add_action(&about);
     }
 
+    /// Says that the config file could not be used, and what was wrong with it.
+    ///
+    /// A dialog rather than a toast: it carries a parser's line-and-column
+    /// complaint, which is several lines and worth reading twice, and it ends in
+    /// something only the user can go and fix.
+    pub fn report_config_problem(&self, problem: &str) {
+        self.0.updates.alert("Your config file wasn't used", problem);
+    }
+
     pub fn show_shortcuts(&self) {
         crate::shortcuts::present(&self.0.window);
     }

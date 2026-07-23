@@ -366,6 +366,9 @@ impl Pane {
         // are working at once. VTE still emits the `bell` signal either way;
         // this only suppresses the beep.
         terminal.set_audible_bell(false);
+        // Agents produce a great deal of output, and VTE's default scrollback is
+        // not generous by the standards of a long tool-using turn.
+        terminal.set_scrollback_lines(crate::config::get().scrollback as _);
         // VTE has no clipboard keybindings of its own, so without this a pane
         // can't be pasted into at all.
         crate::clipboard::install(&terminal);
@@ -433,9 +436,13 @@ impl Pane {
     /// any reason, the pane still gets a perfectly good claude - just a silent
     /// one, which is exactly what it was before this existed.
     pub fn new(cwd: &str) -> Self {
+        let configured = &crate::config::get().command;
         let command = match claude_settings_file() {
-            Some(path) => format!("claude --settings {}", crate::update::sh_quote(&path)),
-            None => "claude".to_string(),
+            Some(path) => format!(
+                "{configured} --settings {}",
+                crate::update::sh_quote(&path)
+            ),
+            None => configured.clone(),
         };
         Self::command(cwd, &command)
     }
