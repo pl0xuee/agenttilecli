@@ -15,7 +15,7 @@
 
 use gtk4::prelude::*;
 use gtk4::{gdk, glib};
-use vte4::{prelude::*, Regex, Terminal};
+use vte4::{Regex, Terminal, prelude::*};
 
 use crate::app::App;
 

@@ -130,7 +130,6 @@ impl Session {
         std::fs::write(&temporary, text)?;
         std::fs::rename(&temporary, &path)
     }
-
 }
 
 /// `$XDG_STATE_HOME/agenttilecli/session.json`.

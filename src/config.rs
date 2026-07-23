@@ -113,13 +113,13 @@ impl Config {
                 return Loaded {
                     config: Config::default(),
                     problem: None,
-                }
+                };
             }
             Err(e) => {
                 return Loaded {
                     config: Config::default(),
                     problem: Some(format!("{} couldn't be read: {e}", path.display())),
-                }
+                };
             }
         };
         Config::parse(&text, &path.display().to_string())
@@ -136,7 +136,9 @@ impl Config {
                 config: Config::default(),
                 // `to_string` on a toml error carries the line and column, which
                 // is the entire value of reporting this at all.
-                problem: Some(format!("{whence} has a problem, so defaults are in use:\n\n{e}")),
+                problem: Some(format!(
+                    "{whence} has a problem, so defaults are in use:\n\n{e}"
+                )),
             },
         }
     }
@@ -180,7 +182,10 @@ mod tests {
         let loaded = Config::parse("agents = = 3", "config.toml");
         assert_eq!(loaded.config, Config::default(), "and defaults are used");
         let problem = loaded.problem.expect("a malformed file is reported");
-        assert!(problem.contains("config.toml"), "says which file: {problem}");
+        assert!(
+            problem.contains("config.toml"),
+            "says which file: {problem}"
+        );
     }
 
     /// A key that doesn't exist is almost always a typo for one that does, and

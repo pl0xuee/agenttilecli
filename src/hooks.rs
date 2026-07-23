@@ -182,7 +182,11 @@ mod tests {
     /// for, and the one a naive "last event wins" would lose.
     #[test]
     fn a_pane_waiting_on_you_is_not_demoted_by_its_own_activity() {
-        let waiting = advance(&PaneState::Working { tool: None }, Event::Notification, None);
+        let waiting = advance(
+            &PaneState::Working { tool: None },
+            Event::Notification,
+            None,
+        );
         assert_eq!(waiting, PaneState::Waiting);
 
         let still = advance(&waiting, Event::PostToolUse, None);
@@ -197,7 +201,10 @@ mod tests {
     #[test]
     fn nothing_resurrects_an_exited_pane() {
         for event in Event::ALL {
-            assert_eq!(advance(&PaneState::Exited, event, Some("Bash")), PaneState::Exited);
+            assert_eq!(
+                advance(&PaneState::Exited, event, Some("Bash")),
+                PaneState::Exited
+            );
         }
     }
 
@@ -233,7 +240,9 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert!(
-            commands(Event::Stop).iter().any(|c| c.contains(r"printf '\a'")),
+            commands(Event::Stop)
+                .iter()
+                .any(|c| c.contains(r"printf '\a'")),
             "the bell fallback lost its escape: {:?}",
             commands(Event::Stop),
         );

@@ -21,8 +21,8 @@
 
 use gtk4::gdk;
 use gtk4::prelude::*;
-use gtk4::{gio, GestureClick, PropagationPhase};
-use vte4::{prelude::*, Regex, Terminal};
+use gtk4::{GestureClick, PropagationPhase, gio};
+use vte4::{Regex, Terminal, prelude::*};
 
 /// What counts as a URL in plain terminal output.
 ///

@@ -237,10 +237,10 @@ mod tests {
             "",
             "\n",
             "onlyonefield\n",
-            "\tStop\t\n",                    // no pane
-            "p1\tNotAnEvent\t\n",            // unknown event
-            "p1\n",                          // truncated
-            "p1\tStop",                      // no newline at all
+            "\tStop\t\n",         // no pane
+            "p1\tNotAnEvent\t\n", // unknown event
+            "p1\n",               // truncated
+            "p1\tStop",           // no newline at all
         ] {
             let parsed = Message::parse(line);
             assert!(
