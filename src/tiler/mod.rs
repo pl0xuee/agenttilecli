@@ -266,6 +266,24 @@ impl Tiler {
         }
     }
 
+    /// Copies the whole of the focused pane's output to the clipboard.
+    ///
+    /// select-all, copy, unselect: the binding has no `text()` to read the
+    /// buffer out directly, so the clipboard path is the way to the same place.
+    /// The brief selection flash is left in rather than hidden - it is honest
+    /// feedback that something was grabbed, and it is gone by the next frame.
+    ///
+    /// Returns whether there was a pane to copy from, so the caller can say so.
+    pub fn copy_focused_output(&self) -> bool {
+        let Some(terminal) = self.focused_terminal() else {
+            return false;
+        };
+        terminal.select_all();
+        terminal.copy_clipboard_format(vte4::Format::Text);
+        terminal.unselect_all();
+        true
+    }
+
     /// The terminal of the pane the keyboard is in.
     pub fn focused_terminal(&self) -> Option<vte4::Terminal> {
         let focus = self.imp().focus.get();

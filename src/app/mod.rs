@@ -548,6 +548,18 @@ impl App {
         }
     }
 
+    /// Copies the focused pane's entire output to the clipboard, and says so.
+    pub fn copy_focused_output(&self) {
+        let copied = self
+            .active_tiler()
+            .is_some_and(|tiler| tiler.copy_focused_output());
+        if copied {
+            self.0
+                .toasts
+                .add_toast(adw::Toast::new("Pane output copied"));
+        }
+    }
+
     /// Opens the find bar over the focused pane, or closes it again.
     pub fn toggle_search(&self) {
         let search = self.0.search.borrow().clone();

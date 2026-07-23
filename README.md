@@ -122,6 +122,9 @@ you want to nudge it.
   four agents is exactly what it's for and exactly what makes it easy to do by
   accident, so it's built to be impossible to leave on without noticing. Per
   project, and never remembered across a restart.
+- **Copy a pane's output** — `Super+Alt+C` puts everything the focused agent
+  has printed onto the clipboard, so you can paste a whole exchange somewhere
+  else without selecting it by hand.
 - **Find in a pane** — `Super+Alt+F` opens a search bar over the focused pane
   and searches its scrollback, wrapping around, case-insensitively. Enter for
   the next match, `Shift+Enter` for the previous, `Escape` to close and hand the
@@ -178,6 +181,7 @@ your desktop environment's own `Super+key` shortcuts.
 | `=` / `-` | enlarge / shrink terminal text (all panes) |
 | `0` | reset terminal text size |
 | `f` | find in the focused pane |
+| `c` | copy the focused pane's output |
 | `/` | show the keyboard shortcuts |
 | `u` | check for updates |
 

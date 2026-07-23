@@ -163,6 +163,10 @@ pub const SECTIONS: &[Section] = &[
                 description: "Find in the focused pane",
             },
             Binding {
+                accelerator: "<Super><Alt>c",
+                description: "Copy the focused pane's output",
+            },
+            Binding {
                 accelerator: "<Super><Alt>u",
                 description: "Check for updates",
             },
@@ -242,6 +246,10 @@ pub fn install(window: &impl IsA<gtk4::Widget>, app: &App) {
             }
             gdk::Key::f => {
                 app.toggle_search();
+                return glib::Propagation::Stop;
+            }
+            gdk::Key::c => {
+                app.copy_focused_output();
                 return glib::Propagation::Stop;
             }
             gdk::Key::u => {
@@ -327,11 +335,11 @@ mod tests {
             .flat_map(|s| s.bindings)
             .filter(|b| b.accelerator.contains("<Super>"))
             .count();
-        // Return, g, [, ], {, }, =, -, 0, f, u, /, Shift+Return, j, k, h, l, i,
-        // d, m, Tab, w - the two match blocks in `install`, counted by hand
+        // Return, g, [, ], {, }, =, -, 0, f, c, u, /, Shift+Return, j, k, h, l,
+        // i, d, m, Tab, w - the two match blocks in `install`, counted by hand
         // because a match arm isn't something a test can enumerate.
         assert_eq!(
-            advertised, 22,
+            advertised, 23,
             "the matcher and the cheatsheet have drifted apart",
         );
     }
