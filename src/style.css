@@ -395,66 +395,53 @@ window {
   padding: 0.15em 0.4em;
 }
 
-/* The strip itself, built exactly the way a pane is: a surface one rung above
-   the thing it sits on, inside a hairline, with the rail living in the wide left
-   padding.
+/* The strip itself.
+   
+   Borderless, and that is the whole of the design. An earlier pass gave every
+   strip the same rule and surface a pane has, on the reasoning that a strip
+   should be a scale model of the tiles it opens. It read as five outlined boxes
+   stacked in a narrow column - the look of a list widget from twenty years ago,
+   and busier than the workspace it was supposed to be echoing. Five rules in a
+   170px column is five more lines than the eye needs to see three projects.
 
-   That construction is the point. A pane is @tile on @field inside a 1px rule;
-   a strip is @tile on @rack inside the same. Before this the workspace was
-   assembled hardware and the rack was a list of words on a background - two
-   vocabularies in one window, and the strips were the half that didn't look
-   like it stood for anything. Now each strip is a scale model of the project it
-   opens, and the rack reads as a legend for the workspace.
-
-   The border is on every strip in every state, which is what makes it safe:
-   a rule that appeared on hover or selection would change the strip's height at
-   that moment and shove every strip below it down a line. Only its colour
-   moves. */
+   So the rack goes quiet and the *selection* does the talking: one filled shape,
+   generously rounded, and nothing else drawn at all. That is also the honest
+   hierarchy - a rack is a list of places you might go, and the only fact worth
+   drawing is which one you're in. */
 row.sidebar-row {
   padding: 0.8em 0.7em 0.8em 0.95em;
-  margin: 0.14em 0;
-  border: 1px solid @hairline;
-  /* The same chamfer a tile catches on its top edge, for the same reason: a
-     plate is milled, not dropped. */
-  border-top-color: mix(@hairline, @filament, 0.16);
-  border-radius: 0.25em;
-  background-color: @tile;
+  margin: 0.1em 0;
+  border-radius: 0.5em;
   color: @dim;
-  transition: background-color 120ms ease-out, border-color 120ms ease-out,
-    color 120ms ease-out, box-shadow 120ms ease-out;
+  transition: background-color 120ms ease-out, color 120ms ease-out,
+    box-shadow 120ms ease-out;
 }
 
-/* Hover lifts the plate rather than washing it: the same surface, a touch
-   warmer, and the edge brought up to the one a pane wears. One mechanism for
-   "the pointer is here", not a fill layered over a surface. */
 row.sidebar-row:hover {
-  background-color: mix(@tile, @filament, 0.04);
-  border-color: @edge;
+  background-color: alpha(@text, 0.05);
   color: @text;
 }
 
-/* The lit strip: the focused pane's own lift, at strip scale. @tile-lit is the
-   surface a pane takes when the keyboard is in it, and the open project is the
-   rack's answer to the same question - so it is the same rung, reached the same
-   way, and the eye only has to learn it once.
+/* The lit strip. A single warm fill, in the light everything focused in this
+   app is lit by - the same @filament that edges the focused pane and paints its
+   cursor, so "where am I" is one colour across the whole window rather than a
+   different idiom per half.
 
-   Its edge warms toward @filament without reaching it. The full lamp - filament
-   border and bloom - stays the focused *pane's* alone: two lit things at once
-   and neither is the answer to "where is the keyboard". A strip is raised, not
-   lit.
+   A wash rather than a solid: at full strength this would be the brightest
+   thing on screen, competing with the focused pane, which is the one thing
+   allowed to look lit.
 
-   Surface *and* rail, because the surface alone would have to carry the
-   selection on brightness - which is exactly what hover also does, and what the
-   attention flash also does, leaving three states separated only by how bright
-   the same rectangle is. */
+   Fill *and* rail, because the fill alone would have to carry the selection on
+   brightness - which is exactly what hover also does, and what the attention
+   flash also does, leaving three states separated only by how bright the same
+   rectangle is. */
 row.sidebar-row:selected {
-  background-color: @tile-lit;
-  border-color: mix(@edge, @filament, 0.4);
+  background-color: alpha(@filament, 0.11);
   color: @text;
 }
 
 row.sidebar-row:selected:hover {
-  background-color: mix(@tile-lit, @filament, 0.05);
+  background-color: alpha(@filament, 0.15);
 }
 
 .sidebar-row-icon {

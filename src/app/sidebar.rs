@@ -187,8 +187,13 @@ impl App {
         // Measuring against the window surface instead fixes it at the source:
         // the surface doesn't move when the sidebar resizes, so a still hand
         // produces a still number.
+        // `None` until a drag begins, and again if the press arrived without a
+        // position we can read. A plain 0.0 default would be indistinguishable
+        // from "the pointer is at the left edge of the window", so the first
+        // motion event would compute a travel of the whole pointer x and slam
+        // the rack to its maximum width.
         let start_width = Rc::new(Cell::new(0.0));
-        let start_pointer = Rc::new(Cell::new(0.0));
+        let start_pointer: Rc<Cell<Option<f64>>> = Rc::new(Cell::new(None));
 
         let drag = gtk4::GestureDrag::new();
         let rack_at_begin = rack.clone();
@@ -196,19 +201,17 @@ impl App {
         let pointer_at_begin = start_pointer.clone();
         drag.connect_drag_begin(move |gesture, _, _| {
             width_at_begin.set(f64::from(rack_at_begin.width()));
-            if let Some(x) = pointer_x(gesture) {
-                pointer_at_begin.set(x);
-            }
+            pointer_at_begin.set(pointer_x(gesture));
         });
 
         let split = self.0.split.clone();
         let width_at_begin = start_width.clone();
         let pointer_at_begin = start_pointer.clone();
         drag.connect_drag_update(move |gesture, _, _| {
-            let Some(now) = pointer_x(gesture) else {
+            let (Some(now), Some(began)) = (pointer_x(gesture), pointer_at_begin.get()) else {
                 return;
             };
-            let travelled = now - pointer_at_begin.get();
+            let travelled = now - began;
             let total = f64::from(split.width());
             if let Some(fraction) = sidebar_fraction(width_at_begin.get(), travelled, total) {
                 // Only when it actually moves. The property notifies and
