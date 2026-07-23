@@ -60,9 +60,10 @@ const DROP_BELOW_CLASS: &str = "drop-below";
 
 /// How much each font-size keybinding press changes the UI's text scale - a
 /// multiplier applied both to every pane's VTE `font-scale` and, via a dynamic
-/// `window { font-size: {scale}em; }` CSS rule, to every chrome element sized in
-/// `em` - so the whole program's text and the app's own controls grow together
-/// instead of only the terminal contents.
+/// `.scaled-content { font-size: {scale}em; }` CSS rule, to every content-side
+/// chrome element sized in `em` - so the panes' text and the controls around
+/// them grow together instead of only the terminal contents. The sidebar is
+/// scoped out on purpose (see `set_font_scale`), so its rows stay put.
 ///
 /// The step is a *ratio*, not an addend: each press multiplies (or divides) the
 /// scale by it. A flat additive step feels lumpy because a fixed 0.1 is a fifth
@@ -160,9 +161,10 @@ struct Inner {
     /// The find bar, built after the window because it needs it for key
     /// capture, so it arrives later than everything else here.
     search: RefCell<Option<crate::search::Search>>,
-    /// Holds just the one dynamic `window { font-size: ... }` rule that drives
-    /// chrome scaling - reloaded in place on every scale change rather than
-    /// recreated, so it keeps sitting at the priority it was added with.
+    /// Holds just the one dynamic `.scaled-content { font-size: ... }` rule that
+    /// drives content-side chrome scaling - reloaded in place on every scale
+    /// change rather than recreated, so it keeps sitting at the priority it was
+    /// added with.
     css_provider: gtk4::CssProvider,
 }
 
@@ -593,8 +595,10 @@ impl App {
         self.set_font_scale(1.0);
     }
 
-    /// Applies `scale` to every project's panes and to the chrome (sidebar,
-    /// header bar, pane borders and labels) via the dynamic CSS provider.
+    /// Applies `scale` to every project's panes and to the content-side chrome
+    /// (header bar, pane borders and labels) via the dynamic CSS provider. The
+    /// sidebar sits in the split view's other subtree and is deliberately left
+    /// out, so its project rows stay a fixed, readable size at any zoom.
     ///
     /// Global rather than per-project, so switching projects never shows a
     /// different zoom level.
@@ -606,7 +610,7 @@ impl App {
         }
         self.0
             .css_provider
-            .load_from_string(&format!("window {{ font-size: {scale}em; }}"));
+            .load_from_string(&format!(".scaled-content {{ font-size: {scale}em; }}"));
     }
 
     // ── Header bar ───────────────────────────────────────────────────────

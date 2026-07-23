@@ -158,14 +158,16 @@ window {
   background-color: @field;
 }
 
-/* Sizes below are in `em`, relative to `window`'s own font-size - which
-   Groups::set_font_scale rewrites (via a separate, higher-priority dynamic
-   provider) every time the text-size keybinding fires. That's what makes
-   the sidebar, floating buttons, and pane chrome all scale together with
-   pane text, without this stylesheet needing to know the current scale
-   itself. Border widths are the deliberate exception, kept at a flat 1px
-   so rules stay crisp instead of going blurry or vanishing at small
-   scales. */
+/* Sizes below are in `em`, relative to the font-size they inherit - which for
+   the content side (header, floating buttons, pane chrome) is rewritten by
+   App::set_font_scale, via a separate higher-priority dynamic provider scoped
+   to `.scaled-content`, every time the text-size keybinding fires. That's what
+   makes the content chrome scale together with pane text, without this
+   stylesheet needing to know the current scale itself. The sidebar sits outside
+   `.scaled-content` and so keeps `window`'s own font-size at any zoom - its rows
+   are an index, sized to stay readable rather than to track the panes. Border
+   widths are the deliberate exception, kept at a flat 1px so rules stay crisp
+   instead of going blurry or vanishing at small scales. */
 
 /* A tile is cut, not dropped: a 3px radius that reads as a machined corner
    rather than a soft card, a single hairline, and no shadow at all. What lifts

@@ -151,7 +151,14 @@ impl App {
         header.pack_end(&new_agent);
         header.pack_end(&broadcast);
 
-        let view = adw::ToolbarView::builder().content(&self.0.stack).build();
+        // The scaled-content class is what the text-size keybinding targets: the
+        // dynamic font-size rule lands here rather than on `window`, so scaling
+        // grows the header and panes but leaves the sidebar at its native size
+        // (the sidebar is the split view's other, separate subtree).
+        let view = adw::ToolbarView::builder()
+            .content(&self.0.stack)
+            .css_classes(["scaled-content"])
+            .build();
         view.add_top_bar(&header);
         view
     }
