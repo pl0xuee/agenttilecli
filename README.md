@@ -5,7 +5,7 @@ real terminals (VTE) that auto re-tile as you spawn, close, or promote them —
 no manual resizing, though you can also drag any divider with the mouse if
 you want to nudge it.
 
-![AgentTileCLI showing the built-in help pane next to a freshly spawned pane](assets/screenshot.png)
+![AgentTileCLI tiling four live Claude Code sessions in one project, with a second project running in the background](assets/screenshot.png)
 
 ## Features
 
