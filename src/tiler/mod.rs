@@ -71,6 +71,17 @@ mod imp {
         /// after a resize. Set to 1.0 in `Tiler::new`, since `Cell<f64>`'s
         /// `Default` is 0.0 (invisible text), not the unscaled size.
         pub font_scale: Cell<f64>,
+        /// Whether typing into the focused pane is echoed to every other pane in
+        /// this group. Off by default and never persisted: it is a mode you turn
+        /// on for one deliberate thing - the same command to four agents - and a
+        /// window that remembered it across a restart would send your next
+        /// keystroke to four terminals you had forgotten were listening.
+        pub broadcast: Cell<bool>,
+        /// True while a broadcast is fanning out, so the `commit` it causes on
+        /// the receiving panes can't fan out again. The focus gate already
+        /// stops that, since only the focused pane broadcasts - this is the belt
+        /// to that braces.
+        pub broadcasting: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -263,6 +274,16 @@ impl Tiler {
             .borrow()
             .get(focus)
             .map(|pane| pane.terminal.clone())
+    }
+
+    /// Whether keystrokes are being echoed to every pane in this group.
+    pub fn broadcast(&self) -> bool {
+        self.imp().broadcast.get()
+    }
+
+    /// Turns input broadcast on or off for this group.
+    pub fn set_broadcast(&self, on: bool) {
+        self.imp().broadcast.set(on);
     }
 
     /// How this group's panes are currently arranged.

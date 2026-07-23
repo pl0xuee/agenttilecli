@@ -640,6 +640,36 @@ row.sidebar-row.needs-attention .sidebar-row-count {
   color: @tally;
 }
 
+/* ── Broadcast ─────────────────────────────────────────────────────────────
+   The one control in the header bar that changes what a keystroke *does* rather
+   than what is shown, which is why it is the one allowed to shout when it is on.
+
+   Off, it is a header button like any other. On, it takes @tally - the app's
+   "pay attention" colour - as a solid fill and holds it, because a broadcast
+   left on is a trap: every key you press goes to four agents, and the only
+   thing standing between that and a surprise is this button being impossible to
+   miss. It also pulses once on arming, so turning it on is a thing you see
+   happen rather than a state you have to notice.
+
+   @tally rather than @hangup: this is not destructive, it is loud. Red would
+   say "you broke something"; amber says "mind what you type now". */
+@keyframes broadcast-arm {
+  from { background-color: alpha(@tally, 0.5); }
+  to   { background-color: @tally; }
+}
+
+.broadcast-toggle:checked,
+.broadcast-toggle.broadcast-active {
+  color: @field;
+  background-color: @tally;
+  animation: broadcast-arm 220ms ease-out;
+}
+
+.broadcast-toggle:checked:hover,
+.broadcast-toggle.broadcast-active:hover {
+  background-color: mix(@tally, #ffffff, 0.12);
+}
+
 /* ── What an agent is doing ────────────────────────────────────────────────
    A dot at the head of every pane, and the same three meanings on the sidebar
    tally beside a project's name.

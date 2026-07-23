@@ -123,8 +123,33 @@ impl App {
             }
         });
 
+        // Broadcast is a `ToggleButton` rather than a plain one because it is a
+        // *mode*, not an action, and a mode has to show whether it is on. Typing
+        // one line into four agents is what it is for and also what makes it
+        // dangerous: the armed state (see `.broadcast-active` in style.css) is
+        // loud on purpose, so a broadcast left on is not something you discover
+        // by watching the same keystroke land in four panes.
+        let broadcast = gtk4::ToggleButton::builder()
+            .icon_name("send-to-symbolic")
+            .can_focus(false)
+            .css_classes(["broadcast-toggle"])
+            .tooltip_text("Broadcast typing to every agent in this project")
+            .build();
+        let this = self.clone();
+        broadcast.connect_toggled(move |button| {
+            if this.0.syncing_broadcast.get() {
+                return;
+            }
+            if let Some(tiler) = this.active_tiler() {
+                tiler.set_broadcast(button.is_active());
+            }
+            this.set_broadcast_armed(button.is_active());
+        });
+        *self.0.broadcast_button.borrow_mut() = Some(broadcast.clone());
+
         header.pack_end(&menu_button);
         header.pack_end(&new_agent);
+        header.pack_end(&broadcast);
 
         let view = adw::ToolbarView::builder().content(&self.0.stack).build();
         view.add_top_bar(&header);
@@ -182,6 +207,18 @@ impl App {
             button.set_active(true);
         }
         self.0.syncing_mode.set(false);
+    }
+
+    /// Points the broadcast toggle at a group's state without letting it write
+    /// that state back - the same dance `sync_mode_buttons` does.
+    pub(super) fn sync_broadcast_button(&self, on: bool) {
+        let Some(button) = self.0.broadcast_button.borrow().clone() else {
+            return;
+        };
+        self.0.syncing_broadcast.set(true);
+        button.set_active(on);
+        self.0.syncing_broadcast.set(false);
+        self.set_broadcast_armed(on);
     }
 
     /// Dims the mode toggles for a project with no panes.

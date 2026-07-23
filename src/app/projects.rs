@@ -245,6 +245,7 @@ impl App {
             tiler.on_shown();
             self.sync_mode_buttons(tiler.mode());
             self.sync_mode_sensitivity(tiler.pane_count());
+            self.sync_broadcast_button(tiler.broadcast());
         }
         if let Some(row) = self.row_for(id) {
             row.remove_css_class(ATTENTION_CLASS);

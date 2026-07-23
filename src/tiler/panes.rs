@@ -19,6 +19,39 @@ use crate::model::PaneState;
 use crate::pane::Pane;
 
 impl Tiler {
+    /// Echoes `text`, just committed by `source`, to every other pane - if this
+    /// group is broadcasting and `source` is the pane the keyboard is in.
+    ///
+    /// The focus check is what makes this safe against itself. `feed_child` on
+    /// the receiving panes causes their own `commit` to fire, which lands back
+    /// here - but they are not the focused pane, so they broadcast nothing, and
+    /// the fan-out stops one level deep. `broadcasting` guards the same thing a
+    /// second way, in case a future VTE changes when `commit` fires.
+    fn broadcast_from(&self, source: &Rc<Pane>, text: &str) {
+        if !self.imp().broadcast.get() || self.imp().broadcasting.get() {
+            return;
+        }
+        let panes = self.imp().panes.borrow();
+        let focused = self.imp().focus.get();
+        let is_focused = panes.get(focused).is_some_and(|p| Rc::ptr_eq(p, source));
+        if !is_focused {
+            return;
+        }
+        let bytes = text.as_bytes().to_vec();
+        let others: Vec<_> = panes
+            .iter()
+            .filter(|p| !Rc::ptr_eq(p, source))
+            .cloned()
+            .collect();
+        drop(panes);
+
+        self.imp().broadcasting.set(true);
+        for pane in others {
+            pane.terminal.feed_child(&bytes);
+        }
+        self.imp().broadcasting.set(false);
+    }
+
     /// Applies an agent's report to whichever of this group's panes sent it.
     ///
     /// Returns whether it landed *and* changed something - the caller uses that
@@ -192,6 +225,22 @@ impl Tiler {
             if let (Some(this), Some(pane)) = (this_weak.upgrade(), pane_weak.upgrade()) {
                 this.close_pane(&pane);
             }
+        });
+
+        // Broadcast: when this group is in broadcast mode and this is the
+        // focused pane, whatever the terminal is about to send its own child
+        // gets sent to every other pane's child too. Hooking `commit` rather
+        // than the keyboard means VTE has already done the key-to-bytes work -
+        // arrows, control codes, pasted text and all - and hands over exactly
+        // the bytes it is sending, so the copies are byte-for-byte identical to
+        // the original.
+        let this_weak = self.downgrade();
+        let pane_weak = Rc::downgrade(&pane);
+        pane.terminal.connect_commit(move |_, text, _size| {
+            let (Some(this), Some(pane)) = (this_weak.upgrade(), pane_weak.upgrade()) else {
+                return;
+            };
+            this.broadcast_from(&pane, text);
         });
 
         self.imp().panes.borrow_mut().push(pane);

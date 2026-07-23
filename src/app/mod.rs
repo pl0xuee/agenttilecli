@@ -130,6 +130,10 @@ struct Inner {
     /// loop. Setting a `ToggleButton` active fires `toggled` exactly as a click
     /// does, and nothing in the signal says which it was.
     syncing_mode: Cell<bool>,
+    /// The broadcast toggle, and the same anti-echo flag the mode buttons have -
+    /// syncing it to a new group's state must not write that state back.
+    broadcast_button: RefCell<Option<gtk4::ToggleButton>>,
+    syncing_broadcast: Cell<bool>,
     /// Carries the attention signal out to where it can be seen when the sidebar
     /// is closed: it says "one of your projects wants you", and the row behind
     /// it says which.
@@ -251,6 +255,8 @@ impl App {
             title: title_widget.clone(),
             mode_buttons: RefCell::new(Vec::new()),
             syncing_mode: Cell::new(false),
+            broadcast_button: RefCell::new(None),
+            syncing_broadcast: Cell::new(false),
             sidebar_toggle: sidebar_toggle.clone(),
             last_dir: RefCell::new(cwd.to_string()),
             last_agent_count: Cell::new(crate::config::get().agents.max(1)),
@@ -529,6 +535,18 @@ impl App {
     }
 
 
+
+    /// Paints the window's broadcast-armed state.
+    ///
+    /// The class goes on the *content* header bar, not just the button, so the
+    /// warning can be as wide as a whole strip rather than one icon - a mode
+    /// that sends your typing to four terminals earns more than a pressed
+    /// button to say it is on.
+    pub(super) fn set_broadcast_armed(&self, armed: bool) {
+        if let Some(button) = self.0.broadcast_button.borrow().as_ref() {
+            set_class(button, "broadcast-active", armed);
+        }
+    }
 
     /// Opens the find bar over the focused pane, or closes it again.
     pub fn toggle_search(&self) {

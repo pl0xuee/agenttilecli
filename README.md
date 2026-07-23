@@ -115,6 +115,13 @@ you want to nudge it.
   *not* restarted: an agent is a process with a token budget attached, and "I
   quit with four running" is not the same thing as "start four now" — each
   project reopens with its layout and an empty state telling you what to press.
+- **Broadcast typing** — the broadcast button in the header bar (top-right)
+  echoes whatever you type into the focused pane to every other agent in the
+  project, so one instruction can go to all of them at once. It's a toggle, and
+  it turns the header control solid amber while it's on — typing one line into
+  four agents is exactly what it's for and exactly what makes it easy to do by
+  accident, so it's built to be impossible to leave on without noticing. Per
+  project, and never remembered across a restart.
 - **Find in a pane** — `Super+Alt+F` opens a search bar over the focused pane
   and searches its scrollback, wrapping around, case-insensitively. Enter for
   the next match, `Shift+Enter` for the previous, `Escape` to close and hand the
