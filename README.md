@@ -35,7 +35,8 @@ you want to nudge it.
   pane count: the grid shape (rows/columns) recomputes as you open/close
   panes, orienting itself to the window's own aspect ratio, and a partial
   last row keeps its panes the same size as every other row rather than
-  stretching them to fill the gap.
+  stretching them to fill the gap — and sits centred in that leftover space,
+  so three panes read as three panes rather than as four with one missing.
 - **A grid you've arranged stays arranged** — drag a seam and those
   proportions survive the window being resized around them, including a
   resize drastic enough that the grid would otherwise re-orient itself.
