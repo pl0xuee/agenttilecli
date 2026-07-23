@@ -295,6 +295,12 @@ impl App {
             this.set_font_scale(saved.font_scale);
         }
         this.save_on_close();
+        // A staged window for taking the README's screenshots: sidebar open, a
+        // couple of extra projects, some panes to tile. `debug_assertions`
+        // rather than a plain env check so it exists only in a `cargo build`,
+        // never in the release binary someone installs - a shipped app has no
+        // business spawning projects nobody opened, however obscure the trigger.
+        #[cfg(debug_assertions)]
         if std::env::var_os("ATC_SCREENSHOT").is_some() {
             this.0.split.set_show_sidebar(true);
             let tiler = this.add_project(cwd, "agenttilecli".to_string(), "folder-symbolic");
@@ -308,6 +314,7 @@ impl App {
     }
 
     #[doc(hidden)]
+    #[cfg(debug_assertions)]
     fn select_for_screenshot(&self) {
         let id = self.0.views.borrow()[1].id;
         self.select(id);
