@@ -71,8 +71,21 @@ impl Rgb {
     /// `RGBA::parse`, so no hex string has to be reconstructed only to be
     /// re-parsed by GDK - and so nothing here can fail at runtime.
     pub fn to_rgba(self) -> gdk::RGBA {
+        self.to_rgba_alpha(1.0)
+    }
+
+    /// The same colour at `alpha`, for the one place in the app that needs a
+    /// translucent one: the terminal's own background.
+    ///
+    /// VTE takes an alpha here and honours it, which is the only route a pane
+    /// has to being see-through - GTK CSS never reaches the surface the terminal
+    /// clears for itself. Nothing else takes this: a translucent *foreground*,
+    /// cursor or selection is text you can see the desk through, which is not a
+    /// setting anyone wants and is trivially reachable by mistake if this
+    /// defaulted the other way.
+    pub fn to_rgba_alpha(self, alpha: f32) -> gdk::RGBA {
         let c = |v: u8| v as f32 / 255.0;
-        gdk::RGBA::new(c(self.r), c(self.g), c(self.b), 1.0)
+        gdk::RGBA::new(c(self.r), c(self.g), c(self.b), alpha.clamp(0.0, 1.0))
     }
 }
 
@@ -148,8 +161,8 @@ mod tests {
         assert_eq!(
             color("tile"),
             Rgb {
-                r: 0x1c,
-                g: 0x24,
+                r: 0x1a,
+                g: 0x23,
                 b: 0x2a
             },
         );

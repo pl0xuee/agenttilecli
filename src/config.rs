@@ -73,6 +73,25 @@ pub struct Config {
     /// How many lines of scrollback each pane keeps. Agents produce a great
     /// deal of output and the default is not generous.
     pub scrollback: u32,
+    /// How opaque the workspace floor and the rack are. Below 1.0 the desktop
+    /// shows through both. Clamped to 0.5..=1.0 by `appearance`.
+    ///
+    /// The default is 0.92 rather than something more dramatic because of what
+    /// the panes are: opaque. The floor is meant to sit *below* them, and a
+    /// translucent surface over a bright desktop climbs toward that desktop
+    /// while the opaque panes stay where they are - so past a point the floor
+    /// stops being the floor. The crossover is around 0.93 against a pure white
+    /// backdrop, and well below that against anything darker; 0.92 keeps the
+    /// depth against an ordinary wallpaper and gives up only against a very
+    /// bright one, where raising this back toward 1.0 is the fix.
+    pub window_opacity: f64,
+    /// How opaque a pane's terminal surface is. Fully opaque by default, and
+    /// deliberately: everything in this window may be seen through except the
+    /// surfaces whose job is being read.
+    pub pane_opacity: f64,
+    /// The terminal font, as Pango describes one ("Fira Mono 10"). Empty means
+    /// the desktop's own monospace.
+    pub font: String,
 }
 
 impl Default for Config {
@@ -81,8 +100,21 @@ impl Default for Config {
             command: "claude".to_string(),
             agents: 1,
             restore_agents: false,
-            gap: 4,
+            // Six rather than the four this was before the tiles cast a shadow.
+            // A shadow needs somewhere to land, and at four the 16px ambient one
+            // was falling almost entirely on the neighbouring tile rather than on
+            // the floor between them.
+            gap: 6,
             scrollback: 10_000,
+            window_opacity: 0.92,
+            pane_opacity: 1.0,
+            // Fira Mono because the rack is already set in Fira Sans, which was
+            // drawn as its companion - so the chrome and the terminals end up
+            // speaking one type family rather than two. `monospace` behind it in
+            // the Pango string is not possible (a font description names one
+            // family), so a machine without Fira falls back through Pango's own
+            // substitution, which lands on the desktop monospace.
+            font: "Fira Mono 10".to_string(),
         }
     }
 }
@@ -206,6 +238,9 @@ mod tests {
             restore_agents: true,
             gap: 8,
             scrollback: 50_000,
+            window_opacity: 0.8,
+            pane_opacity: 0.95,
+            font: "JetBrains Mono 11".into(),
         };
         let text = toml::to_string(&config).expect("serialises");
         let back = Config::parse(&text, "test");

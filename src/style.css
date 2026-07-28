@@ -31,10 +31,17 @@
    the floor for the same reason: a surface that bottoms out at near-black
    stops looking like metal and starts looking like a hole.
 
-   The cool cast widens as the ladder climbs (9 points of red-to-blue spread at
-   the floor, 23 at the top): a fixed offset is a smaller and smaller fraction
+   The cool cast widens as the ladder climbs (8 points of red-to-blue spread at
+   the floor, 24 at the top): a fixed offset is a smaller and smaller fraction
    of the channel values as they lighten, so holding it flat would let the cast
    drain out of the top of the ramp.
+
+   The floor sits lower than it once did, and the glass is why. A translucent
+   surface only reads as translucent when what it is laid over is darker than it
+   is; against the old floor the sidebar stopped looking like a pane of something
+   and started looking like a slightly different grey. Dropping @field and @rack
+   four points each also widens the gap from the floor to @tile from 14 points to
+   16, which the tiles need now that they cast a shadow down onto it.
 
    Tints are derived with `alpha()`/`mix()` rather than hand-mixed hex, so a
    change to @filament carries through every hover, selection and focus ring in
@@ -42,13 +49,21 @@
    `the_stylesheet_parses_without_errors`, which is what stops an unsupported
    colour function being silently dropped. */
 
-@define-color field    #0e1317; /* the window's own panel, the floor */
-@define-color rack     #131a1f; /* sidebar - recessed below the panes */
-@define-color tile     #1c242a; /* pane body: gunmetal proper */
-@define-color tile-lit #212a30; /* the focused pane, same gunmetal lit */
-@define-color chip     #29333a; /* small controls sitting on a pane */
-@define-color hairline #323d45; /* rules inside the chrome */
-@define-color edge     #43505a; /* pane borders, the strongest rule */
+@define-color field    #0a0f12; /* the window's own panel, the floor */
+@define-color rack     #0f151a; /* sidebar - recessed below the panes */
+@define-color tile     #1a232a; /* pane body: gunmetal proper */
+@define-color tile-lit #1f282f; /* the focused pane, same gunmetal lit */
+@define-color chip     #2a343b; /* small controls sitting on a pane */
+@define-color hairline #34404a; /* rules inside the chrome */
+@define-color edge     #47555f; /* pane borders, the strongest rule */
+
+/* The ink every shadow in this app is cast in, and deliberately not black.
+   Gunmetal has teal in it, and a shadow with none in it goes muddy against it -
+   the grey you get from laying pencil over a photograph of blued steel. This is
+   the ladder carried two rungs below where the ladder itself stops, which is
+   also why it isn't on it: nothing is ever painted this colour, it only ever
+   appears through `alpha()`. */
+@define-color shadow   #050a0d;
 
 @define-color text  #e9eef1; /* the thing being read */
 @define-color dim   #aeb8be; /* secondary labels */
@@ -110,25 +125,37 @@
    These lines are also, deliberately, invisible to `palette.rs`. Its parser
    takes `@define-color <name> <#rrggbb>` and returns `None` for anything whose
    value isn't a hex literal, so every alias below is skipped rather than
-   mis-parsed. That is why they're aliases and not copies. */
+   mis-parsed. That is why they're aliases and not copies.
+
+   Several of them are now `alpha()` or `transparent` rather than a bare name,
+   which is how the glass reaches libadwaita's own widgets - see "Glass" below
+   for why the numbers are what they are. The parser skips these for the same
+   reason it skips the plain aliases: the value isn't a hex literal.
+
+   The two sidebar names are `transparent` rather than glass, and that is the
+   compositing trap written down: the split view paints the sidebar region and
+   the toolbar view inside it paints again, so a pair of 0.78 fills would
+   composite to 0.95 and the glass would come out looking like a slightly
+   different grey. Exactly one surface may paint it, and the one that does is
+   `.sidebar` far below. */
 @define-color window_bg_color @field;
 @define-color window_fg_color @text;
 @define-color view_bg_color @tile;
 @define-color view_fg_color @text;
-@define-color headerbar_bg_color @rack;
+@define-color headerbar_bg_color transparent;
 @define-color headerbar_fg_color @text;
-@define-color headerbar_border_color @hairline;
-@define-color headerbar_backdrop_color @field;
-@define-color sidebar_bg_color @rack;
+@define-color headerbar_border_color transparent;
+@define-color headerbar_backdrop_color transparent;
+@define-color sidebar_bg_color transparent;
 @define-color sidebar_fg_color @text;
-@define-color sidebar_backdrop_color @rack;
+@define-color sidebar_backdrop_color transparent;
 @define-color sidebar_border_color @hairline;
-@define-color secondary_sidebar_bg_color @rack;
+@define-color secondary_sidebar_bg_color transparent;
 @define-color card_bg_color @chip;
 @define-color card_fg_color @text;
-@define-color dialog_bg_color @tile;
+@define-color dialog_bg_color alpha(@tile, 0.94);
 @define-color dialog_fg_color @text;
-@define-color popover_bg_color @tile;
+@define-color popover_bg_color alpha(@tile, 0.92);
 @define-color popover_fg_color @text;
 
 /* The lamp is the accent, which keeps "the thing you're about to act on" and
@@ -151,12 +178,57 @@
 @define-color error_fg_color @field;
 @define-color error_color @hangup;
 
-/* Flat, and deliberately so. The gutters between tiles are the app's own
-   diagram - which panes are where, at what size - and a gradient across the
-   backdrop puts a second, meaningless picture behind that one. */
+/* ── Elevation ─────────────────────────────────────────────────────────────
+   Until 0.5 this app drew no shadow anywhere, and said so: depth was carried by
+   tone alone, on the argument that a ramp with wide enough rungs does the work a
+   shadow would. That argument holds right up until something genuinely overlaps
+   something else - and by 0.5 three things did. The sidebar overlays the panes
+   below 700px, dialogs sit on top of the workspace, and toasts float over both.
+   All three were drawn as though nothing was in front of anything.
+
+   So there is a ladder now, and it has five rungs:
+
+     0  floor      window, the workspace  glassiest, casts nothing
+     1  recessed   .sidebar, .pane-head   below the floor by tone, no shadow
+     2  raised     .pane                  bevel ring + ambient shadow
+     3  lit        .pane.focused          bevel + the warm bloom
+     4  floating   popovers, dialogs, toasts, the find bar, the palette
+
+   Two rules keep it honest. A surface only casts a shadow onto something it is
+   actually in front of - which is why level 1 has none, since a recessed strip
+   in front of nothing casting a shadow onto nothing is just a smudge. And every
+   shadow is @shadow, never black, for the reason given where @shadow is defined.
+
+   ── Glass ─────────────────────────────────────────────────────────────────
+   Opacity in GTK only ever climbs. A child painting `alpha(@rack, 0.78)` over a
+   parent that has already painted a fill composites to *more* opaque than either,
+   never less - so the sidebar cannot be made glassier than the thing behind it by
+   asking for a lower number. There is only one arrangement that works, and it is
+   the one the elevation ladder already describes: transparency falls as
+   elevation rises. Chrome is glass, content is solid, and the floor is the
+   glassiest thing in the window.
+
+   Which is why `window` paints nothing at all. If it painted the floor, the
+   floor would sit under the sidebar too, and the sidebar's own alpha would
+   composite on top of it to something within a percent of opaque. Instead the
+   floor is painted by `.scaled-content` - the content half only - leaving the
+   sidebar column with nothing behind it but the desktop.
+
+   `.scaled-content`'s fill is written by the dynamic provider in `appearance.rs`
+   rather than here, because its alpha is a setting. This file cannot state it;
+   it can only leave the room. */
 window {
-  background-color: @field;
+  background-color: transparent;
 }
+
+/* The panes are the only opaque thing in the window, and that is the point: a
+   terminal is the one surface here whose entire job is being read, and text on
+   glass is text competing with a wallpaper. Everything around them may be seen
+   through; they may not.
+
+   The gutters between tiles stay flat and ungradiented for the reason they
+   always did - they are the app's own diagram of which pane is where, and a
+   gradient across them puts a second, meaningless picture behind that one. */
 
 /* Sizes below are in `em`, relative to the font-size they inherit - which for
    the content side (header, floating buttons, pane chrome) is rewritten by
@@ -169,31 +241,58 @@ window {
    widths are the deliberate exception, kept at a flat 1px so rules stay crisp
    instead of going blurry or vanishing at small scales. */
 
-/* A tile is cut, not dropped: a 3px radius that reads as a machined corner
-   rather than a soft card, a single hairline, and no shadow at all. What lifts
-   it off the backdrop is tone - @tile sits a full 14 points above @field, which
-   is a wider gap than any shadow was carrying - and keeping the lift in the
-   fill means it survives at any window size, on any panel, at any gutter width.
-   Nothing in this app floats except the pane the keyboard is talking to.
+/* Level 2, and now a tile is milled *and* dropped. The lift is still mostly
+   tone - @tile sits 16 points above @field, which is more than the shadow is
+   carrying - and that matters, because tone survives what a shadow doesn't: a
+   pane flush against the window edge, or against a neighbour with 12px between
+   them, has nowhere to put a shadow and still has all of its fill.
 
-   The top edge is lighter than the other three. Machined gunmetal catches the
-   light on its chamfer, and one brighter rule along the top is the whole of
-   what makes these read as milled plate rather than as rectangles - the same
-   trick a bevel plays, for a fraction of the ink.
+   The shadow is two, and they are doing different jobs. The 1px contact shadow
+   is what makes the bottom edge sit *on* the floor rather than hover above it;
+   the 16px ambient one is the height. Both are shallow on purpose - deep shadows
+   under a grid of rectangles read as a dropdown menu, not as plate.
+
+   The ring is a bevel: lighter along the top, darker along the bottom. Machined
+   gunmetal catches the light on its top chamfer and loses it on the bottom one,
+   and those two rules are the whole of what makes these read as milled plate
+   rather than as outlined rectangles - the same trick a bevel plays, for a
+   fraction of the ink.
 
    It has to live on the *border* rather than on an inset box-shadow, which is
    the obvious way to draw it and does not work here: GTK paints background and
    box-shadow before it paints children, and the terminal clears the frame's
    whole content box opaquely on top of both (see `.pane.focused` below, which
    has the same problem and solves it in pane.rs). The border ring is the one
-   part of the frame the terminal never reaches. */
+   part of the frame the terminal never reaches - and the outer shadow, being
+   outside the border box entirely, is the other.
+
+   ── Radius scale ──────────────────────────────────────────────────────────
+   GTK's CSS has no `var()`, so this is a convention rather than a mechanism and
+   the numbers are repeated by hand wherever they're used:
+
+     0.3em   small controls - close buttons, the mode switcher, a scrollbar
+     0.5em   panes
+     0.6em   sidebar strips
+     0.85em  anything floating - the find bar, dialogs, the palette
+
+   The scale climbs with elevation, which is not a coincidence: the higher a
+   surface floats the more it wants to look like an object rather than a region,
+   and roundness is most of what says which of the two something is. */
 .pane {
   background-color: @tile;
-  border: 1px solid @edge;
-  border-top-color: mix(@edge, @filament, 0.22);
-  border-radius: 0.25em;
-  transition: border-color 120ms ease-out, box-shadow 120ms ease-out,
-    background-color 120ms ease-out;
+  /* Below @edge, which is where this sat when the ring was carrying the
+     separation by itself. It isn't any more - the shadow is - and an @edge ring
+     on top of a shadow draws the same boundary twice, which is what turns a
+     grid of tiles into a grid of outlined boxes. The two chamfers still reach
+     for @edge and past it; it is only the sides that step back. */
+  border: 1px solid mix(@hairline, @edge, 0.5);
+  border-top-color: mix(@edge, @filament, 0.28);
+  border-bottom-color: mix(@edge, @shadow, 0.45);
+  border-radius: 0.5em;
+  box-shadow: 0 1px 2px alpha(@shadow, 0.45), 0 6px 16px alpha(@shadow, 0.3);
+  transition: border-color 140ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 140ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* The lamp. Because it is the only glow anywhere in the app, it needs no
@@ -218,7 +317,10 @@ window {
 .pane.focused {
   background-color: @tile-lit;
   border-color: @filament;
-  box-shadow: 0 0 0 2px alpha(@filament, 0.13), 0 0 1.6em alpha(@filament, 0.09);
+  border-top-color: @filament;
+  border-bottom-color: @filament;
+  box-shadow: 0 0 0 2px alpha(@filament, 0.15), 0 0 2em alpha(@filament, 0.1),
+    0 2px 4px alpha(@shadow, 0.5), 0 10px 24px alpha(@shadow, 0.34);
 }
 
 /* ── The pane's head ───────────────────────────────────────────────────────
@@ -243,7 +345,8 @@ window {
   padding: 0.1em 0.15em 0.1em 0.5em;
   background-color: @rack;
   border-bottom: 1px solid @hairline;
-  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+  transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* The focused tile's strip picks up the same warmth its border does, so the
@@ -259,9 +362,10 @@ window {
   min-width: 1.5em;
   min-height: 1.5em;
   padding: 0;
-  border-radius: 0.25em;
+  border-radius: 0.3em;
   color: @faint;
-  transition: background-color 120ms ease-out, color 120ms ease-out;
+  transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1),
+    color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* Only reaches full strength under the pointer. Closing a pane hangs up an
@@ -288,7 +392,8 @@ window {
   min-width: 2em;
   min-height: 1.8em;
   color: @muted;
-  transition: color 120ms ease-out, background-color 120ms ease-out;
+  transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .mode-switcher button:hover {
@@ -341,6 +446,62 @@ window {
   color: @muted;
 }
 
+/* ── The find bar ──────────────────────────────────────────────────────────
+   Level 4, and until now level nothing: `.search-row` has been applied to the
+   box since the day the find bar landed and has never had a single rule to its
+   name, so it arrived in stock Adwaita - a full-width grey slab with a boxed
+   entry in it, wedged between the header bar and the panes.
+
+   It is a thing that appears over your work and then goes away again, which is
+   the definition of floating, so it floats: a centred pill with the deep shadow
+   every level-4 surface carries, sized to the text you type rather than to the
+   window. The width comes from `search.rs` - a centred box whose child has a
+   width request - because a box that hexpands cannot be centred, it can only be
+   full.
+
+   GtkSearchBar paints a slab of its own underneath (`searchbar > revealer >
+   box`), which has to be cleared or the pill floats on a rectangle rather than
+   on the workspace. */
+searchbar,
+searchbar > revealer > box {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.search-row {
+  margin: 0.4em 0 0.55em;
+  padding: 0.3em 0.35em 0.3em 0.6em;
+  border-radius: 0.85em;
+  background-color: alpha(@chip, 0.92);
+  border: 1px solid alpha(@filament, 0.07);
+  box-shadow: 0 2px 6px alpha(@shadow, 0.5), 0 16px 40px alpha(@shadow, 0.45);
+}
+
+/* The entry gives up its own box. Inside a pill that is already a container,
+   a second bordered rectangle is a control drawn twice. */
+.search-row entry {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  min-height: 1.9em;
+}
+
+.search-row button {
+  min-width: 1.7em;
+  min-height: 1.7em;
+  border-radius: 0.3em;
+  color: @muted;
+  transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.search-row button:hover {
+  color: @text;
+  background-color: alpha(@text, 0.08);
+}
+
 /* ── The rack ──────────────────────────────────────────────────────────────
    The sidebar is a rack of channel strips: every open project gets a strip,
    every strip carries a tally rail in that project's own colour, and exactly
@@ -352,6 +513,10 @@ window {
    to an overlay below a breakpoint), and draws the second itself - a `min-width`
    fighting the clamp, or a border doubling the separator, is the kind of seam
    that only shows up at one particular window size. */
+/* The fill is written by `appearance.rs`, not here, and at the same alpha the
+   workspace floor gets - see `appearance::content_css` for why the two have to
+   match. This rule is what the dynamic one overrides, and it is the colour the
+   rack is during the frame before that provider has loaded. */
 .sidebar {
   background-color: @rack;
 }
@@ -380,9 +545,10 @@ window {
 .sidebar-header button {
   min-width: 1.8em;
   min-height: 1.8em;
-  border-radius: 0.25em;
+  border-radius: 0.3em;
   color: @muted;
-  transition: color 120ms ease-out, background-color 120ms ease-out;
+  transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* A wash rather than a solid fill. At this size a filled square is the
@@ -414,7 +580,7 @@ window {
 row.sidebar-row {
   padding: 1.05em 0.7em 1.05em 1em;
   margin: 0.13em 0;
-  border-radius: 0.5em;
+  border-radius: 0.6em;
   /* A whisper of surface, and it is the rail that needs it. The rail is an
      inset shadow, so it takes the strip's rounded corners with it - and with
      nothing behind it, a 3px bar with curved ends floating on the rack reads as
@@ -422,8 +588,9 @@ row.sidebar-row {
      much fill it becomes what it is: a coloured edge on a strip. */
   background-color: alpha(@text, 0.032);
   color: @dim;
-  transition: background-color 120ms ease-out, color 120ms ease-out,
-    box-shadow 120ms ease-out;
+  transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1),
+    color 140ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 row.sidebar-row:hover {
@@ -456,7 +623,7 @@ row.sidebar-row:selected:hover {
 .sidebar-row-icon {
   color: @muted;
   opacity: 0.85;
-  transition: color 120ms ease-out;
+  transition: color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* Fira Sans, and it is a pairing rather than a preference.
@@ -558,11 +725,12 @@ row.sidebar-row:selected .sidebar-row-label {
 .sidebar-row-close {
   min-width: 1.4em;
   min-height: 1.4em;
-  border-radius: 0.25em;
+  border-radius: 0.3em;
   color: @muted;
   opacity: 0;
-  transition: opacity 120ms ease-out, color 120ms ease-out,
-    background-color 120ms ease-out;
+  transition: opacity 140ms cubic-bezier(0.2, 0, 0, 1),
+    color 140ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 row.sidebar-row:hover .sidebar-row-close {
@@ -699,7 +867,7 @@ row.sidebar-row.needs-attention .sidebar-row-count {
   margin-right: 0.55em;
   border-radius: 50%;
   background-color: @faint;
-  transition: background-color 160ms ease-out;
+  transition: background-color 160ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* Not yet heard from - it has been up for a fraction of a second. Hollow
@@ -816,7 +984,7 @@ row.sidebar-row.drop-below:selected {
    seam you are merely hovering has not been given focus. */
 .sidebar-grip {
   background-color: @hairline;
-  transition: background-color 120ms ease-out;
+  transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .sidebar-grip:hover {

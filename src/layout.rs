@@ -6,8 +6,11 @@
 /// tiles' worth - but it does mean the number here reads as half of what the
 /// eye actually measures between panes, which is how this came to be twice the
 /// size it wanted to be.
+/// Read from `appearance` rather than straight from the config, because the
+/// preferences dialog moves it while the app is running and the config file is
+/// only where it starts.
 fn gap() -> i32 {
-    crate::config::get().gap.clamp(0, 40)
+    crate::appearance::get().gap
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

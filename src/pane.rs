@@ -200,7 +200,16 @@ fn theme(focused: bool) -> Theme {
 fn apply_theme(terminal: &Terminal, focused: bool) {
     let theme = theme(focused);
 
-    let background = theme.background.to_rgba();
+    // The background is the one colour here that may be translucent, and it is
+    // also the one VTE will let go see-through: the terminal clears its own
+    // surface, so the `.pane` fill underneath it never shows regardless. The
+    // cursor's *foreground* is painted with the opaque form below for the same
+    // reason it isn't `alpha`'d - it is the character under the block cursor,
+    // which has to be legible against the cursor rather than through it.
+    let background = theme
+        .background
+        .to_rgba_alpha(crate::appearance::get().pane_opacity as f32);
+    let opaque_background = theme.background.to_rgba();
     let foreground = theme.foreground.to_rgba();
     let ansi = theme.ansi.map(|c| c.to_rgba());
     let ansi_refs: Vec<&gdk::RGBA> = ansi.iter().collect();
@@ -211,9 +220,30 @@ fn apply_theme(terminal: &Terminal, focused: bool) {
     // palette ends up with a stock-blue selection and a white block cursor in
     // the middle of it.
     terminal.set_color_cursor(Some(&theme.cursor.to_rgba()));
-    terminal.set_color_cursor_foreground(Some(&background));
+    terminal.set_color_cursor_foreground(Some(&opaque_background));
     terminal.set_color_highlight(Some(&theme.selection.to_rgba()));
     terminal.set_color_highlight_foreground(Some(&foreground));
+}
+
+/// Sets the terminal's font from the appearance, or leaves VTE on the desktop's
+/// own monospace when no font is named.
+///
+/// Until now nothing set one at all, so every pane inherited whatever
+/// `monospace` resolved to on the machine - which meant the one part of the app
+/// made entirely of text was the one part nobody had chosen a typeface for. The
+/// default names Fira Mono, the face Fira Sans was drawn as a companion to, so
+/// the rack and the terminals it indexes speak one family.
+///
+/// An unparseable description is not an error worth reporting: Pango returns a
+/// description with no family set, and VTE falls back to the default - which is
+/// exactly what an empty setting asks for anyway.
+fn apply_font(terminal: &Terminal) {
+    let font = crate::appearance::get().font;
+    if font.trim().is_empty() {
+        terminal.set_font(None);
+        return;
+    }
+    terminal.set_font(Some(&gtk4::pango::FontDescription::from_string(&font)));
 }
 
 #[cfg(test)]
@@ -359,6 +389,7 @@ impl Pane {
         terminal.set_hexpand(true);
         terminal.set_vexpand(true);
         apply_theme(&terminal, false);
+        apply_font(&terminal);
         // An agent's bell is this app's "the agent wants you" signal - it's
         // what lights up the group's sidebar row (see `App::flash_row`).
         // Turning the *audible* half off keeps that a visual notification

@@ -32,9 +32,13 @@ pub struct Search {
 
 impl Search {
     pub fn new(app: &App) -> Self {
+        // A width request rather than `hexpand`, because the row it sits in is
+        // centred and a child that expands would push it back out to the full
+        // width of the window - which is the shape the find bar had when it had
+        // no style of its own at all.
         let entry = gtk4::SearchEntry::builder()
             .placeholder_text("Find in this pane")
-            .hexpand(true)
+            .width_request(320)
             .build();
 
         let previous = gtk4::Button::builder()
@@ -53,6 +57,7 @@ impl Search {
         let row = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(6)
+            .halign(gtk4::Align::Center)
             .css_classes(["search-row"])
             .build();
         row.append(&entry);

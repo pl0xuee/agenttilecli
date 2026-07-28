@@ -1,4 +1,5 @@
 mod app;
+mod appearance;
 mod clipboard;
 mod config;
 mod hooks;
@@ -63,6 +64,9 @@ fn main() -> glib::ExitCode {
     // size indirectly (through the session), what its panes run, and how much
     // air there is between them.
     config::install(config::Config::load());
+    // After the config and before the window: the appearance takes its defaults
+    // from the config file, and the window is painted from the appearance.
+    appearance::install();
 
     let application = adw::Application::builder()
         .application_id(app_id())
@@ -158,6 +162,70 @@ fn build_window(application: &adw::Application) {
     if let Some(problem) = config::problem() {
         app.report_config_problem(problem);
     }
+
+    #[cfg(debug_assertions)]
+    if let Some(path) = std::env::var_os("ATC_SHOT") {
+        capture_and_quit(application, app.window(), path.into());
+    }
+}
+
+/// Renders the window to a PNG and quits - `ATC_SHOT=/path/to.png`.
+///
+/// The app draws itself rather than being photographed by a screenshot tool,
+/// and that is the point. Every desktop grabber worth using offers "the active
+/// window", which is a description of whatever happens to have focus at the
+/// instant the shutter fires - and when the answer is "not this app" the file
+/// you get is a picture of someone's other window. Asking GTK to render its own
+/// widget tree cannot photograph anything that isn't this process.
+///
+/// It also keeps the alpha. A grabber composites the window against the desktop
+/// and hands back an opaque image; this writes the translucency out as real
+/// transparency, which is the only way to see what the glass is actually doing
+/// rather than what it happens to look like over today's wallpaper.
+///
+/// Debug builds only, alongside the screenshot staging it is usually paired
+/// with (`ATC_SCREENSHOT=1 ATC_SHOT=shot.png`).
+#[cfg(debug_assertions)]
+fn capture_and_quit(
+    application: &adw::Application,
+    window: &adw::ApplicationWindow,
+    path: std::path::PathBuf,
+) {
+    use gtk4::prelude::*;
+
+    let application = application.clone();
+    let window = window.clone();
+    // A beat after presenting, so the window has been mapped, laid out and had
+    // its first frame drawn. Rendering before that yields a texture of the
+    // window's idea of itself before the tiler has allocated anything.
+    glib::timeout_add_local_once(std::time::Duration::from_millis(1200), move || {
+        let shot = window
+            .native()
+            .and_then(|native| native.renderer())
+            .and_then(|renderer| {
+                let paintable = gtk4::WidgetPaintable::new(Some(&window));
+                let snapshot = gtk4::Snapshot::new();
+                paintable.snapshot(
+                    &snapshot,
+                    f64::from(window.width()),
+                    f64::from(window.height()),
+                );
+                snapshot.to_node().map(|node| renderer.render_texture(&node, None))
+            });
+
+        match shot {
+            Some(texture) => {
+                let bytes = texture.save_to_png_bytes();
+                if let Err(e) = std::fs::write(&path, &bytes) {
+                    eprintln!("ATC_SHOT: could not write {}: {e}", path.display());
+                } else {
+                    eprintln!("ATC_SHOT: wrote {}", path.display());
+                }
+            }
+            None => eprintln!("ATC_SHOT: the window had nothing to render yet"),
+        }
+        application.quit();
+    });
 }
 
 #[cfg(test)]

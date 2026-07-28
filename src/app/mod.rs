@@ -296,6 +296,11 @@ impl App {
         if saved.font_scale > 0.0 {
             this.set_font_scale(saved.font_scale);
         }
+        // Unconditionally, because the rule this writes carries the workspace
+        // floor as well as the text size - and a saved scale of exactly 1.0
+        // skips the branch above, which would leave the window with no floor
+        // painted at all and the desktop showing through the gutters.
+        this.refresh_appearance_css();
         this.save_on_close();
         // A staged window for taking the README's screenshots: sidebar open, a
         // couple of extra projects, some panes to tile. `debug_assertions`
@@ -608,9 +613,14 @@ impl App {
         for view in self.0.views.borrow().iter() {
             view.tiler.set_font_scale(scale);
         }
-        self.0
-            .css_provider
-            .load_from_string(&format!(".scaled-content {{ font-size: {scale}em; }}"));
+        self.refresh_appearance_css();
+    }
+
+    /// Rewrites the one dynamic rule. Called whenever either of the two things
+    /// that rule carries moves - the text scale, or the window's opacity.
+    pub(super) fn refresh_appearance_css(&self) {
+        let css = crate::appearance::content_css(self.0.font_scale.get());
+        self.0.css_provider.load_from_string(&css);
     }
 
     // ── Header bar ───────────────────────────────────────────────────────

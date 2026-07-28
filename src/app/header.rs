@@ -155,9 +155,22 @@ impl App {
         // dynamic font-size rule lands here rather than on `window`, so scaling
         // grows the header and panes but leaves the sidebar at its native size
         // (the sidebar is the split view's other, separate subtree).
+        //
+        // It also carries the workspace floor - see `appearance::content_css`.
+        // The floor is painted here rather than on the window because the window
+        // spans the sidebar too, and a floor under the rack is a floor the
+        // rack's own glass composites against.
         let view = adw::ToolbarView::builder()
             .content(&self.0.stack)
             .css_classes(["scaled-content"])
+            // Flat, so the header bar stops being a slab with the workspace
+            // below it and becomes part of the workspace. The default `Raised`
+            // style gives the bar its own fill and a rule under it, which is a
+            // second horizontal line immediately above a grid of tiles that are
+            // already drawing their own - and with the floor now translucent, an
+            // opaque bar across the top of it is the one place the glass would
+            // visibly stop.
+            .top_bar_style(adw::ToolbarStyle::Flat)
             .build();
         view.add_top_bar(&header);
         view

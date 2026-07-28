@@ -98,6 +98,13 @@ impl App {
             // disabled button to look like one, and attached to nothing.
             .show_end_title_buttons(false)
             .show_start_title_buttons(false)
+            // `style.css` has carried `.sidebar-header` rules - the heading's
+            // padding, and the "+" button's hover wash - since the rack was
+            // built, and nothing has ever worn the class, so neither has ever
+            // been drawn. A rule that matches nothing is invisible in both
+            // directions: the stylesheet reads as though the heading is padded
+            // and the app renders as though it isn't.
+            .css_classes(["sidebar-header"])
             .build();
         header.pack_start(&header_label);
         header.pack_end(&new_project);
