@@ -128,12 +128,12 @@ impl App {
             App(inner).schedule_save();
         });
 
-        let (row, count) = self.build_row(id);
+        let (row, agents) = self.build_row(id);
         self.0.views.borrow_mut().push(ProjectView {
             id,
             tiler: tiler.clone(),
             row: row.clone(),
-            count,
+            agents,
             view: project_view,
         });
         self.0.list.append(&row);

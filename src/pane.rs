@@ -61,7 +61,10 @@ const STATUS_CLASSES: [&str; 5] = [
     "starting", "working", "idle", "waiting", "exited",
 ];
 
-fn status_class(state: &PaneState) -> &'static str {
+/// The dot's class for a state. `pub(crate)` because the rack draws the same
+/// dots for the same states - see `App::refresh_row_tally`. One function so the
+/// two scales cannot disagree about which colour means what.
+pub(crate) fn status_class(state: &PaneState) -> &'static str {
     match state {
         PaneState::Starting => "starting",
         PaneState::Working { .. } => "working",
@@ -671,6 +674,15 @@ impl Pane {
     /// Repaints the terminal in the focused or unfocused surface, to match the
     /// What this pane's agent is doing.
     pub fn state(&self) -> PaneState {
+        // A pane with no agent behind it has no state to report and never will,
+        // so its stored `Starting` is not a state - it is the absence of one,
+        // and it would otherwise be drawn as the hollow "not yet heard from"
+        // dot forever, in the rack as well as on the pane. `Idle` is what the
+        // palette already has for "a thing that is simply there", which is
+        // exactly what a command running in a terminal is.
+        if !self.head.reports {
+            return PaneState::Idle;
+        }
         self.head.state.borrow().clone()
     }
 

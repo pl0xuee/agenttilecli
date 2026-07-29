@@ -86,6 +86,19 @@ impl Tiler {
     }
 
     /// How many of this group's panes are in each state worth counting.
+    /// What each of this group's agents is doing, in pane order.
+    ///
+    /// The ordered form of `agent_tally`, for the rack: a tally can say "one of
+    /// them wants you" and a list can say which, and where in the group it is.
+    pub fn agent_states(&self) -> Vec<PaneState> {
+        self.imp()
+            .panes
+            .borrow()
+            .iter()
+            .map(|pane| pane.state())
+            .collect()
+    }
+
     pub fn agent_tally(&self) -> Tally {
         let mut tally = Tally::default();
         for pane in self.imp().panes.borrow().iter() {

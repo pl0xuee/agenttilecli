@@ -1029,34 +1029,10 @@ row.sidebar-row.needs-attention .sidebar-row-label {
   color: mix(@tally, @text, 0.55);
 }
 
-/* How many agents this project is running. A tally, not a badge: no pill, no
-   fill, no colour of its own - it sits in the same monospace the rest of the
-   rack is engraved in and reads as a number stamped on the strip.
-
-   It is the answer to the only question you can't ask a project you aren't
-   looking at, which is why it earns room on a row that already carries an icon,
-   a name and a close button. Quiet enough that a rack of them scans as a column
-   of numbers rather than as five things demanding attention. */
-/* Monospace, unlike the name beside it, and for the reason monospace is for:
-   these are numbers in a column and they line up. */
-.sidebar-row-count {
-  min-width: 1.2em;
-  color: @muted;
-  font-family: monospace;
-  font-size: 0.98em;
-}
-
-/* The open project's own tally lifts with the rest of its strip. */
-row.sidebar-row:selected .sidebar-row-count {
-  color: @dim;
-}
-
-/* A project calling for you says so with its number too - it is the row's one
-   piece of live information, and leaving it grey while everything around it
-   goes amber reads as a number that stopped updating. */
-row.sidebar-row.needs-attention .sidebar-row-count {
-  color: @tally;
-}
+/* Where a count used to be, there are now dots - one per agent, in the state
+   colours. See "The rack's dots" above. The count was the answer to the only
+   question you can't ask a project you aren't looking at, and it turned out to
+   be answering half of it: how many, but not what any of them was doing. */
 
 /* ── Broadcast ─────────────────────────────────────────────────────────────
    The one control in the header bar that changes what a keystroke *does* rather
@@ -1117,9 +1093,49 @@ row.sidebar-row.needs-attention .sidebar-row-count {
   box-shadow: inset 0 0 0 1px @faint;
 }
 
-.pane-status.working  { background-color: @fresh; }
-.pane-status.idle     { background-color: @faint; }
-.pane-status.exited   { background-color: @hangup; }
+/* Every state's colour is written once, for both scales at which the app draws
+   it: the dot at the head of a pane, and the row of dots on that project's
+   strip in the rack. Two selectors, one value - a state whose colour existed in
+   two rules would be a state that could end up meaning two things. */
+.pane-status.working, .rack-dot.working { background-color: @fresh; }
+.pane-status.idle,    .rack-dot.idle    { background-color: @faint; }
+.pane-status.exited,  .rack-dot.exited  { background-color: @hangup; }
+
+/* ── The rack's dots ───────────────────────────────────────────────────────
+   One per agent, where a bare count used to be. The count could say how many
+   agents a project was running and nothing about what any of them was doing,
+   so a project with three agents all waiting on you looked exactly like one
+   with three all working - which is the single distinction a rack you are not
+   looking at exists to draw.
+
+   Smaller than the pane's own dot, because these are a summary of that one and
+   a summary should not be as loud as the thing it summarises. */
+.rack-dot {
+  min-width: 0.42em;
+  min-height: 0.42em;
+  border-radius: 50%;
+  background-color: @faint;
+  transition: background-color 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.rack-dot.starting {
+  background-color: transparent;
+  box-shadow: inset 0 0 0 1px @faint;
+}
+
+.rack-dot.waiting {
+  background-color: @tally;
+}
+
+/* The overflow count, for a project running more agents than there is room to
+   draw. Set in the monospace the rest of the rack's numbers were, which is the
+   one job a number was always better at than a picture. */
+.rack-overflow {
+  margin-left: 0.15em;
+  color: @muted;
+  font-family: monospace;
+  font-size: 0.8em;
+}
 
 /* Waiting is the one state that is *about* you: the agent has stopped and will
    not start again until you answer it. Every other dot reports something you
@@ -1150,25 +1166,11 @@ row.sidebar-row.needs-attention .sidebar-row-count {
   animation-timing-function: ease-in-out;
 }
 
-/* The tally takes the most urgent answer in its group. A project with one agent
-   waiting on you and three working is a project you need to go to, and the
-   number alone cannot say so.
-
-   Both selectors, and the `:selected` one is not redundant. The open project's
-   tally is set by `row.sidebar-row:selected .sidebar-row-count`, which carries
-   one more class than a bare `.sidebar-row-count.tally-waiting` does and would
-   therefore win on specificity alone - leaving the tally grey on exactly one
-   row in the rack: the project you currently have open, which is also the one
-   whose agents you are most likely to be watching. */
-row.sidebar-row .sidebar-row-count.tally-working,
-row.sidebar-row:selected .sidebar-row-count.tally-working {
-  color: @fresh;
-}
-
-row.sidebar-row .sidebar-row-count.tally-waiting,
-row.sidebar-row:selected .sidebar-row-count.tally-waiting {
-  color: @tally;
-}
+/* The tally used to collapse a group to its single most urgent state, because a
+   number can only be one colour - "one waiting, three working" had to pick. The
+   dots don't have to: each one carries its own agent's state, so the row shows
+   the whole group at once and the specificity dance this rule used to need
+   (the open project's count out-ranking its own status colour) goes with it. */
 
 /* ── Drop targets ──────────────────────────────────────────────────────────
    Where a dragged project would land if it were dropped right now. Each strip

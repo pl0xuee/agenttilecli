@@ -129,9 +129,12 @@ const SCREENSHOT_COMMANDS: [(&str, &str); 3] = [
         "src",
         "wc -l *.rs */*.rs | sort -rn | head -16; sleep 600",
     ),
+    // `ls -1sh` rather than `ls -lh`: the long form prints owner and group on
+    // every line, which puts whoever took the screenshot into the README. Size
+    // and name are the only columns the picture wanted anyway.
     (
         "assets",
-        "ls -lh; echo; head -8 icon.svg; sleep 600",
+        "ls -1sh; echo; head -5 icon.svg; sleep 600",
     ),
 ];
 
@@ -142,8 +145,9 @@ struct ProjectView {
     id: ProjectId,
     tiler: Tiler,
     row: gtk4::ListBoxRow,
-    /// How many agents this project is running, shown on its sidebar row.
-    count: gtk4::Label,
+    /// One dot per agent this project is running, coloured by what each is
+    /// doing - see `refresh_row_tally`.
+    agents: gtk4::Box,
     /// Switches between the tiler and the empty state. A project with no panes
     /// used to be impossible (the app opened straight into a help pane), and
     /// now it's the *first* thing a new user sees - so it has to say what to do
@@ -641,12 +645,20 @@ impl App {
         self.0.title.set_subtitle(&self.agent_summary());
     }
 
-    /// "3 agents \u{b7} 1 waiting for you", or as much of it as is true.
+    /// The active project's agents, in words.
     fn agent_summary(&self) -> String {
-        let Some(tiler) = self.active_tiler() else {
-            return String::new();
-        };
-        let tally = tiler.agent_tally();
+        match self.active_tiler() {
+            Some(tiler) => self.agent_words(&tiler.agent_tally()),
+            None => String::new(),
+        }
+    }
+
+    /// "3 agents \u{b7} 1 waiting for you", or as much of it as is true.
+    ///
+    /// One function for two readers - the header's subtitle and the tooltip on
+    /// a rack row's dots - because they are the same sentence about the same
+    /// fact at two scales, and two copies of a sentence drift.
+    pub(super) fn agent_words(&self, tally: &crate::tiler::Tally) -> String {
         let total = tally.total();
         if total == 0 {
             return "no agents running".to_string();

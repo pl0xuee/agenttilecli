@@ -12,6 +12,7 @@ mod panes;
 mod resize;
 
 pub(crate) use manager::{GridDragState, Handle, TilerLayout};
+pub(crate) use panes::Tally;
 
 use crate::layout::Mode;
 use crate::pane::Pane;

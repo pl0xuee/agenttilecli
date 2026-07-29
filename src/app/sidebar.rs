@@ -295,12 +295,15 @@ impl App {
     /// would have had to remember to touch both. The store is the only place a
     /// project's name, hue and icon are written, so it is the only place they
     /// are read.
-    pub(super) fn build_row(&self, id: ProjectId) -> (gtk4::ListBoxRow, gtk4::Label) {
+    pub(super) fn build_row(&self, id: ProjectId) -> (gtk4::ListBoxRow, gtk4::Box) {
         let store = self.0.store.borrow();
         let Some(project) = store.get(id) else {
             // Unreachable: the caller adds the project before building its row.
             // A blank row beats a panic in a UI callback either way.
-            return (gtk4::ListBoxRow::new(), gtk4::Label::new(None));
+            return (
+                gtk4::ListBoxRow::new(),
+                gtk4::Box::new(gtk4::Orientation::Horizontal, 0),
+            );
         };
         let name = project.name.clone();
         let hue = project.hue.clone();
@@ -323,9 +326,18 @@ impl App {
         // rather than "0": a project with nothing running is what the empty
         // state already says at length the moment you open it, and a column of
         // zeroes is noise on every other row to say it again.
-        let count = gtk4::Label::builder()
+        // One dot per agent, in the colours the pane heads already use. This
+        // replaced a bare count, which could say how many agents a project was
+        // running and nothing about what any of them was doing - so a project
+        // with three agents all waiting on you and a project with three all
+        // working looked identical, which is the one distinction a rack you are
+        // not looking at exists to draw.
+        let agents = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(3)
             .halign(gtk4::Align::End)
-            .css_classes(["sidebar-row-count"])
+            .valign(gtk4::Align::Center)
+            .css_classes(["sidebar-row-agents"])
             .build();
 
         let close = gtk4::Button::builder()
@@ -343,7 +355,7 @@ impl App {
             .build();
         content.append(&row_icon);
         content.append(&label);
-        content.append(&count);
+        content.append(&agents);
         content.append(&close);
 
         let row = gtk4::ListBoxRow::builder().child(&content).build();
@@ -354,7 +366,7 @@ impl App {
             "{name}\nDrag to reorder (or Super+Alt+Shift+[ / ])"
         )));
         self.install_reorder(&row, id);
-        (row, count)
+        (row, agents)
     }
 
     /// Makes `row` draggable onto its neighbours, so the sidebar's project order
@@ -492,18 +504,40 @@ impl App {
         let Some(view) = views.iter().find(|v| v.id == id) else {
             return;
         };
-        let tally = view.tiler.agent_tally();
-        view.count.set_label(&if tally.total() == 0 {
-            String::new()
-        } else {
-            tally.total().to_string()
-        });
-        set_class(&view.count, "tally-waiting", tally.waiting > 0);
-        set_class(
-            &view.count,
-            "tally-working",
-            tally.waiting == 0 && tally.working > 0,
-        );
+        let states = view.tiler.agent_states();
+
+        while let Some(child) = view.agents.first_child() {
+            view.agents.remove(&child);
+        }
+
+        // Past a handful, dots stop being countable and start being a texture -
+        // and a rack 170px wide has no room for a texture. The overflow is said
+        // in a number instead, which is the one thing a number was always good
+        // at.
+        const MAX_DOTS: usize = 5;
+        let shown = states.len().min(MAX_DOTS);
+        for state in &states[..shown] {
+            let dot = gtk4::Box::builder()
+                .css_classes(["rack-dot", crate::pane::status_class(state)])
+                .valign(gtk4::Align::Center)
+                .build();
+            view.agents.append(&dot);
+        }
+        if states.len() > shown {
+            view.agents.append(
+                &gtk4::Label::builder()
+                    .label(format!("+{}", states.len() - shown))
+                    .css_classes(["rack-overflow"])
+                    .valign(gtk4::Align::Center)
+                    .build(),
+            );
+        }
+
+        // The dots say it at a glance and the tooltip says it in words, which is
+        // the same pairing the pane's own dot uses.
+        let words = self.agent_words(&view.tiler.agent_tally());
+        view.agents
+            .set_tooltip_text((!states.is_empty()).then_some(words.as_str()));
 
         // The header's subtitle falls back to this same tally when no agent has
         // a title to show, so a change here can be a change up there. Only for
