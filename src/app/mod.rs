@@ -92,6 +92,33 @@ const SAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(1500
 /// much under this and the rack is winning an argument it shouldn't be in.
 const COLLAPSE_WIDTH_PX: i32 = 700;
 
+/// What the staged panes run for a screenshot, one command each.
+///
+/// This used to be `sleep 600` in all three, which tiles three black
+/// rectangles - fine for checking the chrome and useless as a picture of the
+/// app, since what the app *is* is terminals with output in them.
+///
+/// Real output from the repository the panes are standing in, rather than
+/// anything invented. A screenshot of an agent session would have to come from
+/// an agent session, and staging a convincing fake of one is how a README ends
+/// up showing something the software doesn't do. These show what it does: real
+/// terminals, tiled, with real colour in them.
+///
+/// Three different commands rather than one repeated, because three panes
+/// showing identical text reads as a mock-up of a tiling app rather than a
+/// tiling app - and because the point of the picture is several agents doing
+/// several things at once.
+///
+/// Each ends in a `sleep`, which is what keeps the pane alive: a pane whose
+/// command exits is a pane that closes.
+#[cfg(debug_assertions)]
+const SCREENSHOT_COMMANDS: [&str; 3] = [
+    "git -c color.ui=always log --graph --oneline --decorate -14; echo; \
+     git -c color.status=always status --short --branch; sleep 600",
+    "git -c color.ui=always diff --stat HEAD~4 HEAD; sleep 600",
+    "wc -l src/*.rs src/*/*.rs | sort -rn | head -18; sleep 600",
+];
+
 /// The widgets belonging to one project. Parallel to `model::Project` rather
 /// than inside it, because these are GTK objects and `model` is deliberately
 /// GTK-free - which is what lets the ordering rules be tested without a display.
@@ -313,8 +340,8 @@ impl App {
         if std::env::var_os("ATC_SCREENSHOT").is_some() {
             this.0.split.set_show_sidebar(true);
             let tiler = this.add_project(cwd, "agenttilecli".to_string(), "folder-symbolic");
-            for _ in 0..3 {
-                tiler.spawn_command_pane(cwd, "sleep 600", |_| {});
+            for command in SCREENSHOT_COMMANDS {
+                tiler.spawn_command_pane(cwd, command, |_| {});
             }
             this.add_project("/usr/share", "Offline_map".to_string(), "folder-symbolic");
             this.select_for_screenshot();

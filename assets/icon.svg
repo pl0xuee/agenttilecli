@@ -1,8 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <rect x="4" y="4" width="120" height="120" rx="26" fill="#1a1d22" stroke="#2c2f36" stroke-width="2"/>
-  <rect x="16" y="16" width="56" height="96" rx="10" fill="#20242b" stroke="#61afef" stroke-width="3"/>
-  <rect x="80" y="16" width="32" height="44" rx="8" fill="#20242b" stroke="#3a3f48" stroke-width="2"/>
-  <rect x="80" y="68" width="32" height="44" rx="8" fill="#20242b" stroke="#3a3f48" stroke-width="2"/>
-  <path d="M30 56 L42 64 L30 72" fill="none" stroke="#56b6c2" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="46" y="68" width="14" height="6" rx="2" fill="#56b6c2"/>
+  <!-- The app's own palette, and every colour here is a name out of style.css:
+       @field for the plate, @tile and @tile-lit for the panes, @edge for their
+       rules, @filament for the one that is lit. The icon says what the app says
+       - a tiled workspace with exactly one pane the keyboard is in - so the
+       master pane carries the warm border and the cursor, and the stack panes
+       sit quiet beside it. -->
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="#0a0f12" stroke="#34404a" stroke-width="2"/>
+  <!-- The plate's top chamfer, the same trick the panes play in the app: one
+       brighter rule along the top edge is what makes it read as milled rather
+       than as a rounded square. -->
+  <path d="M22 5.2 H110" fill="none" stroke="#47555f" stroke-width="2" stroke-linecap="round" opacity="0.75"/>
+
+  <!-- The lit pane. -->
+  <rect x="16" y="16" width="56" height="96" rx="10" fill="#1f282f" stroke="#f2e7d3" stroke-width="3"/>
+  <!-- The stack. -->
+  <rect x="80" y="16" width="32" height="44" rx="8" fill="#1a232a" stroke="#47555f" stroke-width="2"/>
+  <rect x="80" y="68" width="32" height="44" rx="8" fill="#1a232a" stroke="#47555f" stroke-width="2"/>
+
+  <!-- A prompt in the lit pane: the chevron in @text, the block cursor in
+       @filament, which is what the app paints a cursor with. -->
+  <path d="M30 56 L42 64 L30 72" fill="none" stroke="#e9eef1" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="46" y="68" width="14" height="6" rx="2" fill="#f2e7d3"/>
 </svg>

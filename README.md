@@ -132,6 +132,20 @@ you want to nudge it.
   pasted straight in finds that line instead of failing to compile as a regex.
 - **Adjustable text size** — enlarge or shrink every pane's terminal text
   together, independent of pane layout.
+- **A command palette** — `Super+Alt+P` opens a search box over everything the
+  app can do, plus every open project. Type a few letters of what you want and
+  press Enter; the match is by subsequence, so `nxp` finds "switch to the next
+  project". It's generated from the same table the keybindings and the
+  cheatsheet come from, so nothing the app can do is missing from it. It's on
+  `Super+Alt+P` rather than the usual `Ctrl+Shift+P` because that combination
+  belongs to whatever is running inside a pane.
+- **Preferences you can see while you set them** — window and pane opacity and
+  the space around tiles, applied as you move them, with the window behind the
+  dialog as the preview. They're remembered in your session; `config.toml` still
+  says what the app opens as.
+- **Glass chrome, solid panes** — the gutters, the header strip and the project
+  rack are translucent to your desktop; the terminals are not, so agent output
+  never competes with a wallpaper. Turn it up or off in Preferences.
 
 ## Configuration
 
@@ -141,11 +155,14 @@ you make it:
 ```toml
 # ~/.config/agenttilecli/config.toml
 
-command = "claude"      # what each pane runs
-agents = 1              # agents a newly-opened project starts with
-restore_agents = false  # reopen a saved session's agents too?
-gap = 4                 # half the space between tiles, in pixels
-scrollback = 10000      # lines of scrollback per pane
+command = "claude"        # what each pane runs
+agents = 1                # agents a newly-opened project starts with
+restore_agents = false    # reopen a saved session's agents too?
+gap = 6                   # half the space between tiles, in pixels
+scrollback = 10000        # lines of scrollback per pane
+font = "Fira Mono 10"     # terminal font; "" for your desktop's monospace
+window_opacity = 0.92     # the gutters, the header strip and the rack
+pane_opacity = 1.0        # the terminal surfaces themselves
 ```
 
 A mistake in it — a typo'd key, broken TOML — is reported when the app starts,
@@ -154,6 +171,20 @@ with the line and column, rather than silently ignored.
 `restore_agents` is off on purpose. An agent is a process with a token budget
 attached, so reopening a project restores its *layout* and leaves the panes to
 you; turn this on if you'd rather it started them.
+
+The two opacities are clamped to `0.5`–`1.0`, and the panes default to fully
+opaque deliberately: a terminal is the one surface here whose job is being read.
+`window_opacity` is 0.92 rather than something more dramatic for a related
+reason — the floor is meant to sit *below* the panes, and a translucent surface
+over a bright desktop climbs toward that desktop while the opaque panes stay
+put, so past about 0.93 against a very light wallpaper the floor stops reading
+as the floor. On a dark desktop you can go a good deal lower. Whether the
+translucency is *blurred* is your compositor's business, not the app's.
+
+The three appearance settings are also in Preferences, and what you set there is
+remembered in your session rather than written back here — this file is meant to
+be commented, and saving over it would delete what you'd written. Only values
+you actually change are remembered, so editing this file keeps working.
 
 Your session (which projects are open, their order, each one's layout mode and
 ratios, the window size) is remembered separately in
@@ -182,8 +213,13 @@ your desktop environment's own `Super+key` shortcuts.
 | `0` | reset terminal text size |
 | `f` | find in the focused pane |
 | `c` | copy the focused pane's output |
+| `p` | show all commands |
 | `/` | show the keyboard shortcuts |
 | `u` | check for updates |
+
+A few things have no key of their own and live in the command palette (`p`) and
+the app menu: starting another agent, toggling broadcast, choosing a layout mode
+by name, and Preferences.
 
 ## Requirements
 
