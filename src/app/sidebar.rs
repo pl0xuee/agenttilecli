@@ -78,7 +78,12 @@ impl App {
             .build();
         let new_project = gtk4::Button::builder()
             .icon_name("list-add-symbolic")
-            .css_classes(["flat", "circular"])
+            // The same shape the content header's buttons take. Unifying that
+            // bar and leaving this one on `flat circular` didn't remove the
+            // second button language, it just moved the seam from inside one
+            // header to between two.
+            .css_classes(["header-action"])
+            .valign(gtk4::Align::Center)
             .can_focus(false)
             .tooltip_text("Open a new project as a new group (Super+Alt+Return)")
             .build();
@@ -499,6 +504,15 @@ impl App {
             "tally-working",
             tally.waiting == 0 && tally.working > 0,
         );
+
+        // The header's subtitle falls back to this same tally when no agent has
+        // a title to show, so a change here can be a change up there. Only for
+        // the project on screen - the header only ever speaks for that one.
+        let is_active = self.0.store.borrow().active() == Some(id);
+        drop(views);
+        if is_active {
+            self.refresh_subtitle();
+        }
     }
 }
 

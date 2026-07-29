@@ -70,7 +70,17 @@ fn main() -> glib::ExitCode {
     // from the config file, and the window is painted from the appearance.
     appearance::install();
 
-    let application = adw::Application::builder().application_id(app_id()).build();
+    let mut application = adw::Application::builder().application_id(app_id());
+    // A capture run must never be handed off to a window that is already open.
+    // GApplication is single-instance per id, so `ATC_SHOT=... cargo run` beside
+    // a running build of the same branch would send an activate to *that*
+    // process - which has no ATC_SHOT in its environment - and exit having
+    // photographed nothing, silently.
+    #[cfg(debug_assertions)]
+    if std::env::var_os("ATC_SHOT").is_some() {
+        application = application.flags(gtk4::gio::ApplicationFlags::NON_UNIQUE);
+    }
+    let application = application.build();
     application.connect_startup(|_| {
         load_css();
         // This app has exactly one palette, and it is a dark one - the graphite

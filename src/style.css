@@ -534,6 +534,58 @@ window {
   color: @muted;
 }
 
+/* ── The empty state ───────────────────────────────────────────────────────
+   The first screen of the app, and the only one with nothing on it to read.
+
+   Its primary button used to be `.suggested-action`, which paints from
+   `accent_bg_color` - aliased here to @filament - so it arrived as a solid warm
+   pill and became the brightest thing in the window, wearing the one colour
+   this palette reserves for "the keyboard is here". Two buttons alone on a
+   blank page have no competition to win, so the primary takes the same wash
+   the sidebar's lit strip and the checked toggles use, and the secondary is an
+   outline. The hierarchy is still obvious and neither of them is a lamp. */
+.empty-primary {
+  color: @filament;
+  background-color: alpha(@filament, 0.16);
+  background-image: none;
+  border: 1px solid alpha(@filament, 0.22);
+  box-shadow: none;
+  transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.empty-primary:hover {
+  background-color: alpha(@filament, 0.24);
+  border-color: alpha(@filament, 0.34);
+}
+
+.empty-secondary {
+  color: @dim;
+  background-color: transparent;
+  background-image: none;
+  border: 1px solid alpha(@text, 0.14);
+  box-shadow: none;
+  transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.empty-secondary:hover {
+  color: @text;
+  background-color: alpha(@text, 0.06);
+  border-color: alpha(@text, 0.22);
+}
+
+/* Quieter than the description above it and set in the engraved monospace the
+   rest of the app's footnotes use, so it reads as a note rather than a third
+   button. */
+.empty-hint {
+  margin-top: 0.6em;
+  font-family: monospace;
+  font-size: 0.8em;
+  color: @faint;
+}
+
 /* ── The find bar ──────────────────────────────────────────────────────────
    Level 4, and until now level nothing: `.search-row` has been applied to the
    box since the day the find bar landed and has never had a single rule to its
@@ -701,22 +753,10 @@ searchbar > revealer > box {
   text-transform: uppercase;
 }
 
-.sidebar-header button {
-  min-width: 1.8em;
-  min-height: 1.8em;
-  border-radius: 0.3em;
-  color: @muted;
-  transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
-    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-/* A wash rather than a solid fill. At this size a filled square is the
-   brightest thing in the rack, which is a strange amount of noise for "add a
-   project" to make while the pointer merely passes over it. */
-.sidebar-header button:hover {
-  color: @filament;
-  background-color: alpha(@filament, 0.12);
-}
+/* The "+" here wears `.header-action`, like every other button in either
+   header bar - so it has no rules of its own any more. It used to have a pair,
+   which had never applied to anything: nothing wore `.sidebar-header` until
+   that was fixed, and by then the button had been unified. */
 
 .sidebar-list {
   background-color: transparent;
@@ -736,8 +776,13 @@ searchbar > revealer > box {
    generously rounded, and nothing else drawn at all. That is also the honest
    hierarchy - a rack is a list of places you might go, and the only fact worth
    drawing is which one you're in. */
+/* Down from 1.05em of vertical padding, which made three projects fill a third
+   of a column with room for fifteen. A rack is an index, and an index wants to
+   be scanned - rows tall enough to be buttons put fewer of them on screen and
+   made the empty space below them the loudest thing in the panel. Still roomy
+   enough to carry a rail and a tally without crowding either. */
 row.sidebar-row {
-  padding: 1.05em 0.7em 1.05em 1em;
+  padding: 0.8em 0.7em 0.8em 1em;
   margin: 0.13em 0;
   border-radius: 0.6em;
   /* A whisper of surface, and it is the rail that needs it. The rail is an
@@ -827,7 +872,7 @@ row.sidebar-row:selected:hover {
    lit strip do the talking. */
 .sidebar-add {
   margin: 0.3em 0.4em 0.15em;
-  padding: 0.72em 0.7em 0.72em 0.92em;
+  padding: 0.55em 0.7em 0.55em 0.92em;
   border: 1px dashed alpha(@text, 0.13);
   border-radius: 0.6em;
   background-color: transparent;

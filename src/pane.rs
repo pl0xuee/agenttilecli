@@ -583,6 +583,19 @@ impl Pane {
         });
         head_state.refresh();
 
+        // The dot has the same problem the label had, and needs the same
+        // answer. `starting` means "not yet heard from", drawn hollow so that
+        // "nothing known" doesn't read as a state of its own - which is right
+        // for an agent in the second before its first hook arrives, and wrong
+        // forever for a pane that has no hooks to arrive. Those get the plain
+        // grey dot that means "a thing that is simply there", which is exactly
+        // what a command running in a terminal is.
+        if !reports {
+            status.remove_css_class("starting");
+            status.add_css_class("idle");
+            status.set_tooltip_text(Some("Running"));
+        }
+
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let argv = [shell.as_str(), "-lc", command];
 

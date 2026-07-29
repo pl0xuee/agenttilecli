@@ -161,6 +161,11 @@ struct Inner {
     toasts: adw::ToastOverlay,
     updates: Updates,
     title: adw::WindowTitle,
+    /// The focused agent's own terminal title, kept because the subtitle it
+    /// competes for is rewritten by two different events - a title change and
+    /// a change in how many agents are running - and whichever fires second
+    /// has to know what the other one had to say.
+    pane_title: RefCell<String>,
     /// The three layout-mode toggles, in `MODE_BUTTONS` order.
     mode_buttons: RefCell<Vec<gtk4::ToggleButton>>,
     /// True while the mode toggles are being repainted *from* the tiler, so the
@@ -293,6 +298,7 @@ impl App {
             toasts,
             updates: updates.clone(),
             title: title_widget.clone(),
+            pane_title: RefCell::new(String::new()),
             mode_buttons: RefCell::new(Vec::new()),
             syncing_mode: Cell::new(false),
             broadcast_button: RefCell::new(None),
@@ -610,6 +616,55 @@ impl App {
     /// Opens the command palette.
     pub fn show_command_palette(&self) {
         crate::commands::present(self);
+    }
+
+    /// Rewrites the header's subtitle.
+    ///
+    /// Two things want that line and only one can have it, so they take turns
+    /// by usefulness. The focused agent's own terminal title is the better
+    /// answer whenever there is one - it is live, it is specific, and it says
+    /// what that agent is doing right now. When there isn't one (no panes, or a
+    /// pane running something that never sets a title) the line would otherwise
+    /// be blank, and a blank line under a project name is a header bar with
+    /// nothing to say in the one place positioned to say it.
+    ///
+    /// So the fallback is the tally: how many agents this project is running
+    /// and whether any of them is waiting on you. That fact is otherwise only
+    /// in the sidebar, which is shut most of the time - which is exactly when
+    /// you would want to know it.
+    pub(super) fn refresh_subtitle(&self) {
+        let pane_title = self.0.pane_title.borrow().clone();
+        if !pane_title.is_empty() {
+            self.0.title.set_subtitle(&pane_title);
+            return;
+        }
+        self.0.title.set_subtitle(&self.agent_summary());
+    }
+
+    /// "3 agents \u{b7} 1 waiting for you", or as much of it as is true.
+    fn agent_summary(&self) -> String {
+        let Some(tiler) = self.active_tiler() else {
+            return String::new();
+        };
+        let tally = tiler.agent_tally();
+        let total = tally.total();
+        if total == 0 {
+            return "no agents running".to_string();
+        }
+        let agents = if total == 1 {
+            "1 agent".to_string()
+        } else {
+            format!("{total} agents")
+        };
+        // Only the claim on your attention is worth the second clause. "2
+        // working" is a thing you can see by looking at the panes; "1 waiting
+        // for you" is the thing you cannot, because a stopped agent looks
+        // exactly like a finished one.
+        if tally.waiting > 0 {
+            format!("{agents} \u{b7} {} waiting for you", tally.waiting)
+        } else {
+            agents
+        }
     }
 
     /// Opens the preferences dialog.

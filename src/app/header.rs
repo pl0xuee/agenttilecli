@@ -294,10 +294,16 @@ impl App {
     /// yet done the one thing that makes any of them matter. The full list is
     /// still a keystroke away, in the menu and on `Super+Alt+/`.
     pub(super) fn build_empty_state(&self) -> adw::StatusPage {
+        // Not `suggested-action`. That class paints from `accent_bg_color`,
+        // which this app aliases to @filament - so the stock treatment made
+        // this button a solid warm pill and the brightest thing in the window,
+        // in the one colour the stylesheet reserves for "the keyboard is here".
+        // A primary action on an empty screen has no competition and needs
+        // none: it is one of two things on an otherwise blank page.
         let start = gtk4::Button::builder()
             .label("Open a project\u{2026}")
             .halign(gtk4::Align::Center)
-            .css_classes(["pill", "suggested-action"])
+            .css_classes(["pill", "empty-primary"])
             .build();
         let this = self.clone();
         start.connect_clicked(move |_| this.new_project());
@@ -305,7 +311,7 @@ impl App {
         let agent = gtk4::Button::builder()
             .label("Start an agent here")
             .halign(gtk4::Align::Center)
-            .css_classes(["pill"])
+            .css_classes(["pill", "empty-secondary"])
             .tooltip_text("Run claude in this project's own folder")
             .build();
         let this = self.clone();
@@ -315,6 +321,16 @@ impl App {
             }
         });
 
+        // The one line worth adding to an empty screen: where everything else
+        // is. This is the only page in the app with nothing on it to read, so
+        // it is the only place a pointer to the command palette costs nothing
+        // and is certain to be seen.
+        let hint = gtk4::Label::builder()
+            .label("Press Super+Alt+P for everything else")
+            .halign(gtk4::Align::Center)
+            .css_classes(["empty-hint"])
+            .build();
+
         let buttons = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(10)
@@ -322,6 +338,7 @@ impl App {
             .build();
         buttons.append(&start);
         buttons.append(&agent);
+        buttons.append(&hint);
 
         adw::StatusPage::builder()
             .icon_name("tab-new-symbolic")

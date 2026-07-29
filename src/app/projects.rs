@@ -73,7 +73,8 @@ impl App {
                 return;
             }
             inner.title.set_title(&name_for_title);
-            inner.title.set_subtitle(pane_title);
+            *inner.pane_title.borrow_mut() = pane_title.to_string();
+            App(inner.clone()).refresh_subtitle();
             // The header bar shows the project, because that's what you need
             // while working. The *window* title still leads with the app - it's
             // what the taskbar and the alt-tab switcher show, where "Getting
@@ -251,6 +252,13 @@ impl App {
             row.remove_css_class(ATTENTION_CLASS);
         }
         self.refresh_attention();
+
+        // The title belonged to the project we just left. Clearing it before
+        // refreshing means the header falls back to the new project's tally
+        // rather than showing what the *previous* project's focused agent was
+        // doing until that project happens to retitle itself.
+        self.0.pane_title.borrow_mut().clear();
+        self.refresh_subtitle();
 
         // On a narrow window the sidebar is covering the panes, so having picked
         // a project, get out of the way of it.
