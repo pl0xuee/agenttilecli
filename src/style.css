@@ -878,9 +878,37 @@ row.sidebar-row.needs-attention .sidebar-row-count {
 }
 
 .pane-status.working  { background-color: @fresh; }
-.pane-status.waiting  { background-color: @tally; }
 .pane-status.idle     { background-color: @faint; }
 .pane-status.exited   { background-color: @hangup; }
+
+/* Waiting is the one state that is *about* you: the agent has stopped and will
+   not start again until you answer it. Every other dot reports something you
+   can read at your leisure, so every other dot sits still.
+
+   It breathes rather than blinks, and the distinction is the whole design. A
+   blink is an alarm - it has an off state, it demands to be dealt with, and a
+   screen with three of them is a screen you want to leave. A slow swell between
+   full and a little under half is movement the eye catches in the periphery and
+   the mind doesn't have to answer. Two seconds each way is slower than a resting
+   breath, which is what keeps four of them from reading as a fairground.
+
+   Unbounded, unlike the app's other animations, and deliberately: the header
+   bar's update pulse gets three beats and stops because a waiting update can
+   wait forever, whereas this stops the moment the state does - the class comes
+   off as soon as the agent moves, which is the only ending it needs. */
+@keyframes status-breathing {
+  from { opacity: 1; }
+  to   { opacity: 0.45; }
+}
+
+.pane-status.waiting {
+  background-color: @tally;
+  animation-name: status-breathing;
+  animation-duration: 2s;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+  animation-timing-function: ease-in-out;
+}
 
 /* The tally takes the most urgent answer in its group. A project with one agent
    waiting on you and three working is a project you need to go to, and the

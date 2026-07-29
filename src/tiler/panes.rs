@@ -7,6 +7,11 @@
 
 use std::rc::Rc;
 
+// Just the one trait, rather than the whole libadwaita prelude: `play` lives on
+// `AnimationExt`, and glob-importing adw's prelude alongside gtk4's puts two
+// `play` methods (the other is `MediaStream`'s) in scope on types that have
+// both, which resolves to the wrong one rather than to an error.
+use adw::prelude::AnimationExt;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use gtk4::{gdk, GestureClick, PropagationPhase};
@@ -195,6 +200,7 @@ impl Tiler {
     fn attach_pane(&self, pane: Rc<Pane>) {
         pane.frame.set_parent(self);
         pane.terminal.set_font_scale(self.imp().font_scale.get());
+        fade_in(&pane.frame);
 
         // Click-to-focus: fires in the Capture phase so it always sees the
         // press, but never claims it, so the terminal underneath still gets
@@ -322,8 +328,64 @@ impl Tiler {
     /// Close a specific pane regardless of focus (e.g. from its own X button).
     /// Removal happens asynchronously via the `child-exited` signal.
     fn close_pane(&self, pane: &Rc<Pane>) {
+        fade_out(&pane.frame);
         pane.hangup();
     }
+}
+
+/// How long a pane takes to arrive, and to leave. Short enough not to be a wait
+/// - closing a pane is a thing you do repeatedly - and long enough that the eye
+/// registers the tiles re-laying as a consequence of it rather than as an
+/// unrelated jump.
+const FADE_IN_MS: u32 = 180;
+const FADE_OUT_MS: u32 = 140;
+
+/// A new pane arrives at zero and comes up.
+///
+/// Only the opacity moves. Animating the *geometry* is the obvious next thought
+/// and is a genuinely bad idea here: a pane's size is its terminal's character
+/// grid, so interpolating it would resize a pty on every frame of the animation
+/// and have every agent's output reflow continuously for the length of it.
+fn fade_in(frame: &gtk4::Frame) {
+    frame.set_opacity(0.0);
+    animate_opacity(frame, 0.0, 1.0, FADE_IN_MS);
+}
+
+/// A closing pane dims while its agent is being hung up.
+///
+/// It does not wait for the fade before hanging up, and the fade does not
+/// remove anything: the pane goes when its `child-exited` arrives, which is the
+/// same as it ever was. This is only the acknowledgement that the click landed,
+/// which the instant version left to the tiles jumping some milliseconds later.
+fn fade_out(frame: &gtk4::Frame) {
+    animate_opacity(frame, frame.opacity(), 0.12, FADE_OUT_MS);
+}
+
+/// Runs `widget.opacity` from `from` to `to`.
+///
+/// Never fades fully to zero, and that is a safety floor rather than a taste
+/// call: the fade is started by "close this pane" but the *removal* is driven by
+/// the agent's process actually exiting, and an agent that ignores its hangup
+/// leaves the pane on screen. At zero that pane would be invisible, still
+/// holding its share of the tiling, and impossible to click on. At 0.12 it is
+/// plainly on its way out and still there to be dealt with.
+///
+/// The animation needs no owner. `AdwAnimation` holds a reference to itself for
+/// as long as it is playing, and when the desktop has animations turned off it
+/// jumps straight to the end value and finishes - so the widget lands on `to`
+/// either way, which is the property that matters when `to` is what makes a new
+/// pane visible at all.
+fn animate_opacity(frame: &gtk4::Frame, from: f64, to: f64, ms: u32) {
+    let target = adw::PropertyAnimationTarget::new(frame, "opacity");
+    adw::TimedAnimation::builder()
+        .widget(frame)
+        .value_from(from)
+        .value_to(to)
+        .duration(ms)
+        .easing(adw::Easing::EaseOutCubic)
+        .target(&target)
+        .build()
+        .play();
 }
 
 /// What a group's agents are up to, counted.

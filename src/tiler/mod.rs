@@ -104,7 +104,47 @@ mod imp {
         }
     }
 
-    impl WidgetImpl for Tiler {}
+    impl WidgetImpl for Tiler {
+        /// Paints the children in order, except the focused one, which goes
+        /// last.
+        ///
+        /// The focused tile is the only thing in the app that draws outside its
+        /// own allocation - a two-pixel warm ring and a soft bloom, both of
+        /// which land in the gutter around it. GTK paints siblings in child
+        /// order, and a pane painted *after* the focused one fills its own
+        /// rectangle opaquely straight over whichever part of that bloom reached
+        /// into the gutter between them. The result is a glow with a clean
+        /// straight bite taken out of one or two sides, depending on where the
+        /// focused pane happens to sit in the order.
+        ///
+        /// Painting it last is the whole fix, and it costs nothing: the panes
+        /// don't overlap, so the order is invisible everywhere except in the
+        /// gutters where only the bloom reaches.
+        ///
+        /// Widget order still matches `panes` order - `reflow_children` keeps
+        /// that true and the layout manager walks the same list. This changes
+        /// only what is drawn on top of what.
+        fn snapshot(&self, snapshot: &gtk4::Snapshot) {
+            let obj = self.obj();
+            let focused: Option<Widget> = self
+                .panes
+                .borrow()
+                .get(self.focus.get())
+                .map(|pane| pane.frame.clone().upcast());
+
+            let mut child = obj.first_child();
+            while let Some(current) = child {
+                child = current.next_sibling();
+                if focused.as_ref() != Some(&current) {
+                    obj.snapshot_child(&current, snapshot);
+                }
+            }
+
+            if let Some(focused) = focused {
+                obj.snapshot_child(&focused, snapshot);
+            }
+        }
+    }
 }
 
 glib::wrapper! {
