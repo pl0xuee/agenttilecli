@@ -318,6 +318,18 @@ impl Tiler {
         }
     }
 
+    /// Repaints every pane from the current appearance, and re-lays them.
+    ///
+    /// The re-lay is for the gap: it is read by the layout manager rather than
+    /// stored anywhere, so a changed gap has no effect at all until something
+    /// asks for a fresh allocation.
+    pub fn refresh_appearance(&self) {
+        for pane in self.imp().panes.borrow().iter() {
+            pane.refresh_appearance();
+        }
+        self.queue_allocate();
+    }
+
     pub fn close_focused(&self) {
         let focus = self.imp().focus.get();
         if let Some(pane) = self.imp().panes.borrow().get(focus).cloned() {

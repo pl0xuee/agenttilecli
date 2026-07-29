@@ -38,12 +38,30 @@ const MODE_BUTTONS: [(Mode, &str, &str); 3] = [
 /// news survives dismissing the dialog even though the menu itself is shut.
 const UPDATE_CLASS: &str = "update-available";
 
-/// The app menu's resting caption for the update item, and where that item sits.
-/// The two are kept together because relabelling a `gio::Menu` item means
-/// replacing it by position, and a wrong index silently rewrites the wrong row.
+/// The app menu's resting caption for the update item.
 const UPDATE_LABEL: &str = "Check for Updates";
 
-const UPDATE_MENU_INDEX: i32 = 1;
+/// The action the update item is attached to, which is also how it is found.
+const UPDATE_ACTION: &str = "win.updates";
+
+/// Where the update item currently sits in the menu.
+///
+/// Found rather than written down. `gio::Menu` items are immutable, so
+/// relabelling one means removing and reinserting it *by position* - and this
+/// was a constant, with a comment warning that a wrong index silently rewrites
+/// the wrong row. That is not a warning that survives contact with someone
+/// adding a menu item above it, which is exactly what happened the first time
+/// anyone did: the index went stale and "Check for Updates" started relabelling
+/// the shortcuts row instead.
+///
+/// Asking the menu where the item is cannot go stale.
+fn update_item_index(menu: &gio::Menu) -> Option<i32> {
+    (0..menu.n_items()).find(|index| {
+        menu.item_attribute_value(*index, "action", None)
+            .and_then(|value| value.get::<String>())
+            .is_some_and(|action| action == UPDATE_ACTION)
+    })
+}
 
 impl App {
     /// The working half: a header bar that reports where you are and how the
@@ -70,8 +88,10 @@ impl App {
         header.pack_start(&self.build_mode_switcher());
 
         let menu = gio::Menu::new();
+        menu.append(Some("Commands\u{2026}"), Some("win.commands"));
         menu.append(Some("Keyboard Shortcuts"), Some("win.shortcuts"));
-        menu.append(Some(UPDATE_LABEL), Some("win.updates"));
+        menu.append(Some("Preferences"), Some("win.preferences"));
+        menu.append(Some(UPDATE_LABEL), Some(UPDATE_ACTION));
         menu.append(Some("About AgentTileCLI"), Some("win.about"));
         let menu_button = gtk4::MenuButton::builder()
             .icon_name("open-menu-symbolic")
@@ -96,9 +116,11 @@ impl App {
                 UPDATE_LABEL
             };
             // GMenu items are immutable once appended, so the way to relabel one
-            // is to replace it in place. Position 1 is the update item.
-            menu_for_state.remove(UPDATE_MENU_INDEX);
-            menu_for_state.insert(UPDATE_MENU_INDEX, Some(label), Some("win.updates"));
+            // is to replace it in place - at wherever it currently is.
+            if let Some(index) = update_item_index(&menu_for_state) {
+                menu_for_state.remove(index);
+                menu_for_state.insert(index, Some(label), Some(UPDATE_ACTION));
+            }
 
             // Its own class, deliberately not `ATTENTION_CLASS`: that one means
             // "an agent wants you", and an available update is housekeeping. Two
@@ -305,6 +327,16 @@ impl App {
     }
 
     pub(super) fn install_window_actions(&self) {
+        let this = self.clone();
+        let commands = gio::SimpleAction::new("commands", None);
+        commands.connect_activate(move |_, _| this.show_command_palette());
+        self.0.window.add_action(&commands);
+
+        let this = self.clone();
+        let preferences = gio::SimpleAction::new("preferences", None);
+        preferences.connect_activate(move |_, _| this.show_preferences());
+        self.0.window.add_action(&preferences);
+
         let this = self.clone();
         let shortcuts = gio::SimpleAction::new("shortcuts", None);
         shortcuts.connect_activate(move |_, _| this.show_shortcuts());

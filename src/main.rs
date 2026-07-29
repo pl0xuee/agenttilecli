@@ -11,6 +11,7 @@ mod links;
 mod model;
 mod palette;
 mod pane;
+mod preferences;
 mod search;
 mod session;
 mod shortcuts;
@@ -199,44 +200,53 @@ fn capture_and_quit(application: &adw::Application, app: &App, path: std::path::
         match std::env::var("ATC_SHOT_WITH").as_deref() {
             Ok("palette") => app.show_command_palette(),
             Ok("shortcuts") => app.show_shortcuts(),
+            Ok("preferences") => app.show_preferences(),
             Ok(other) => eprintln!("ATC_SHOT_WITH: no dialog called {other:?}"),
             Err(_) => {}
         }
 
-        // A second beat, so a dialog opened just above has been laid out and
-        // has finished animating in before the shutter.
-        glib::timeout_add_local_once(std::time::Duration::from_millis(700), move || {
-            let window = app.window().clone();
-            let shot = window
-                .native()
-                .and_then(|native| native.renderer())
-                .and_then(|renderer| {
-                    let paintable = gtk4::WidgetPaintable::new(Some(&window));
-                    let snapshot = gtk4::Snapshot::new();
-                    paintable.snapshot(
-                        &snapshot,
-                        f64::from(window.width()),
-                        f64::from(window.height()),
-                    );
-                    snapshot
-                        .to_node()
-                        .map(|node| renderer.render_texture(&node, None))
-                });
-
-            match shot {
-                Some(texture) => {
-                    let bytes = texture.save_to_png_bytes();
-                    if let Err(e) = std::fs::write(&path, &bytes) {
-                        eprintln!("ATC_SHOT: could not write {}: {e}", path.display());
-                    } else {
-                        eprintln!("ATC_SHOT: wrote {}", path.display());
-                    }
+        // Then try to render, and keep trying. A widget tree that has been asked
+        // to lay out a dialog does not necessarily have a frame to give on the
+        // next tick - `to_node` returns nothing at all when the snapshot came
+        // back empty - and how many ticks it takes depends on what else the
+        // machine is doing. A fixed delay long enough to always work is a delay
+        // that is always wasted; retrying is neither.
+        let mut attempts = 0;
+        glib::timeout_add_local(std::time::Duration::from_millis(250), move || {
+            attempts += 1;
+            if let Some(texture) = render(app.window()) {
+                let bytes = texture.save_to_png_bytes();
+                match std::fs::write(&path, &bytes) {
+                    Ok(()) => eprintln!("ATC_SHOT: wrote {}", path.display()),
+                    Err(e) => eprintln!("ATC_SHOT: could not write {}: {e}", path.display()),
                 }
-                None => eprintln!("ATC_SHOT: the window had nothing to render yet"),
+                application.quit();
+                return glib::ControlFlow::Break;
             }
-            application.quit();
+            if attempts >= 20 {
+                eprintln!("ATC_SHOT: the window never produced a frame");
+                application.quit();
+                return glib::ControlFlow::Break;
+            }
+            glib::ControlFlow::Continue
         });
     });
+}
+
+/// The window as a texture, or `None` if it has no frame to give yet.
+#[cfg(debug_assertions)]
+fn render(window: &adw::ApplicationWindow) -> Option<gtk4::gdk::Texture> {
+    use gtk4::prelude::*;
+
+    let renderer = window.native()?.renderer()?;
+    let paintable = gtk4::WidgetPaintable::new(Some(window));
+    let snapshot = gtk4::Snapshot::new();
+    paintable.snapshot(
+        &snapshot,
+        f64::from(window.width()),
+        f64::from(window.height()),
+    );
+    Some(renderer.render_texture(&snapshot.to_node()?, None))
 }
 
 #[cfg(test)]

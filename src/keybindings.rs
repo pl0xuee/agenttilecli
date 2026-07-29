@@ -382,6 +382,13 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         section: "App",
+        title: "Preferences",
+        accelerator: "",
+        shift: Shift::Any,
+        run: Some(Action::App(App::show_preferences)),
+    },
+    Command {
+        section: "App",
         title: "Check for updates",
         accelerator: "<Super><Alt>u",
         shift: Shift::Any,

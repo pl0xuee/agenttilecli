@@ -22,6 +22,7 @@
 use std::cell::RefCell;
 
 use crate::config;
+use crate::session;
 
 /// How see-through the app is allowed to get, either surface.
 ///
@@ -62,6 +63,37 @@ impl Appearance {
             font: config.font.clone(),
         }
     }
+
+    /// The config's appearance with the session's adjustments laid over it.
+    ///
+    /// Two sources rather than one because they answer different questions.
+    /// `config.toml` is where someone writes down what they want the app to
+    /// open as; the session is where the preferences dialog remembers what they
+    /// last dragged a slider to. A field the dialog has never touched stays
+    /// `None` and the file keeps speaking for it, so editing the file still
+    /// works on a machine that has a session - which is the one thing a config
+    /// file cannot be allowed to stop doing.
+    fn resolved(saved: &session::Appearance) -> Self {
+        let base = Appearance::from_config();
+        Appearance {
+            window_opacity: saved.window_opacity.map_or(base.window_opacity, clamp_opacity),
+            pane_opacity: saved.pane_opacity.map_or(base.pane_opacity, clamp_opacity),
+            gap: saved.gap.map_or(base.gap, |gap| gap.clamp(0, 40)),
+            font: base.font,
+        }
+    }
+
+    /// What to write into the session: only the fields that differ from what
+    /// the config file already says, so a value the user never changed doesn't
+    /// get frozen into the session and start overriding later edits to the file.
+    pub fn overrides(&self) -> session::Appearance {
+        let base = Appearance::from_config();
+        session::Appearance {
+            window_opacity: (self.window_opacity != base.window_opacity).then_some(self.window_opacity),
+            pane_opacity: (self.pane_opacity != base.pane_opacity).then_some(self.pane_opacity),
+            gap: (self.gap != base.gap).then_some(self.gap),
+        }
+    }
 }
 
 fn clamp_opacity(value: f64) -> f64 {
@@ -86,10 +118,19 @@ pub fn get() -> Appearance {
     })
 }
 
-/// Reads the config's appearance and installs it. Called once, from `main`.
+/// Reads the config's appearance and installs it. Called once, from `main`,
+/// before the session has been read - so the window has a floor to paint from
+/// the moment it exists.
 pub fn install() {
     let loaded = Appearance::from_config();
     ACTIVE.with(|active| *active.borrow_mut() = Some(loaded));
+}
+
+/// Lays the session's saved adjustments over what the config file asked for.
+/// Called once the session has been read, which is after the window is built.
+pub fn restore(saved: &session::Appearance) {
+    let resolved = Appearance::resolved(saved);
+    ACTIVE.with(|active| *active.borrow_mut() = Some(resolved));
 }
 
 /// Replaces the live appearance, clamping whatever it is handed.
@@ -97,10 +138,6 @@ pub fn install() {
 /// Callers are responsible for actually applying it - re-emitting the CSS and
 /// repainting the panes - because this module can't reach the widgets and
 /// shouldn't try to.
-// Its caller is the preferences dialog, which is the next thing to be built;
-// until then the only thing that moves the appearance is the config file, read
-// once at startup. The allow comes off with the dialog.
-#[allow(dead_code)]
 pub fn set(next: Appearance) {
     let next = Appearance {
         window_opacity: clamp_opacity(next.window_opacity),
@@ -176,6 +213,67 @@ mod tests {
         let css = content_css(1.25);
         assert!(css.contains("font-size: 1.25em"), "{css}");
         assert!(css.contains("alpha(@field, 0.900)"), "{css}");
+    }
+
+    /// A session that has never seen the dialog must leave the config file
+    /// entirely in charge.
+    #[test]
+    fn an_untouched_session_defers_to_the_config() {
+        assert_eq!(
+            Appearance::resolved(&session::Appearance::default()),
+            Appearance::from_config(),
+        );
+    }
+
+    /// And a field the dialog *has* touched wins over the file, for that field
+    /// alone.
+    #[test]
+    fn a_saved_adjustment_overrides_only_its_own_field() {
+        let base = Appearance::from_config();
+        let resolved = Appearance::resolved(&session::Appearance {
+            window_opacity: Some(0.7),
+            pane_opacity: None,
+            gap: None,
+        });
+        assert_eq!(resolved.window_opacity, 0.7);
+        assert_eq!(resolved.pane_opacity, base.pane_opacity);
+        assert_eq!(resolved.gap, base.gap);
+    }
+
+    /// A session is a file on disk that anything could have written, so its
+    /// values go through the same clamp the config's do.
+    #[test]
+    fn a_saved_adjustment_is_still_clamped() {
+        let resolved = Appearance::resolved(&session::Appearance {
+            window_opacity: Some(-1.0),
+            pane_opacity: Some(9.0),
+            gap: Some(4000),
+        });
+        assert_eq!(resolved.window_opacity, OPACITY_MIN);
+        assert_eq!(resolved.pane_opacity, OPACITY_MAX);
+        assert_eq!(resolved.gap, 40);
+    }
+
+    /// The half of the split that keeps the config file working: a value equal
+    /// to what the file already says is not written to the session at all.
+    ///
+    /// Without this every field would be saved on the first adjustment of any
+    /// one of them, and from then on the config file would be dead - edits to it
+    /// silently overridden by a session recording values the user never chose.
+    #[test]
+    fn only_a_changed_value_is_written_to_the_session() {
+        let mut appearance = Appearance::from_config();
+        assert_eq!(
+            appearance.overrides(),
+            session::Appearance::default(),
+            "an unmodified appearance writes nothing",
+        );
+
+        appearance.gap += 3;
+        let overrides = appearance.overrides();
+        assert_eq!(overrides.gap, Some(appearance.gap));
+        assert_eq!(overrides.window_opacity, None);
+        assert_eq!(overrides.pane_opacity, None);
     }
 
     /// The floor and the rack have to be emitted at the *same* alpha, or the

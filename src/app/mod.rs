@@ -291,6 +291,10 @@ impl App {
         } else {
             this.restore_session(&saved);
         }
+        // Before the CSS is emitted below, so the first frame is painted at the
+        // opacity the last run was left at rather than at the config's and then
+        // corrected.
+        crate::appearance::restore(&saved.appearance);
         if saved.font_scale > 0.0 {
             this.set_font_scale(saved.font_scale);
         }
@@ -478,6 +482,7 @@ impl App {
             },
             font_scale: self.0.font_scale.get(),
             projects,
+            appearance: crate::appearance::get().overrides(),
         }
     }
 
@@ -556,6 +561,28 @@ impl App {
     /// Opens the command palette.
     pub fn show_command_palette(&self) {
         crate::commands::present(self);
+    }
+
+    /// Opens the preferences dialog.
+    pub fn show_preferences(&self) {
+        crate::preferences::present(self);
+    }
+
+    /// Installs a new appearance and makes the window show it.
+    ///
+    /// Everything the settings touch is repainted from one place, because they
+    /// reach three different layers that have nothing else in common: the two
+    /// chrome fills are CSS, the terminal surfaces and font belong to VTE, and
+    /// the gap is read by the layout manager during allocation. A dialog that
+    /// moved a value without going through here would change one of the three
+    /// and look like it had done nothing.
+    pub fn set_appearance(&self, next: crate::appearance::Appearance) {
+        crate::appearance::set(next);
+        self.refresh_appearance_css();
+        for view in self.0.views.borrow().iter() {
+            view.tiler.refresh_appearance();
+        }
+        self.schedule_save();
     }
 
     pub fn copy_focused_output(&self) {

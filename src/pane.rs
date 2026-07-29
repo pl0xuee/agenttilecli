@@ -607,6 +607,18 @@ impl Pane {
         }
     }
 
+    /// Repaints the terminal from the current appearance - its surface alpha
+    /// and its font - leaving its focus state alone.
+    ///
+    /// Separate from `set_focused` because that one repaints only when focus
+    /// actually changed, which is the right guard for a focus change and the
+    /// wrong one here: nothing about the pane has changed, the settings have,
+    /// and every pane needs the new ones whatever it was doing.
+    pub fn refresh_appearance(&self) {
+        apply_theme(&self.terminal, self.focused.get());
+        apply_font(&self.terminal);
+    }
+
     /// Politely ask the child (shell + claude) to exit, mirroring how a real
     /// terminal emulator closes a tab. Actual removal from the layout happens
     /// via the `child-exited` signal the caller wires up separately.

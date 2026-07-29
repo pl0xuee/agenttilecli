@@ -33,6 +33,29 @@ pub struct Session {
     /// The text scale the keybindings last left the whole window at.
     pub font_scale: f64,
     pub projects: Vec<Project>,
+    /// What the preferences dialog was last left showing.
+    pub appearance: Appearance,
+}
+
+/// The appearance settings, as the preferences dialog last left them.
+///
+/// Here rather than only in `config.toml`, and the reason is what that file is
+/// for: it exists to be opened and commented (see `config`'s header), and
+/// serialising a struct back over it would delete every comment the user had
+/// written. So the file states the defaults and this remembers the adjustments,
+/// which is exactly how `font_scale` above already behaves.
+///
+/// `Option` on every field, so "never touched the dialog" is distinguishable
+/// from "chose the value that happens to be the default". Without it, editing
+/// `window_opacity` in the config file would do nothing on any machine whose
+/// session had ever been written, which is the failure mode a config file can
+/// least afford.
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Appearance {
+    pub window_opacity: Option<f64>,
+    pub pane_opacity: Option<f64>,
+    pub gap: Option<i32>,
 }
 
 /// The window's own shape, which is the part people notice missing first.
@@ -157,6 +180,11 @@ mod tests {
                 sidebar_shown: true,
             },
             font_scale: 1.1,
+            appearance: Appearance {
+                window_opacity: Some(0.85),
+                pane_opacity: None,
+                gap: Some(10),
+            },
             projects: vec![
                 Project {
                     path: "/home/a/work".into(),
