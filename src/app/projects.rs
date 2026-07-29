@@ -16,7 +16,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk4::gio;
 
-use super::{App, ProjectView, ATTENTION_CLASS};
+use super::{ATTENTION_CLASS, App, ProjectView};
 use crate::model::{ProjectId, Removal};
 use crate::pane::folder_name;
 use crate::tiler::Tiler;
@@ -286,6 +286,32 @@ impl App {
     }
 
     /// The `Tiler` for whichever project is currently visible.
+    /// Every open project as (id, name, is-the-open-one), in sidebar order.
+    ///
+    /// A snapshot rather than a borrow, because the caller is the command
+    /// palette: it holds what it reads for as long as the dialog is open, and
+    /// activating a row calls straight back into `select`, which takes the same
+    /// `RefCell` mutably.
+    pub fn project_list(&self) -> Vec<(ProjectId, String, bool)> {
+        let store = self.0.store.borrow();
+        let active = store.active();
+        store
+            .iter()
+            .map(|project| (project.id, project.name.clone(), Some(project.id) == active))
+            .collect()
+    }
+
+    /// Switches to `id`.
+    ///
+    /// Goes through the sidebar's selection rather than straight to
+    /// `show_project`, because the row being selected is what everything else
+    /// hangs off - the stack page, the header title, the mode buttons and the
+    /// attention flag all follow from it. Public because the palette switches
+    /// projects too, and it must switch them the same way a click does.
+    pub fn switch_to_project(&self, id: ProjectId) {
+        self.select(id);
+    }
+
     pub fn active_tiler(&self) -> Option<Tiler> {
         let id = self.0.store.borrow().active()?;
         self.tiler_for(id)

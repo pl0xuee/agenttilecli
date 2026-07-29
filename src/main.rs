@@ -1,12 +1,13 @@
 mod app;
 mod appearance;
 mod clipboard;
+mod commands;
 mod config;
 mod hooks;
 mod ipc;
 mod keybindings;
-mod links;
 mod layout;
+mod links;
 mod model;
 mod palette;
 mod pane;
@@ -20,7 +21,7 @@ mod update;
 mod updates;
 
 use adw::prelude::*;
-use gtk4::{gdk, glib, CssProvider};
+use gtk4::{CssProvider, gdk, glib};
 
 use app::App;
 
@@ -68,9 +69,7 @@ fn main() -> glib::ExitCode {
     // from the config file, and the window is painted from the appearance.
     appearance::install();
 
-    let application = adw::Application::builder()
-        .application_id(app_id())
-        .build();
+    let application = adw::Application::builder().application_id(app_id()).build();
     application.connect_startup(|_| {
         load_css();
         // This app has exactly one palette, and it is a dark one - the graphite
@@ -126,10 +125,8 @@ fn hook_event() -> Option<hooks::Event> {
 /// quietly. The bell hook on `Stop` and `Notification` is what still gets
 /// through when this doesn't (see `hooks::settings_json`).
 fn report_hook(event: hooks::Event) {
-    let (Ok(pane), Ok(socket)) = (
-        std::env::var(ipc::ENV_PANE),
-        std::env::var(ipc::ENV_SOCKET),
-    ) else {
+    let (Ok(pane), Ok(socket)) = (std::env::var(ipc::ENV_PANE), std::env::var(ipc::ENV_SOCKET))
+    else {
         return;
     };
 
@@ -165,7 +162,7 @@ fn build_window(application: &adw::Application) {
 
     #[cfg(debug_assertions)]
     if let Some(path) = std::env::var_os("ATC_SHOT") {
-        capture_and_quit(application, app.window(), path.into());
+        capture_and_quit(application, &app, path.into());
     }
 }
 
@@ -183,48 +180,62 @@ fn build_window(application: &adw::Application) {
 /// transparency, which is the only way to see what the glass is actually doing
 /// rather than what it happens to look like over today's wallpaper.
 ///
+/// `ATC_SHOT_WITH=palette|shortcuts` opens that dialog first. libadwaita's
+/// dialogs are a layer inside the window rather than windows of their own, so
+/// they land in the same render - but only once something has opened them.
+///
 /// Debug builds only, alongside the screenshot staging it is usually paired
 /// with (`ATC_SCREENSHOT=1 ATC_SHOT=shot.png`).
 #[cfg(debug_assertions)]
-fn capture_and_quit(
-    application: &adw::Application,
-    window: &adw::ApplicationWindow,
-    path: std::path::PathBuf,
-) {
+fn capture_and_quit(application: &adw::Application, app: &App, path: std::path::PathBuf) {
     use gtk4::prelude::*;
 
     let application = application.clone();
-    let window = window.clone();
+    let app = app.clone();
     // A beat after presenting, so the window has been mapped, laid out and had
     // its first frame drawn. Rendering before that yields a texture of the
     // window's idea of itself before the tiler has allocated anything.
     glib::timeout_add_local_once(std::time::Duration::from_millis(1200), move || {
-        let shot = window
-            .native()
-            .and_then(|native| native.renderer())
-            .and_then(|renderer| {
-                let paintable = gtk4::WidgetPaintable::new(Some(&window));
-                let snapshot = gtk4::Snapshot::new();
-                paintable.snapshot(
-                    &snapshot,
-                    f64::from(window.width()),
-                    f64::from(window.height()),
-                );
-                snapshot.to_node().map(|node| renderer.render_texture(&node, None))
-            });
-
-        match shot {
-            Some(texture) => {
-                let bytes = texture.save_to_png_bytes();
-                if let Err(e) = std::fs::write(&path, &bytes) {
-                    eprintln!("ATC_SHOT: could not write {}: {e}", path.display());
-                } else {
-                    eprintln!("ATC_SHOT: wrote {}", path.display());
-                }
-            }
-            None => eprintln!("ATC_SHOT: the window had nothing to render yet"),
+        match std::env::var("ATC_SHOT_WITH").as_deref() {
+            Ok("palette") => app.show_command_palette(),
+            Ok("shortcuts") => app.show_shortcuts(),
+            Ok(other) => eprintln!("ATC_SHOT_WITH: no dialog called {other:?}"),
+            Err(_) => {}
         }
-        application.quit();
+
+        // A second beat, so a dialog opened just above has been laid out and
+        // has finished animating in before the shutter.
+        glib::timeout_add_local_once(std::time::Duration::from_millis(700), move || {
+            let window = app.window().clone();
+            let shot = window
+                .native()
+                .and_then(|native| native.renderer())
+                .and_then(|renderer| {
+                    let paintable = gtk4::WidgetPaintable::new(Some(&window));
+                    let snapshot = gtk4::Snapshot::new();
+                    paintable.snapshot(
+                        &snapshot,
+                        f64::from(window.width()),
+                        f64::from(window.height()),
+                    );
+                    snapshot
+                        .to_node()
+                        .map(|node| renderer.render_texture(&node, None))
+                });
+
+            match shot {
+                Some(texture) => {
+                    let bytes = texture.save_to_png_bytes();
+                    if let Err(e) = std::fs::write(&path, &bytes) {
+                        eprintln!("ATC_SHOT: could not write {}: {e}", path.display());
+                    } else {
+                        eprintln!("ATC_SHOT: wrote {}", path.display());
+                    }
+                }
+                None => eprintln!("ATC_SHOT: the window had nothing to render yet"),
+            }
+            application.quit();
+        });
     });
 }
 
@@ -255,9 +266,9 @@ mod tests {
     fn an_ellipsizing_label_is_never_letter_spaced() {
         let css = include_str!("style.css");
         for class in ELLIPSIZING_LABELS {
-            let start = css
-                .find(&format!("\n{class} {{"))
-                .unwrap_or_else(|| panic!("{class} has no rule in style.css - has it been renamed?"));
+            let start = css.find(&format!("\n{class} {{")).unwrap_or_else(|| {
+                panic!("{class} has no rule in style.css - has it been renamed?")
+            });
             let body = &css[start..];
             let body = &body[..body.find('}').expect("an unterminated rule")];
             assert!(

@@ -23,9 +23,15 @@
 
 use adw::prelude::*;
 
-use crate::keybindings::SECTIONS;
+use crate::keybindings::{COMMANDS, SECTIONS};
 
 /// Opens the shortcuts dialog over `parent`.
+///
+/// Walks `SECTIONS` for the order and the notes, and picks up each group's
+/// commands from `COMMANDS`. Only the ones that actually have a key: the table
+/// also carries palette-only commands, and a cheatsheet row describing an
+/// action beside an empty space is a row that looks like a binding failed to
+/// draw.
 pub fn present(parent: &impl IsA<gtk4::Widget>) {
     let page = adw::PreferencesPage::builder()
         .title("Keyboard Shortcuts")
@@ -33,18 +39,26 @@ pub fn present(parent: &impl IsA<gtk4::Widget>) {
         .build();
 
     for section in SECTIONS {
+        let bound: Vec<_> = COMMANDS
+            .iter()
+            .filter(|command| command.section == section.title && !command.accelerator.is_empty())
+            .collect();
+        if bound.is_empty() {
+            continue;
+        }
+
         let group = adw::PreferencesGroup::builder()
             .title(section.title)
             .description(section.note.unwrap_or_default())
             .build();
 
-        for binding in section.bindings {
+        for command in bound {
             let keys = gtk4::ShortcutLabel::builder()
-                .accelerator(binding.accelerator)
+                .accelerator(command.accelerator)
                 .valign(gtk4::Align::Center)
                 .build();
             let row = adw::ActionRow::builder()
-                .title(binding.description)
+                .title(command.title)
                 .activatable(false)
                 .build();
             row.add_suffix(&keys);

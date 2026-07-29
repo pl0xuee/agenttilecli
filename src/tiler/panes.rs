@@ -333,10 +333,10 @@ impl Tiler {
     }
 }
 
-/// How long a pane takes to arrive, and to leave. Short enough not to be a wait
-/// - closing a pane is a thing you do repeatedly - and long enough that the eye
-/// registers the tiles re-laying as a consequence of it rather than as an
-/// unrelated jump.
+/// How long a pane takes to arrive, and to leave. Short enough not to be a
+/// wait, since closing a pane is a thing you do repeatedly, and long enough
+/// that the eye registers the tiles re-laying as a consequence of it rather
+/// than as an unrelated jump.
 const FADE_IN_MS: u32 = 180;
 const FADE_OUT_MS: u32 = 140;
 

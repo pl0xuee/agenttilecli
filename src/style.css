@@ -502,6 +502,77 @@ searchbar > revealer > box {
   background-color: alpha(@text, 0.08);
 }
 
+/* ── The command palette ───────────────────────────────────────────────────
+   Level 4. The dialog's own fill comes from the `dialog_bg_color` alias above,
+   so the palette is glass over the workspace like everything else that floats.
+
+   The query field gives up its box for the same reason the find bar's does: it
+   is the only thing in the dialog you can type into, and a control that is
+   unambiguous doesn't need an outline to say where it starts. What it gets
+   instead is size - this is the one place in the app where typing *is* the
+   interface, so the field is set larger than the rows it filters. */
+.palette {
+  padding: 0.35em;
+}
+
+.palette entry {
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  padding: 0.4em 0.5em;
+  font-size: 1.15em;
+}
+
+.palette-list {
+  background-color: transparent;
+}
+
+/* Borderless rows, and the selection does the talking - the same argument the
+   rack settled on. A palette is a list of things you might do, and the only one
+   worth drawing is the one Enter would run. */
+.palette-list row {
+  margin: 0.08em 0.15em;
+  border-radius: 0.5em;
+  transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.palette-list row:hover {
+  background-color: alpha(@text, 0.06);
+}
+
+.palette-list row:selected {
+  background-color: alpha(@filament, 0.13);
+  color: @text;
+}
+
+/* A floor on the height so every row is the same one. Only some rows carry a
+   `GtkShortcutLabel`, and drawn key caps are half again as tall as a line of
+   text - so without this the list alternates between two row heights depending
+   on whether a command happens to have a key, which reads as two lists that
+   have been shuffled together. */
+.palette-row {
+  padding: 0.5em 0.55em;
+  min-height: 2em;
+}
+
+.palette-title {
+  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
+}
+
+/* Which group the command came from, or which project the row switches to.
+   Quiet, because it is a disambiguator rather than a label: you read it only
+   when two rows would otherwise look alike. */
+.palette-context {
+  color: @faint;
+  font-size: 0.82em;
+}
+
+.palette-empty {
+  padding: 2.2em 1em;
+  color: @muted;
+}
+
 /* ── The rack ──────────────────────────────────────────────────────────────
    The sidebar is a rack of channel strips: every open project gets a strip,
    every strip carries a tally rail in that project's own colour, and exactly

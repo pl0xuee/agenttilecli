@@ -51,8 +51,6 @@ mod sidebar;
 /// is shown. Styled in `style.css` - a few pulses, then a quiet tint.
 const ATTENTION_CLASS: &str = "needs-attention";
 
-
-
 /// Set on the row a reorder-drag is hovering, to draw the line the dragged
 /// project would land on - above it or below it.
 const DROP_ABOVE_CLASS: &str = "drop-above";
@@ -79,9 +77,6 @@ const FONT_SCALE_STEP: f64 = 1.05;
 const FONT_SCALE_MIN: f64 = 0.5;
 const FONT_SCALE_MAX: f64 = 3.0;
 
-
-
-
 /// How much of the window the rack takes before anyone drags it. libadwaita
 /// defaults to a quarter, which on a wide window is a great deal of room for a
 /// column of folder names.
@@ -96,7 +91,6 @@ const SAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(1500
 /// them instead. Four panes in a grid beside a 16.5em rack is already tight;
 /// much under this and the rack is winning an argument it shouldn't be in.
 const COLLAPSE_WIDTH_PX: i32 = 700;
-
 
 /// The widgets belonging to one project. Parallel to `model::Project` rather
 /// than inside it, because these are GTK objects and `model` is deliberately
@@ -289,7 +283,11 @@ impl App {
         this.wire_signals();
 
         if saved.projects.is_empty() {
-            this.add_project(cwd, "Getting Started".to_string(), crate::model::WELCOME_ICON);
+            this.add_project(
+                cwd,
+                "Getting Started".to_string(),
+                crate::model::WELCOME_ICON,
+            );
         } else {
             this.restore_session(&saved);
         }
@@ -336,10 +334,6 @@ impl App {
     }
 
     // ── Construction ─────────────────────────────────────────────────────
-
-
-
-
 
     /// Below `COLLAPSE_WIDTH_PX` the sidebar overlays the panes rather than
     /// taking width from them.
@@ -401,7 +395,6 @@ impl App {
 
         self.install_window_actions();
     }
-
 
     // ── Session ──────────────────────────────────────────────────────────
 
@@ -523,23 +516,9 @@ impl App {
 
     // ── Projects ─────────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-
-
     // ── Attention ────────────────────────────────────────────────────────
 
-
-
     // ── Lookups ──────────────────────────────────────────────────────────
-
-
-
 
     // ── Public actions, driven by the keybindings ────────────────────────
 
@@ -547,8 +526,6 @@ impl App {
         let shown = self.0.split.shows_sidebar();
         self.0.split.set_show_sidebar(!shown);
     }
-
-
 
     /// Paints the window's broadcast-armed state.
     ///
@@ -563,6 +540,24 @@ impl App {
     }
 
     /// Copies the focused pane's entire output to the clipboard, and says so.
+    /// Flips broadcast typing for the open project.
+    ///
+    /// Goes through `set_broadcast_armed` rather than the tiler directly, so the
+    /// header bar's toggle lights up with it - the button and this command are
+    /// the same switch reached two ways, and a mode this loud going on without
+    /// its indicator following is the trap the button exists to prevent.
+    pub fn toggle_broadcast(&self) {
+        let Some(tiler) = self.active_tiler() else {
+            return;
+        };
+        self.set_broadcast_armed(!tiler.broadcast());
+    }
+
+    /// Opens the command palette.
+    pub fn show_command_palette(&self) {
+        crate::commands::present(self);
+    }
+
     pub fn copy_focused_output(&self) {
         let copied = self
             .active_tiler()
@@ -625,12 +620,7 @@ impl App {
 
     // ── Header bar ───────────────────────────────────────────────────────
 
-
-
-
     // ── Menu items ───────────────────────────────────────────────────────
-
-
 
     /// Relaunches AgentTileCLI, which is how an update finishes: the new binary
     /// is on disk, but this process is still the old one, and only a fresh exec
@@ -641,8 +631,9 @@ impl App {
     /// overwritten, so it's the one to run again. Asking for it *now* would get
     /// the wrong answer; `update::remember_exe` explains why.
     fn restart(&self) {
-        let relaunch = update::exe()
-            .and_then(|exe| update::spawn_relaunch(&update::relaunch_command(std::process::id(), &exe)));
+        let relaunch = update::exe().and_then(|exe| {
+            update::spawn_relaunch(&update::relaunch_command(std::process::id(), &exe))
+        });
 
         match relaunch {
             // Quitting is what actually hands over: the watcher is sitting on

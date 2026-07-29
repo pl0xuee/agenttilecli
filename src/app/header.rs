@@ -327,14 +327,16 @@ impl App {
     /// complaint, which is several lines and worth reading twice, and it ends in
     /// something only the user can go and fix.
     pub fn report_config_problem(&self, problem: &str) {
-        self.0.updates.alert("Your config file wasn't used", problem);
+        self.0
+            .updates
+            .alert("Your config file wasn't used", problem);
     }
 
     pub fn show_shortcuts(&self) {
         crate::shortcuts::present(&self.0.window);
     }
 
-    fn show_about(&self) {
+    pub fn show_about(&self) {
         let about = adw::AboutDialog::builder()
             .application_name("AgentTileCLI")
             .application_icon("agenttilecli")
