@@ -109,10 +109,54 @@ impl App {
         header.pack_start(&header_label);
         header.pack_end(&new_project);
 
+        // A ghost of the row you'd get, sitting where that row would go.
+        //
+        // The rack is a column that is mostly empty most of the time - three
+        // projects in a space with room for fifteen - and empty space with
+        // nothing at the end of it reads as a list that has stopped rather than
+        // a list you can add to. The "+" in the header is the same action, but
+        // it is a 20px target in a corner, and a corner is not where you are
+        // looking when you have just finished reading the last project.
+        //
+        // Dashed and unfilled on purpose: it has to be legible as the shape of
+        // a row without being mistaken for one, or a rack with two projects
+        // looks like a rack with three and one of them broken.
+        let add_content = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(8)
+            .build();
+        add_content.append(&gtk4::Image::from_icon_name("list-add-symbolic"));
+        add_content.append(
+            &gtk4::Label::builder()
+                .label("Open a project\u{2026}")
+                .halign(gtk4::Align::Start)
+                .hexpand(true)
+                .ellipsize(gtk4::pango::EllipsizeMode::End)
+                .build(),
+        );
+        let add_row = gtk4::Button::builder()
+            .css_classes(["sidebar-add"])
+            .can_focus(false)
+            .child(&add_content)
+            .tooltip_text("Open a new project as a new group (Super+Alt+Return)")
+            .build();
+        let this = self.clone();
+        add_row.connect_clicked(move |_| this.new_project());
+
+        // Below the list rather than inside it: the list's rows are sorted by
+        // the project store's order and identified by a `ProjectId` parsed out
+        // of their widget name, and a row that is neither would have to be
+        // special-cased in both. Outside, it is just the next thing down.
+        let column = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .build();
+        column.append(&self.0.list);
+        column.append(&add_row);
+
         let scrolled = gtk4::ScrolledWindow::builder()
             .hscrollbar_policy(gtk4::PolicyType::Never)
             .vexpand(true)
-            .child(&self.0.list)
+            .child(&column)
             .build();
 
         // What the update button is talking about, kept where it can be read

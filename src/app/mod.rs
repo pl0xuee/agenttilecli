@@ -109,16 +109,15 @@ const COLLAPSE_WIDTH_PX: i32 = 700;
 /// tiling app - and because the point of the picture is several agents doing
 /// several things at once.
 ///
+/// Each entry names the folder it runs in, relative to the project, and those
+/// differ on purpose too. A staged pane runs a plain command rather than an
+/// agent, so nothing will ever report a state for it and its head strip falls
+/// back to naming its folder - which, if all three started in the project root,
+/// would be the project's name three times over. Starting them where they would
+/// actually be working shows the strip doing its real job.
+///
 /// Each ends in a `sleep`, which is what keeps the pane alive: a pane whose
 /// command exits is a pane that closes.
-/// Each pane's folder relative to the project, and what it runs there.
-///
-/// The folders differ on purpose. A staged pane runs a plain command rather
-/// than an agent, so nothing will ever report a state for it and its head strip
-/// falls back to naming its folder - which, if all three started in the project
-/// root, would be the project's name three times over. Starting them where they
-/// would actually be working shows the strip doing its real job: saying where
-/// this pane is when that isn't where the project is.
 #[cfg(debug_assertions)]
 const SCREENSHOT_COMMANDS: [(&str, &str); 3] = [
     (
@@ -270,6 +269,7 @@ impl App {
         let sidebar_toggle = gtk4::ToggleButton::builder()
             .icon_name("sidebar-show-symbolic")
             .css_classes(["sidebar-toggle", "header-action"])
+            .valign(gtk4::Align::Center)
             .can_focus(false)
             .tooltip_text("Toggle the project sidebar (Super+Alt+g)")
             .build();

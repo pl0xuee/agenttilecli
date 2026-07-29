@@ -412,6 +412,12 @@ window {
    So the app's buttons take the circle the window controls already use. Not
    because a circle is better than a square, but because half of them were
    already circles and the half that weren't had no argument for it. */
+/* Square, and it has to be said twice: `min-width` and `min-height` set the
+   floor, and the widgets are given `valign: center` in Rust so the header bar
+   can't stretch them past it. Without that they came out as ellipses - a 50%
+   radius on a box taller than it is wide is an oval, and the reason the window
+   controls next to them never had the problem is that `windowcontrols` centres
+   its own children. */
 .header-action {
   min-width: 1.95em;
   min-height: 1.95em;
@@ -806,6 +812,42 @@ row.sidebar-row:selected:hover {
   font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
   font-size: 1.18em;
   font-weight: 600;
+}
+
+/* The ghost row at the end of the rack - see `build_sidebar`. It carries the
+   strips' geometry exactly (the same radius, the same left inset for its icon)
+   so it reads as the outline of the next row, and none of their fill, so it
+   never reads as one. Its margins match `.sidebar-list`'s padding, since it
+   sits outside that list and would otherwise be a few pixels adrift of every
+   row above it.
+
+   Quieter than anything else in the rack at rest: it is an affordance, not an
+   item, and a dashed rectangle glowing at the bottom of a column of real
+   projects would be the loudest thing in a panel whose whole job is to let the
+   lit strip do the talking. */
+.sidebar-add {
+  margin: 0.3em 0.4em 0.15em;
+  padding: 0.72em 0.7em 0.72em 0.92em;
+  border: 1px dashed alpha(@text, 0.13);
+  border-radius: 0.6em;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: @faint;
+  transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 140ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.sidebar-add:hover {
+  color: @dim;
+  border-color: alpha(@filament, 0.3);
+  background-color: alpha(@text, 0.045);
+}
+
+.sidebar-add label {
+  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-size: 1.02em;
 }
 
 /* ── Tally rails ───────────────────────────────────────────────────────────
