@@ -84,6 +84,69 @@ fn status_tooltip(state: &PaneState) -> String {
     }
 }
 
+/// The same fact, short enough to sit in the head strip beside three others.
+///
+/// Lower case because the strip is set in caps by the stylesheet, and clipped
+/// hard because this shares a row with a close button: "working · Read" is the
+/// useful form and "working · MultiEditFileWithLongName" is not, so the tool
+/// gets the room that's left rather than as much as it wants.
+fn status_words(state: &PaneState) -> String {
+    match state {
+        PaneState::Starting => "starting".to_string(),
+        PaneState::Working { tool: Some(tool) } => format!("working \u{b7} {tool}"),
+        PaneState::Working { tool: None } => "working".to_string(),
+        PaneState::Idle => "waiting for you".to_string(),
+        PaneState::Waiting => "asking permission".to_string(),
+        PaneState::Exited => "exited".to_string(),
+    }
+}
+
+/// What the head strip says, and the facts it says it from.
+///
+/// Shared between the pane and the cwd poll, which is why it is an `Rc` of its
+/// own rather than fields on `Pane`: the poll outlives nothing and owns nothing,
+/// it just needs to be able to say "the folder changed" and have the strip work
+/// out whether that is worth mentioning.
+struct Head {
+    label: gtk4::Label,
+    /// The folder the pane was started in - which is the project's own, and
+    /// therefore the one thing the strip should never bother saying.
+    root: String,
+    /// The folder its foreground process is in now, once anything is known.
+    cwd: RefCell<Option<String>>,
+    state: RefCell<PaneState>,
+    /// Whether anything will ever report a state for this pane.
+    ///
+    /// Only an agent does - the state arrives from claude's hooks over the
+    /// socket (see `ipc`). A pane running the update script, or anything else
+    /// `Pane::command` starts, has no hooks and so sits in `Starting` for as
+    /// long as it lives. Saying "starting" under a command that has been
+    /// running for ten minutes is worse than saying nothing, so those panes
+    /// keep naming their folder, which is at least true.
+    reports: bool,
+}
+
+impl Head {
+    /// Rewrites the strip from whichever of the two facts is worth reading.
+    ///
+    /// The strip used to show the folder unconditionally, which meant every
+    /// pane in a project displayed that project's name - so a window with the
+    /// name in its title bar, in its sidebar row, and on each of four panes
+    /// said it six times and distinguished nothing. The folder is only news
+    /// when the agent has moved somewhere else, and the rest of the time the
+    /// strip has something better to say: what the agent is actually doing.
+    fn refresh(&self) {
+        let text = match self.cwd.borrow().as_deref() {
+            // It has moved out of the project's folder, which is the one case
+            // where naming a folder tells you something you didn't know.
+            Some(cwd) if cwd != self.root => cwd.to_string(),
+            _ if self.reports => status_words(&self.state.borrow()),
+            _ => self.root.clone(),
+        };
+        self.label.set_label(&text);
+    }
+}
+
 /// A name for the next pane, unique within this process.
 ///
 /// A counter rather than anything derived from the pty or the pid: the id has
@@ -359,8 +422,9 @@ pub struct Pane {
     pub close_button: gtk4::Button,
     /// The dot in the head strip, repainted by `set_state`.
     status: gtk4::Box,
-    /// What this pane's agent is doing, as far as its hooks have said.
-    state: RefCell<PaneState>,
+    /// The strip's label and everything it is written from, including this
+    /// pane's state - shared with the cwd poll, which also rewrites it.
+    head: Rc<Head>,
     pid: Rc<Cell<Option<libc::pid_t>>>,
     /// What `apply_theme` was last called with, so `set_focused` can skip the
     /// repaint when nothing changed. `Tiler::update_focus_style` runs over
@@ -388,6 +452,10 @@ impl Pane {
         let terminal = Terminal::new();
         terminal.set_hexpand(true);
         terminal.set_vexpand(true);
+        // The inset - see `.pane-terminal` in style.css. A class rather than
+        // `set_margin_*`, because VTE fills its CSS padding with the terminal's
+        // own background while a margin would leave the frame's fill showing.
+        terminal.add_css_class("pane-terminal");
         apply_theme(&terminal, false);
         apply_font(&terminal);
         // An agent's bell is this app's "the agent wants you" signal - it's
@@ -476,7 +544,7 @@ impl Pane {
             ),
             None => configured.clone(),
         };
-        Self::command(cwd, &command)
+        Self::spawn(cwd, &command, true)
     }
 
     /// A pane running `command` instead of `claude` (via the same login
@@ -484,21 +552,36 @@ impl Pane {
     /// button, which runs the pull-and-rebuild script in a pane so its
     /// output is visible rather than hidden behind a spinner.
     pub fn command(cwd: &str, command: &str) -> Self {
+        Self::spawn(cwd, command, false)
+    }
+
+    /// The shared body of the two above. `reports` says whether an agent's
+    /// hooks will ever speak for this pane, which is what its head strip is
+    /// allowed to claim - see `Head::reports`.
+    fn spawn(cwd: &str, command: &str, reports: bool) -> Self {
         let (frame, terminal, head, status, close_button) = Self::bare();
         let pid = Rc::new(Cell::new(None));
         let id = next_pane_id();
 
-        let dir_label = gtk4::Label::builder()
-            .css_classes(["pane-dir"])
+        let head_label = gtk4::Label::builder()
+            .css_classes(["pane-head-label"])
             .halign(gtk4::Align::Start)
             .hexpand(true)
             .xalign(0.0)
             .ellipsize(gtk4::pango::EllipsizeMode::Middle)
             .can_target(false)
-            .label(folder_name(cwd))
             .build();
         // After the dot, before the close button.
-        head.insert_child_after(&dir_label, Some(&status));
+        head.insert_child_after(&head_label, Some(&status));
+
+        let head_state = Rc::new(Head {
+            label: head_label,
+            root: folder_name(cwd),
+            cwd: RefCell::new(None),
+            state: RefCell::new(PaneState::Starting),
+            reports,
+        });
+        head_state.refresh();
 
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let argv = [shell.as_str(), "-lc", command];
@@ -542,15 +625,20 @@ impl Pane {
         // foreground process group reflects reality regardless. Stops
         // itself once the label is destroyed (pane closed), since it only
         // holds weak references.
-        let label_weak = dir_label.downgrade();
+        let head_weak = Rc::downgrade(&head_state);
         let terminal_weak = terminal.downgrade();
         gtk4::glib::source::timeout_add_local(CWD_POLL_INTERVAL, move || {
-            let (Some(label), Some(terminal)) = (label_weak.upgrade(), terminal_weak.upgrade())
+            let (Some(head), Some(terminal)) = (head_weak.upgrade(), terminal_weak.upgrade())
             else {
                 return gtk4::glib::ControlFlow::Break;
             };
-            if let Some(name) = foreground_cwd(&terminal) {
-                label.set_label(&name);
+            let found = foreground_cwd(&terminal);
+            // Only when it actually moved: this runs every second for the life
+            // of every pane, and the strip usually has the state in it, which
+            // must not be rewritten from under a reader once a second.
+            if *head.cwd.borrow() != found {
+                *head.cwd.borrow_mut() = found;
+                head.refresh();
             }
             gtk4::glib::ControlFlow::Continue
         });
@@ -561,7 +649,7 @@ impl Pane {
             terminal,
             close_button,
             status,
-            state: RefCell::new(PaneState::Starting),
+            head: head_state,
             pid,
             focused: Cell::new(false),
         }
@@ -570,7 +658,7 @@ impl Pane {
     /// Repaints the terminal in the focused or unfocused surface, to match the
     /// What this pane's agent is doing.
     pub fn state(&self) -> PaneState {
-        self.state.borrow().clone()
+        self.head.state.borrow().clone()
     }
 
     /// Moves the dot, and says whether anything actually changed.
@@ -579,7 +667,7 @@ impl Pane {
     /// every tool an agent runs, and repainting a sidebar tally on each of them
     /// is work nobody asked for. Only a state that moved is news.
     pub fn set_state(&self, state: PaneState) -> bool {
-        if *self.state.borrow() == state {
+        if *self.head.state.borrow() == state {
             return false;
         }
         for class in STATUS_CLASSES {
@@ -588,7 +676,10 @@ impl Pane {
         self.status.add_css_class(status_class(&state));
         self.status
             .set_tooltip_text(Some(&status_tooltip(&state)));
-        *self.state.borrow_mut() = state;
+        *self.head.state.borrow_mut() = state;
+        // The strip carries the state in words whenever the folder isn't news,
+        // so a state change is a change to what it reads.
+        self.head.refresh();
         true
     }
 

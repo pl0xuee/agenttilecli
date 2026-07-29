@@ -341,12 +341,33 @@ window {
 
    It sits a rung below the tile it heads, the way the rack sits below the
    panes: chrome recesses, content stands out. */
+/* ── The inset, and why it is one number ──────────────────────────────────
+   Every surface in this app that holds text was padded except the one whose
+   entire job is holding text. The strip's label sat 13px in from the tile's
+   border and the agent's output started 3px in, hard against it - so the chrome
+   read as considered and the content read as poured in. Text jammed into the
+   corner of a box is the difference between a window that was designed and one
+   that was assembled.
+
+   So the terminal gets a real inset, and the strip above it is set to the same
+   one, measured to the same edge: the status dot and the first character column
+   of the agent's output now sit on one vertical line down the left of the tile.
+   That line is the whole point. An inset that didn't agree with the strip's
+   would just be a second arbitrary margin.
+
+   VTE fills the padding with its own background, so this costs no seam - unlike
+   a margin, which would leave the `.pane` fill showing through at a different
+   alpha the moment anyone turned the pane opacity down. */
 .pane-head {
-  padding: 0.1em 0.15em 0.1em 0.5em;
+  padding: 0.32em 0.4em 0.32em 0.7em;
   background-color: @rack;
   border-bottom: 1px solid @hairline;
   transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1),
     border-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.pane-terminal {
+  padding: 0.5em 0.7em 0.45em 0.7em;
 }
 
 /* The focused tile's strip picks up the same warmth its border does, so the
@@ -377,37 +398,94 @@ window {
   background-color: @hangup;
 }
 
-/* ── The mode switcher ─────────────────────────────────────────────────────
-   Three linked toggles in the header bar, one per layout mode. This is the app
-   finally saying out loud something it always knew: cycling modes used to change
-   the tiling and leave the only evidence in the shape of the panes, which is
-   readable with four of them open and a guess with one.
+/* ── The header bar's own controls ─────────────────────────────────────────
+   One shape for all of them, and the shape is the platform's.
 
-   The active one takes the lamp, at the low alpha the sidebar's selected strip
-   uses rather than a solid fill. It is reporting a state, not asking to be
-   pressed, and a filled button in the header bar would be the brightest thing on
-   screen - competing with the focused pane, which is the one thing that is
+   There were three button languages in one 40px strip: the window controls
+   arrive from libadwaita as filled circles, the app's own buttons were flat
+   ghosts with no background at all, and the sidebar toggle filled a rounded
+   square when active. Three treatments in a row reads as three different
+   programs' worth of buttons that happened to land in the same bar - and it is
+   the single loudest "assembled" signal a window has, because the title bar is
+   the one strip a person looks at on every application they own.
+
+   So the app's buttons take the circle the window controls already use. Not
+   because a circle is better than a square, but because half of them were
+   already circles and the half that weren't had no argument for it. */
+.header-action {
+  min-width: 1.95em;
+  min-height: 1.95em;
+  padding: 0;
+  border-radius: 50%;
+  color: @dim;
+  background-color: alpha(@text, 0.06);
+  transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.header-action:hover {
+  color: @text;
+  background-color: alpha(@text, 0.12);
+}
+
+/* A toggle that is on takes the lamp, at the low alpha the sidebar's selected
+   strip uses rather than a solid fill: it is reporting a state, not asking to
+   be pressed, and a filled button in the header bar would be the brightest
+   thing on screen - competing with the focused pane, which is the one thing
    allowed to look lit. */
+.header-action:checked {
+  color: @filament;
+  background-color: alpha(@filament, 0.16);
+}
+
+.header-action:checked:hover {
+  background-color: alpha(@filament, 0.22);
+}
+
+/* ── The mode switcher ─────────────────────────────────────────────────────
+   Three toggles, one per layout mode. This is the app saying out loud something
+   it always knew: cycling modes used to change the tiling and leave the only
+   evidence in the shape of the panes, which is readable with four of them open
+   and a guess with one.
+
+   It is one control, and it now looks like one. GTK's `.linked` joins buttons
+   by squaring their inner corners, which needs each button to have a fill to
+   square - and these had none, so three "linked" toggles came out as three
+   loose icons floating next to a fourth loose icon that wasn't part of the
+   group at all. A trough behind them does what `.linked` was being asked to:
+   it draws the boundary of the control once, and the selected segment moves
+   around inside it. */
+.mode-switcher {
+  padding: 0.14em;
+  border-radius: 0.62em;
+  background-color: alpha(@text, 0.06);
+}
+
 .mode-switcher button {
   min-width: 2em;
-  min-height: 1.8em;
+  min-height: 1.65em;
+  padding: 0;
+  border: none;
+  border-radius: 0.48em;
+  box-shadow: none;
   color: @muted;
+  background-color: transparent;
   transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
     background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .mode-switcher button:hover {
   color: @text;
-  background-color: alpha(@text, 0.06);
+  background-color: alpha(@text, 0.08);
 }
 
 .mode-switcher button:checked {
   color: @filament;
-  background-color: alpha(@filament, 0.12);
+  background-color: alpha(@filament, 0.16);
 }
 
 .mode-switcher button:checked:hover {
-  background-color: alpha(@filament, 0.16);
+  background-color: alpha(@filament, 0.22);
 }
 
 /* An engraved equipment label rather than a caption: monospace, small, in caps
@@ -431,8 +509,12 @@ window {
    Dropping the ellipsize instead is worse than it sounds: without it the
    label's minimum width is the whole folder name, so one deeply-named project
    would raise the pane's minimum width and through it the window's. Caps,
-   monospace and the small size carry the engraved reading on their own. */
-.pane-dir {
+   monospace and the small size carry the engraved reading on their own.
+
+   It was `.pane-dir` when a directory was all it ever held. It now says what
+   the agent is doing and names the folder only when the agent has moved out of
+   the project's own, so the name would have been a lie. */
+.pane-head-label {
   color: @faint;
   font-family: monospace;
   font-size: 0.72em;
@@ -442,7 +524,7 @@ window {
 /* The focused tile names itself a little louder - not as a second focus signal,
    but because on a screen of four identical strips the one you're typing into
    is the one whose folder you actually want to be able to read. */
-.pane.focused .pane-dir {
+.pane.focused .pane-head-label {
   color: @muted;
 }
 

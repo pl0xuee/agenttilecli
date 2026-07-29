@@ -95,7 +95,7 @@ impl App {
         menu.append(Some("About AgentTileCLI"), Some("win.about"));
         let menu_button = gtk4::MenuButton::builder()
             .icon_name("open-menu-symbolic")
-            .css_classes(["app-menu"])
+            .css_classes(["app-menu", "header-action"])
             .can_focus(false)
             .menu_model(&menu)
             .tooltip_text("Main menu")
@@ -136,6 +136,7 @@ impl App {
         let new_agent = gtk4::Button::builder()
             .icon_name("tab-new-symbolic")
             .can_focus(false)
+            .css_classes(["header-action"])
             .tooltip_text("Spawn a new agent in this project")
             .build();
         let this = self.clone();
@@ -154,7 +155,7 @@ impl App {
         let broadcast = gtk4::ToggleButton::builder()
             .icon_name("send-to-symbolic")
             .can_focus(false)
-            .css_classes(["broadcast-toggle"])
+            .css_classes(["broadcast-toggle", "header-action"])
             .tooltip_text("Broadcast typing to every agent in this project")
             .build();
         let this = self.clone();
@@ -198,7 +199,7 @@ impl App {
         view
     }
 
-    /// The three layout modes as one linked control.
+    /// The three layout modes as one segmented control.
     ///
     /// This is the header bar earning its place. The mode was previously
     /// invisible: `Super+Alt+Tab` cycled grid to master-stack to monocle and the
@@ -207,7 +208,7 @@ impl App {
     fn build_mode_switcher(&self) -> gtk4::Box {
         let row = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
-            .css_classes(["linked", "mode-switcher"])
+            .css_classes(["mode-switcher"])
             .build();
 
         let mut buttons: Vec<gtk4::ToggleButton> = Vec::new();

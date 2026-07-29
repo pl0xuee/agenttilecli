@@ -111,12 +111,29 @@ const COLLAPSE_WIDTH_PX: i32 = 700;
 ///
 /// Each ends in a `sleep`, which is what keeps the pane alive: a pane whose
 /// command exits is a pane that closes.
+/// Each pane's folder relative to the project, and what it runs there.
+///
+/// The folders differ on purpose. A staged pane runs a plain command rather
+/// than an agent, so nothing will ever report a state for it and its head strip
+/// falls back to naming its folder - which, if all three started in the project
+/// root, would be the project's name three times over. Starting them where they
+/// would actually be working shows the strip doing its real job: saying where
+/// this pane is when that isn't where the project is.
 #[cfg(debug_assertions)]
-const SCREENSHOT_COMMANDS: [&str; 3] = [
-    "git -c color.ui=always log --graph --oneline --decorate -14; echo; \
-     git -c color.status=always status --short --branch; sleep 600",
-    "git -c color.ui=always diff --stat HEAD~4 HEAD; sleep 600",
-    "wc -l src/*.rs src/*/*.rs | sort -rn | head -18; sleep 600",
+const SCREENSHOT_COMMANDS: [(&str, &str); 3] = [
+    (
+        ".",
+        "git -c color.ui=always log --graph --oneline --decorate -14; echo; \
+         git -c color.status=always status --short --branch; sleep 600",
+    ),
+    (
+        "src",
+        "wc -l *.rs */*.rs | sort -rn | head -16; sleep 600",
+    ),
+    (
+        "assets",
+        "ls -lh; echo; head -8 icon.svg; sleep 600",
+    ),
 ];
 
 /// The widgets belonging to one project. Parallel to `model::Project` rather
@@ -252,7 +269,7 @@ impl App {
         let title_widget = adw::WindowTitle::new(title, "");
         let sidebar_toggle = gtk4::ToggleButton::builder()
             .icon_name("sidebar-show-symbolic")
-            .css_classes(["sidebar-toggle"])
+            .css_classes(["sidebar-toggle", "header-action"])
             .can_focus(false)
             .tooltip_text("Toggle the project sidebar (Super+Alt+g)")
             .build();
@@ -340,8 +357,13 @@ impl App {
         if std::env::var_os("ATC_SCREENSHOT").is_some() {
             this.0.split.set_show_sidebar(true);
             let tiler = this.add_project(cwd, "agenttilecli".to_string(), "folder-symbolic");
-            for command in SCREENSHOT_COMMANDS {
-                tiler.spawn_command_pane(cwd, command, |_| {});
+            for (folder, command) in SCREENSHOT_COMMANDS {
+                let dir = if folder == "." {
+                    cwd.to_string()
+                } else {
+                    format!("{cwd}/{folder}")
+                };
+                tiler.spawn_command_pane(&dir, command, |_| {});
             }
             this.add_project("/usr/share", "Offline_map".to_string(), "folder-symbolic");
             this.select_for_screenshot();

@@ -257,7 +257,8 @@ mod tests {
     /// than derived, because the property that matters is one a reader of
     /// `style.css` cannot see: whether the widget wearing that class was built
     /// with `EllipsizeMode` set on it.
-    const ELLIPSIZING_LABELS: &[&str] = &[".pane-dir", ".sidebar-row-label", ".sidebar-version"];
+    const ELLIPSIZING_LABELS: &[&str] =
+        &[".pane-head-label", ".sidebar-row-label", ".sidebar-version"];
 
     /// An ellipsizing label must not be given `letter-spacing`.
     ///
