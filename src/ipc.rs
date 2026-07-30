@@ -36,6 +36,29 @@ use crate::hooks::Event;
 /// for if the window has wedged.
 const HOOK_TIMEOUT: Duration = Duration::from_millis(250);
 
+/// The longest line this socket will assemble before hanging up on whoever is
+/// writing it.
+///
+/// Sized from what a message actually is, which is tiny: a pane id (`p` and a
+/// counter), the longest event name there is ("UserPromptSubmit", sixteen
+/// bytes), and the one field this program doesn't choose - the tool name, a
+/// short word for a builtin and an `mcp__server__tool` triple at its longest.
+/// Two tabs and a newline, and the whole message is well under a hundred bytes,
+/// so 4 KiB is two orders of magnitude of headroom for the field with any give
+/// in it. Anything past it is, by definition, not one of ours.
+///
+/// A hard cap rather than a hint, because the obvious reader has no cap at all:
+/// `DataInputStream::read_line` (`g_data_input_stream_read_line`) *doubles* its
+/// buffer every time it fills without finding a newline, with no ceiling and
+/// nothing `set_buffer_size` can do about it. Meanwhile this socket's address is
+/// deliberately in every agent's environment as `ATC_SOCKET` (see `pane`), and
+/// an agent is a thing that runs arbitrary shell: one `cat huge.log >
+/// $ATC_SOCKET`, or a stray `yes >` it, and the *window's* heap grows without
+/// limit, because the newline that would release the buffer never arrives.
+/// `Message::parse` was already careful about what a line says; this is the
+/// other half - how long it is allowed to be before nobody cares what it says.
+const MAX_LINE: usize = 4096;
+
 /// The environment a pane hands its agent so the hooks can find their way home.
 pub const ENV_SOCKET: &str = "ATC_SOCKET";
 pub const ENV_PANE: &str = "ATC_PANE_ID";
@@ -152,12 +175,15 @@ pub fn listen(on_message: impl Fn(Message) + 'static) -> Option<PathBuf> {
         // from a socket that has already been closed underneath it, which is
         // silent: no error, no line, no state change, no clue.
         let connection = connection.clone();
-        let reader = gio::DataInputStream::new(&connection.input_stream());
+        let stream = connection.input_stream();
         glib::spawn_future_local(async move {
             let _connection = connection;
             // One line is the whole protocol, so there is nothing to loop over
-            // and nothing to keep the connection open for.
-            if let Ok(Some(line)) = reader.read_line_future(glib::Priority::DEFAULT).await
+            // and nothing to keep the connection open for. Dropping out of this
+            // future drops the connection with it, which is exactly what should
+            // happen to a writer that sent more than `MAX_LINE` and never a
+            // newline: it gets hung up on, and the window keeps its memory.
+            if let Some(line) = read_line(&stream).await
                 && let Some(message) = Message::parse(&String::from_utf8_lossy(&line))
             {
                 on_message(message);
@@ -174,6 +200,73 @@ pub fn listen(on_message: impl Fn(Message) + 'static) -> Option<PathBuf> {
     std::mem::forget(service);
 
     Some(path)
+}
+
+/// Reads one line from `stream`, at most `MAX_LINE` bytes of it, or `None`.
+///
+/// Hand-rolled rather than `DataInputStream::read_line_future` purely for that
+/// bound - see `MAX_LINE` for what an unbounded one costs. Each read asks for
+/// only the room that is left, so the buffer cannot outgrow the cap however much
+/// the other end sends, and reaching the cap without a newline returns `None`:
+/// there is no legitimate message that long, and the caller's answer to `None`
+/// is to drop the connection.
+///
+/// The loop is not optional. A stream read is allowed to come back short, and
+/// while a forty-byte write to a unix socket arrives in one piece essentially
+/// always, "essentially always" in a socket reader is a status update that is
+/// silently truncated on the one day it doesn't - so a partial read resumes
+/// rather than deciding it has seen the whole message.
+///
+/// End of stream ends the line rather than discarding it, which is what keeps a
+/// hook that died mid-flush readable at all (see
+/// `a_message_missing_its_newline_still_parses`) - and an empty line is not a
+/// special case worth writing, because `Message::parse` already declines it.
+async fn read_line(stream: &gio::InputStream) -> Option<Vec<u8>> {
+    let mut line: Vec<u8> = Vec::new();
+    loop {
+        let room = MAX_LINE.checked_sub(line.len()).filter(|room| *room > 0)?;
+        let chunk = stream
+            .read_bytes_future(room, glib::Priority::DEFAULT)
+            .await
+            .ok()?;
+        if chunk.is_empty() {
+            return Some(line);
+        }
+        // Anything after the newline belongs to nobody: one line is the whole
+        // protocol, and the connection is about to be dropped.
+        if let Some(end) = chunk.iter().position(|byte| *byte == b'\n') {
+            line.extend_from_slice(&chunk[..end]);
+            return Some(line);
+        }
+        line.extend_from_slice(&chunk);
+    }
+}
+
+/// Takes this window's socket file away again, on the way down.
+///
+/// Nothing else will. The `SocketService` is deliberately leaked (see `listen`),
+/// so no drop closes the socket and no drop unlinks the file - which left every
+/// run depositing a dead `<pid>.sock` in the runtime directory, collected only
+/// by the accident of a later run being handed the same pid by the kernel, which
+/// is what `listen`'s own `remove_file` is for. One stale file per run is not a
+/// leak anyone would notice; it is still litter in a directory this app is a
+/// guest in, and the fix is one syscall at the one moment the socket is known to
+/// be finished with.
+///
+/// Called from the window's own shutdown (`App::save_on_close`) and from nowhere
+/// else, which is the important half. A `--hook` invocation is a separate,
+/// short-lived process reporting *into* a window that is still running: it never
+/// builds an `App` (see `main`), so it never reaches here, and a hook exiting can
+/// never take the live window's socket out from under it.
+///
+/// Best-effort, and every failure is one to ignore: a runtime directory cleared
+/// by a session ending underneath us, a permission that changed, a path that was
+/// never created because `listen` failed. In all of them the file is already gone
+/// or about to be overwritten, and none of them is a reason to hold the window
+/// open. Closing the window is the user's instruction; tidying up after it is
+/// ours.
+pub fn remove_socket(path: &std::path::Path) {
+    let _ = std::fs::remove_file(path);
 }
 
 /// Sends one message and returns - the whole of the `--hook` process's job.
@@ -252,12 +345,128 @@ mod tests {
         assert_eq!(Message::parse("\tStop\t"), None);
     }
 
+    /// The unlink is best-effort in both directions: it takes the file away when
+    /// there is one, and says nothing when there isn't. A window closing after
+    /// its runtime directory has already been cleared - a session ending
+    /// underneath it - must be a no-op, not a panic on the way out.
+    #[test]
+    fn the_socket_goes_away_with_the_window_and_absence_is_not_an_error() {
+        let dir = std::env::temp_dir().join(format!("atc-unlink-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a directory to test in");
+        let path = dir.join("7.sock");
+        std::fs::write(&path, b"stands in for a socket").expect("writes");
+
+        remove_socket(&path);
+        assert!(!path.exists(), "the socket file outlived the window");
+
+        // And again, on a path that is already gone.
+        remove_socket(&path);
+        remove_socket(&dir.join("never-existed.sock"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A line with no trailing newline is still a line - a writer that died
     /// mid-flush should not produce a message that looks fine but isn't.
     #[test]
     fn a_message_missing_its_newline_still_parses() {
         assert_eq!(
             Message::parse("p1\tStop"),
+            Some(Message {
+                pane: "p1".into(),
+                event: Event::Stop,
+                tool: None,
+            }),
+        );
+    }
+
+    /// A stream that hands over one piece per read, which is what a socket read
+    /// coming back short looks like from inside `read_line`.
+    struct InPieces(std::collections::VecDeque<Vec<u8>>);
+
+    impl std::io::Read for InPieces {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            let Some(piece) = self.0.front_mut() else {
+                return Ok(0);
+            };
+            let taken = piece.len().min(out.len());
+            out[..taken].copy_from_slice(&piece[..taken]);
+            piece.drain(..taken);
+            if piece.is_empty() {
+                self.0.pop_front();
+            }
+            Ok(taken)
+        }
+    }
+
+    /// Runs the real reader over `pieces`, on a main context of its own.
+    ///
+    /// No display, no GTK and no socket: gio's streams and futures work on their
+    /// own, which is what makes the one thing worth testing here - where the
+    /// reader stops - testable without a window at all.
+    fn read_line_from(pieces: &[&[u8]]) -> Option<Vec<u8>> {
+        let reader = InPieces(pieces.iter().map(|p| p.to_vec()).collect());
+        let stream: gio::InputStream = gio::ReadInputStream::new(reader).upcast();
+        glib::MainContext::new().block_on(read_line(&stream))
+    }
+
+    #[test]
+    fn a_line_ends_at_its_newline() {
+        assert_eq!(
+            read_line_from(&[b"p1\tPreToolUse\tBash\n"]),
+            Some(b"p1\tPreToolUse\tBash".to_vec()),
+        );
+    }
+
+    /// A message arriving in two reads is one message, not two halves of one.
+    /// Unlikely on a unix socket for forty bytes, and the loop in `read_line` is
+    /// the only thing standing between "unlikely" and a status update that
+    /// silently turns into a different one.
+    #[test]
+    fn a_message_split_across_reads_is_reassembled() {
+        assert_eq!(
+            read_line_from(&[b"p1\tPreToo", b"lUse\tBa", b"sh\n"]),
+            Some(b"p1\tPreToolUse\tBash".to_vec()),
+        );
+    }
+
+    /// The reason there is a cap at all. `ATC_SOCKET` is deliberately in every
+    /// agent's environment and an agent runs arbitrary shell, so a `cat` or a
+    /// `yes` pointed at it happens by accident long before anyone tries it on
+    /// purpose - and with no bound, every byte of it is a byte this window keeps,
+    /// doubling its buffer forever because the newline never comes.
+    #[test]
+    fn a_line_that_never_ends_is_dropped_rather_than_buffered() {
+        let flood = vec![b'x'; MAX_LINE * 4];
+        assert_eq!(
+            read_line_from(&[&flood]),
+            None,
+            "a line longer than any message can be was accepted",
+        );
+
+        // Piecewise too: the cap is on the line, not on one read of it.
+        let piece = vec![b'x'; 512];
+        let pieces: Vec<&[u8]> = std::iter::repeat_n(piece.as_slice(), 32).collect();
+        assert_eq!(read_line_from(&pieces), None);
+
+        // And the near side of the boundary still works - a cap that also
+        // rejected legitimate messages would be the same bug wearing a hat.
+        let mut fits = vec![b'x'; MAX_LINE - 1];
+        fits.push(b'\n');
+        assert_eq!(
+            read_line_from(&[&fits]).map(|line| line.len()),
+            Some(MAX_LINE - 1),
+        );
+    }
+
+    /// A real message with rubbish piled behind it still gets through: the reader
+    /// stops at the newline, so what follows is never read and never held.
+    #[test]
+    fn a_message_with_a_flood_behind_it_is_still_read() {
+        let flood = vec![b'x'; MAX_LINE * 4];
+        let line = read_line_from(&[b"p1\tStop\t\n", &flood]).expect("the line before the flood");
+        assert_eq!(
+            Message::parse(&String::from_utf8_lossy(&line)),
             Some(Message {
                 pane: "p1".into(),
                 event: Event::Stop,

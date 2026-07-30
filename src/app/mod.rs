@@ -31,6 +31,7 @@
 //! nothing on screen said what it had changed to.
 
 use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -44,7 +45,10 @@ use crate::updates::Updates;
 
 mod header;
 mod projects;
-mod sidebar;
+// `pub(crate)` for the rack's fraction bounds alone: `session::Session::clamped`
+// holds a remembered sidebar fraction to the range the grip holds a drag to, and
+// the range is worth sharing rather than copying (see `sidebar_fraction`).
+pub(crate) mod sidebar;
 
 /// Set on the sidebar row of a background project whose agent has asked for the
 /// user, and on the sidebar toggle alongside it. Cleared the moment that project
@@ -73,9 +77,15 @@ const DROP_BELOW_CLASS: &str = "drop-below";
 /// The ratio is a twentieth, not a tenth. Even steps still jump if each one is
 /// big, and a tenth of a ~11pt terminal font is over a point a press - enough
 /// that VTE reflows the character grid into a visibly different shape each time.
+///
+/// The two bounds are `pub(crate)` because `session::Session::clamped` holds a
+/// remembered scale to the same pair on the way back in. Shared rather than
+/// restated there: a saved scale the keybindings could never have produced is
+/// only recognisable against the range they enforce, and two copies of that
+/// range would eventually be two different ranges.
 const FONT_SCALE_STEP: f64 = 1.05;
-const FONT_SCALE_MIN: f64 = 0.5;
-const FONT_SCALE_MAX: f64 = 3.0;
+pub(crate) const FONT_SCALE_MIN: f64 = 0.5;
+pub(crate) const FONT_SCALE_MAX: f64 = 3.0;
 
 /// How much of the window the rack takes before anyone drags it. libadwaita
 /// defaults to a quarter, which on a wide window is a great deal of room for a
@@ -207,6 +217,16 @@ struct Inner {
     /// The find bar, built after the window because it needs it for key
     /// capture, so it arrives later than everything else here.
     search: RefCell<Option<crate::search::Search>>,
+    /// Where this window's IPC socket file is, so that it can be taken away
+    /// again when the window closes - see `save_on_close`. Nothing else would:
+    /// the listener behind it is deliberately leaked, so the file outlives the
+    /// process unless this process removes it. `None` when `ipc::listen` never
+    /// managed to open one, in which case there is nothing to remove.
+    ///
+    /// A `RefCell` because listening starts *after* this struct exists - the
+    /// listener's callback needs a weak reference back to it - so the order is
+    /// build, then listen, then record what listening produced.
+    socket: RefCell<Option<PathBuf>>,
     /// Holds just the one dynamic `.scaled-content { font-size: ... }` rule that
     /// drives content-side chrome scaling - reloaded in place on every scale
     /// change rather than recreated, so it keeps sitting at the priority it was
@@ -312,6 +332,7 @@ impl App {
             last_agent_count: Cell::new(crate::config::get().agents.max(1)),
             font_scale: Cell::new(1.0),
             save_queued: Cell::new(false),
+            socket: RefCell::new(None),
             base_title: title.to_string(),
             css_provider,
             search: RefCell::new(None),
@@ -321,11 +342,16 @@ impl App {
         // socket in its environment. A window that can't open one still works;
         // its panes just fall back to the bell (see `hooks::settings_json`).
         let weak = Rc::downgrade(&this.0);
-        crate::ipc::listen(move |message| {
+        let socket = crate::ipc::listen(move |message| {
             if let Some(inner) = weak.upgrade() {
                 App(inner).on_agent_event(&message);
             }
         });
+        // Kept, not dropped. The path is the one thing about listening that has
+        // to be undone: the socket *file* has no owner once the listener behind
+        // it is leaked, so a run that forgets its path is a run that leaves one
+        // behind for good (see `ipc::remove_socket`).
+        *this.0.socket.borrow_mut() = socket;
 
         split.set_sidebar(Some(&this.build_sidebar()));
         let search = crate::search::Search::new(&this);
@@ -349,6 +375,20 @@ impl App {
         // opacity the last run was left at rather than at the config's and then
         // corrected.
         crate::appearance::restore(&saved.appearance);
+        // And then repaint whatever already exists, because `restore_session`
+        // above may have built panes - `restore_agents` - and those were painted
+        // from the config while the session's own opacity was still unread. That
+        // leaves a pane's terminal decided by one appearance and the CSS fill
+        // behind it by another, which since VTE's clearing is switched on the same
+        // number (see `pane::apply_theme`) is not a subtle mismatch: the pane
+        // keeps clearing itself opaquely and the saved glass never arrives.
+        //
+        // Cheap and unconditional rather than guarded on "did anything change",
+        // because the answer is almost always "no panes exist yet" and the cost of
+        // being wrong is a setting that silently applies to some panes only.
+        for view in this.0.views.borrow().iter() {
+            view.tiler.refresh_appearance();
+        }
         if saved.font_scale > 0.0 {
             this.set_font_scale(saved.font_scale);
         }
@@ -565,15 +605,30 @@ impl App {
         });
     }
 
-    /// The last save, taken while there is still a window to ask.
+    /// The last save, taken while there is still a window to ask - and the one
+    /// place this process tidies up after itself.
     ///
     /// `close_request` rather than a destroy handler: by the time a window is
     /// destroyed its size is gone, and a session that remembered every project
     /// but forgot how big the window was would be the one thing people notice.
+    ///
+    /// Both halves are best-effort and neither may hold the window open. A user
+    /// who has asked to close is not interested in whether a file write
+    /// succeeded, and refusing to close because it didn't would turn a full disk
+    /// into an application that cannot be quit.
     fn save_on_close(&self) {
         let this = self.clone();
         self.0.window.connect_close_request(move |_| {
             let _ = this.snapshot_session().save();
+            // The socket goes with the window, in the same handler and for the
+            // same reason: this is the last moment anything still knows the
+            // window existed. Nothing else will remove the file - the listener
+            // holding the socket open is leaked on purpose (see `ipc::listen`) -
+            // so without this every run leaves one behind in the runtime
+            // directory.
+            if let Some(path) = this.0.socket.borrow().as_deref() {
+                crate::ipc::remove_socket(path);
+            }
             glib::Propagation::Proceed
         });
     }
@@ -603,18 +658,33 @@ impl App {
         }
     }
 
-    /// Copies the focused pane's entire output to the clipboard, and says so.
     /// Flips broadcast typing for the open project.
     ///
-    /// Goes through `set_broadcast_armed` rather than the tiler directly, so the
-    /// header bar's toggle lights up with it - the button and this command are
-    /// the same switch reached two ways, and a mode this loud going on without
-    /// its indicator following is the trap the button exists to prevent.
+    /// Goes through the header bar's own toggle rather than the tiler directly,
+    /// because that button is where the switch is actually wired: its `toggled`
+    /// handler is the one place that tells the tiler and repaints the armed state,
+    /// so moving the button does both and cannot do only one.
+    ///
+    /// It used to call `set_broadcast_armed` alone, which is *only* the paint, and
+    /// the result was the exact trap the loud indicator exists to prevent -
+    /// backwards. Off plus this command lit the whole header strip and broadcast
+    /// nothing; on plus this command cleared the warning and left every keystroke
+    /// still going to every agent in the project. It could also never be turned
+    /// back off, since `!tiler.broadcast()` stayed true while the tiler was never
+    /// told anything.
     pub fn toggle_broadcast(&self) {
-        let Some(tiler) = self.active_tiler() else {
+        if let Some(button) = self.0.broadcast_button.borrow().as_ref() {
+            button.set_active(!button.is_active());
             return;
-        };
-        self.set_broadcast_armed(!tiler.broadcast());
+        }
+        // No header bar to speak through - not reachable in the built window, but
+        // the mode is the point and the indicator is the decoration, so if only
+        // one of them can happen it has to be this one.
+        if let Some(tiler) = self.active_tiler() {
+            let armed = !tiler.broadcast();
+            tiler.set_broadcast(armed);
+            self.set_broadcast_armed(armed);
+        }
     }
 
     /// Opens the command palette.

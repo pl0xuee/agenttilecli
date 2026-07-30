@@ -89,8 +89,30 @@ pub fn install(terminal: &Terminal) {
     // `keybindings::install`.)
     controller.set_propagation_phase(PropagationPhase::Capture);
 
-    let target = terminal.clone();
+    // Weak, and it has to stay weak. This controller is installed on the very
+    // terminal its closure acts on (`add_controller` below), so a strong clone
+    // here closes a Terminal -> controller -> closure -> Terminal reference
+    // cycle, and GObject has no cycle collector to break one: every object in
+    // that ring keeps the next alive and none of them is ever finalized.
+    //
+    // What that costs isn't abstract. A pane's terminal carries its scrollback
+    // with it - 10,000 lines by default (`config::scrollback`) of an afternoon's
+    // agent output - and with the cycle in place, closing the pane frees none of
+    // it. `Tiler::remove_pane` drops the whole Frame -> Box -> Terminal tree and
+    // the terminal alone survives it, so RSS climbs by one agent's history every
+    // time a pane closes and never comes back down. `links.rs` installs its own
+    // controller on the same terminal and holds it weakly for this reason.
+    //
+    // The upgrade below can't actually fail in practice - the controller dies
+    // with the terminal it's installed on, so no keypress arrives after the
+    // terminal is gone - which is exactly the reasoning that talks people into
+    // "simplifying" this back into a clone. The point of the weak ref is not to
+    // survive a vanished terminal; it's to not be the thing keeping it alive.
+    let target = terminal.downgrade();
     controller.connect_key_pressed(move |_, keyval, _keycode, state| {
+        let Some(target) = target.upgrade() else {
+            return glib::Propagation::Proceed;
+        };
         let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
         let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
 
@@ -562,6 +584,44 @@ mod tests {
                 b"\x89PNG\r\n\x1a\n",
                 "{} isn't a PNG - claude would refuse to read it",
                 path.display(),
+            );
+        });
+    }
+
+    /// A pane that has been closed has to actually be gone, and the clipboard
+    /// controller is the thing most likely to stop it: `install` hangs an
+    /// `EventControllerKey` on the very terminal its closure acts on, so a strong
+    /// capture in there is a reference cycle GObject cannot collect.
+    ///
+    /// Asserted with a weak reference, because nothing else can tell the
+    /// difference. A leaked terminal looks exactly like a freed one from every
+    /// angle except whether it was finalized - the pane disappears from the
+    /// screen either way, the pty is closed either way (VTE does that at
+    /// `child-exited`), and the only visible symptom is an RSS figure that climbs
+    /// by one agent's scrollback per closed pane over a day's work.
+    #[test]
+    fn a_terminal_with_clipboard_keys_is_freed_when_its_pane_closes() {
+        gtk_test(|| {
+            // The real teardown path, minus the pty: `Tiler::remove_pane`
+            // unparents the frame and drops the last `Rc<Pane>`, which drops the
+            // whole Frame -> Box -> Terminal tree `Pane::bare` built.
+            let frame = gtk4::Frame::new(None);
+            let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+            let terminal = Terminal::new();
+            install(&terminal);
+            content.append(&terminal);
+            frame.set_child(Some(&content));
+
+            let alive = terminal.downgrade();
+            drop(terminal);
+            drop(content);
+            drop(frame);
+
+            assert!(
+                alive.upgrade().is_none(),
+                "the terminal outlived the pane that held it, so something in \
+                 `install` is holding it in a cycle - its scrollback is now \
+                 resident for the life of the process",
             );
         });
     }

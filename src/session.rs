@@ -114,6 +114,45 @@ impl Default for Project {
     }
 }
 
+/// What the font-scale keybindings will let a person reach: `FONT_SCALE_MIN` and
+/// `FONT_SCALE_MAX` in `app` (0.5 and 3.0), the two values
+/// `App::inc_font_scale`/`dec_font_scale` clamp every keystroke to.
+///
+/// A saved scale outside them is a scale no keystroke could have produced, and
+/// nothing downstream re-checks it: `font_scale: 50` goes straight into the
+/// dynamic stylesheet as `.scaled-content { font-size: 50em }`, which is one
+/// glyph per pane and a header bar too large to find the control that would put
+/// it back.
+use crate::app::{FONT_SCALE_MAX, FONT_SCALE_MIN};
+
+/// The largest window dimension worth asking for.
+///
+/// The floor is the interesting end and it isn't here: `GtkWindow:default-width`
+/// and `:default-height` are `gint` properties whose param spec runs
+/// `-1 ..= G_MAXINT` (checked against the installed GTK, not remembered), so a
+/// saved `-2` is not a small window - it is a `g_object_set` critical and a
+/// property left at whatever it was. Anything that isn't a positive number of
+/// pixels is handled by falling back to `Window::default()` instead, because -1
+/// and 0 both mean "let GTK choose" and this app never writes either.
+///
+/// The ceiling is here because the param spec's own is `G_MAXINT`, which no
+/// display can honour: a window's width in the X11 protocol is a 16-bit field,
+/// so 65535 is the largest size that can even be expressed to a server (Wayland's
+/// field is wider; no compositor will hand over more either). Past that a saved
+/// size is not a size, and clamping beats asking for two billion pixels.
+const WINDOW_MAX_PX: i32 = 65535;
+
+/// The rack's share of the window: as narrow and as wide as the grip itself will
+/// go, which is the `0.1 ..= 0.5` in `app::sidebar::sidebar_fraction`.
+///
+/// libadwaita's `OverlaySplitView:sidebar-width-fraction` accepts `0.0 ..= 1.0`
+/// (again checked against the installed library), so a saved `5.0` is out of
+/// range for the property as well - but the grip's range is the one that matters,
+/// because a restored fraction the grip cannot reach is a rack the user cannot
+/// drag back to where they left it. That is exactly the "two clamps disagreeing"
+/// that `App::new`'s comment on this property is about.
+use crate::app::sidebar::{SIDEBAR_FRACTION_MAX, SIDEBAR_FRACTION_MIN};
+
 impl Session {
     /// Reads the saved session, or a default one.
     ///
@@ -129,7 +168,95 @@ impl Session {
         let Ok(text) = std::fs::read_to_string(path) else {
             return Session::default();
         };
-        serde_json::from_str(&text).unwrap_or_default()
+        Session::parse(&text)
+    }
+
+    /// The text of a session file, as the rest of the app is allowed to see it.
+    ///
+    /// Split out of `load` so the clamping is testable without a file on disk -
+    /// `load` is this plus finding the path.
+    fn parse(text: &str) -> Session {
+        serde_json::from_str::<Session>(text)
+            .unwrap_or_default()
+            .clamped()
+    }
+
+    /// Drags every remembered number back into the range its consumer can use.
+    ///
+    /// Here, at the one place a session enters the process, rather than at each
+    /// place it is read - because those places are a window builder, a split
+    /// view and a stylesheet in three different modules, and a guard in each is
+    /// three opportunities to add a fourth reader without one. `appearance` has
+    /// clamped the three fields it owns since it was written (see
+    /// `Appearance::resolved`); these are the ones nothing was clamping.
+    ///
+    /// Not paranoia about the user: a state file is machine-written and nobody
+    /// is expected to edit it (see this module's header). It is about the file
+    /// that *isn't* what this version writes - one from a future build, one
+    /// truncated by a full disk, one somebody opened out of curiosity - and
+    /// about what those cost. Bad JSON is already survivable, because it lands
+    /// on the defaults; a file that parses and holds `font_scale: 50` is worse,
+    /// because it opens a window the user cannot read well enough to fix it, run
+    /// after run, with nothing on screen saying why.
+    fn clamped(mut self) -> Session {
+        // 0.0 is not a scale, it is the absence of one: `#[serde(default)]`
+        // leaves it there for any file written before this field existed, and
+        // `App::new` reads exactly that ("> 0.0") as "no saved scale, open at
+        // 1.0". So the sentinel is passed through untouched - clamping it up to
+        // the floor would open every upgraded session at half size - and
+        // anything else that isn't a finite positive number is turned *into* the
+        // sentinel, because a negative or NaN scale is not something a keystroke
+        // saved and "open at 1.0" is a kinder answer to it than 0.5.
+        self.font_scale = if self.font_scale.is_finite() && self.font_scale > 0.0 {
+            self.font_scale.clamp(FONT_SCALE_MIN, FONT_SCALE_MAX)
+        } else {
+            0.0
+        };
+
+        let default = Window::default();
+        self.window.width = window_px(self.window.width, default.width);
+        self.window.height = window_px(self.window.height, default.height);
+        // A fraction of nothing is not a fraction. `App::new`'s own fallback for
+        // a non-positive one is `SIDEBAR_DEFAULT_FRACTION`, which is this same
+        // 0.17 - so agreeing with it here costs nothing and means the two places
+        // cannot drift apart.
+        self.window.sidebar_fraction =
+            if self.window.sidebar_fraction.is_finite() && self.window.sidebar_fraction > 0.0 {
+                self.window
+                    .sidebar_fraction
+                    .clamp(SIDEBAR_FRACTION_MIN, SIDEBAR_FRACTION_MAX)
+            } else {
+                default.sidebar_fraction
+            };
+
+        // And the two numbers each project hands the tiler as geometry.
+        //
+        // These are not idle. `Tiler::restore_layout` clamps the ratio and floors
+        // the count, so a bad file cannot make the *layout* misbehave - but it
+        // clamps with `f64::clamp`, which returns NaN unchanged, and a NaN ratio
+        // multiplied by a width is a master column allocated zero pixels. And it
+        // applies no ceiling to the count, so `usize::MAX` survives the restore,
+        // is ignored by every geometry calculation that re-clamps it against the
+        // live pane count, and is then written back out on quit: a value nothing
+        // honours and nothing corrects, sitting in the file for ever.
+        //
+        // The ceiling is the project's own agent count, because that is what the
+        // runtime bound actually is - `layout::compute` clamps to the number of
+        // panes there are, and `agents` is exactly the number `snapshot_session`
+        // recorded. `max(1)` on it so a project saved with no agents still leaves
+        // a usable 1 rather than an empty range for `clamp` to panic on.
+        for project in &mut self.projects {
+            project.master_ratio = if project.master_ratio.is_finite() {
+                project
+                    .master_ratio
+                    .clamp(crate::layout::MASTER_RATIO_MIN, crate::layout::MASTER_RATIO_MAX)
+            } else {
+                Project::default().master_ratio
+            };
+            project.master_count = project.master_count.clamp(1, project.agents.max(1));
+        }
+
+        self
     }
 
     /// Writes the session, atomically.
@@ -152,6 +279,17 @@ impl Session {
         let temporary = path.with_extension("json.new");
         std::fs::write(&temporary, text)?;
         std::fs::rename(&temporary, &path)
+    }
+}
+
+/// One window dimension, as GTK will take it: the saved pixels if they are
+/// pixels at all, `default` if they aren't, and never more than any display can
+/// be asked for. See `WINDOW_MAX_PX` for both ends.
+fn window_px(saved: i32, default: i32) -> i32 {
+    if saved < 1 {
+        default
+    } else {
+        saved.min(WINDOW_MAX_PX)
     }
 }
 
@@ -234,11 +372,124 @@ mod tests {
     /// A state file from an older version - or a corrupted one - must not stop
     /// the window opening. It is not the user's mistake and there is nothing
     /// they could do about it.
+    ///
+    /// Through `parse` rather than `serde_json` directly, because `parse` is what
+    /// `load` calls: it also says the defaults survive their own clamping, which
+    /// they have to, or every window with no session would open somewhere else.
     #[test]
     fn rubbish_reads_back_as_defaults() {
         for text in ["", "{", "null", "[]", r#"{"projects":"not a list"}"#] {
-            let parsed: Session = serde_json::from_str(text).unwrap_or_default();
-            assert_eq!(parsed, Session::default(), "accepted {text:?}");
+            assert_eq!(
+                Session::parse(text),
+                Session::default(),
+                "accepted {text:?}"
+            );
+        }
+    }
+
+    /// Anything the app itself wrote must come back untouched. A clamp that moved
+    /// a legitimate value would be a window that quietly forgot its own size.
+    #[test]
+    fn a_session_the_app_wrote_is_not_touched_by_the_clamps() {
+        let session = a_session();
+        let text = serde_json::to_string(&session).expect("serialises");
+        assert_eq!(Session::parse(&text), session);
+    }
+
+    /// A file that *parses* and holds nonsense is the case bad JSON never
+    /// reaches. Bad JSON lands on the defaults; this lands on the widgets - on
+    /// `default_width`, on a libadwaita property with a documented range, and on
+    /// a stylesheet - and every one of them takes what it is given.
+    #[test]
+    fn a_session_full_of_absurd_values_loads_as_something_usable() {
+        let absurd = r#"{
+            "font_scale": 50,
+            "window": {
+                "width": -7,
+                "height": -2147483648,
+                "sidebar_fraction": 5.0,
+                "sidebar_shown": true
+            }
+        }"#;
+        let session = Session::parse(absurd);
+        let default = Window::default();
+
+        assert_eq!(
+            session.font_scale, FONT_SCALE_MAX,
+            "50em of text is a window nobody can read the menus of",
+        );
+        assert_eq!(
+            session.window.width, default.width,
+            "a negative width is not a small window, it is a GTK critical",
+        );
+        assert_eq!(session.window.height, default.height);
+        assert_eq!(
+            session.window.sidebar_fraction, SIDEBAR_FRACTION_MAX,
+            "a fraction of 5 is a rack five windows wide",
+        );
+        assert!(
+            session.window.sidebar_shown,
+            "the fields that were fine are left exactly as they were",
+        );
+    }
+
+    /// The other end of both ranges, and the sizes that are legal for the
+    /// property but not for any display.
+    #[test]
+    fn the_far_ends_of_every_range_are_brought_back_in() {
+        let squashed =
+            Session::parse(r#"{"font_scale":0.01,"window":{"sidebar_fraction":0.0001}}"#);
+        assert_eq!(squashed.font_scale, FONT_SCALE_MIN);
+        assert_eq!(squashed.window.sidebar_fraction, SIDEBAR_FRACTION_MIN);
+
+        let enormous = Session::parse(r#"{"window":{"width":2147483647,"height":100000}}"#);
+        assert_eq!(enormous.window.width, WINDOW_MAX_PX);
+        assert_eq!(enormous.window.height, WINDOW_MAX_PX);
+    }
+
+    /// The one value that must *not* be dragged into its range: 0.0 is the
+    /// absence of a saved scale, not a scale of zero, and every session file
+    /// written before the field existed says exactly that. Clamping it up to the
+    /// floor would open all of them at half size.
+    ///
+    /// The values that can't be spelled in JSON are checked through `clamped`
+    /// directly - `serde_json` won't write a NaN, but a hand-made file, a future
+    /// field or an arithmetic accident upstream can still produce one, and a NaN
+    /// is the value `clamp` famously returns unchanged.
+    #[test]
+    fn a_font_scale_nobody_saved_stays_unsaved() {
+        assert_eq!(
+            Session::parse(r#"{"projects":[]}"#).font_scale,
+            0.0,
+            "a file with no font_scale must not gain one",
+        );
+
+        for scale in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let session = Session {
+                font_scale: scale,
+                ..Session::default()
+            }
+            .clamped();
+            assert_eq!(
+                session.font_scale, 0.0,
+                "{scale} is not a scale a keystroke saved; it should read as none at all",
+            );
+        }
+
+        for fraction in [f64::NAN, f64::INFINITY, -2.0, 0.0] {
+            let session = Session {
+                window: Window {
+                    sidebar_fraction: fraction,
+                    ..Window::default()
+                },
+                ..Session::default()
+            }
+            .clamped();
+            assert_eq!(
+                session.window.sidebar_fraction,
+                Window::default().sidebar_fraction,
+                "{fraction} of a window is not a rack width",
+            );
         }
     }
 
@@ -259,4 +510,43 @@ mod tests {
         );
         assert_eq!(session.window, Window::default());
     }
+    /// The two numbers a project hands the tiler, from a file that means harm.
+    ///
+    /// NaN is the one worth spelling out: `Tiler::restore_layout` already clamps
+    /// the ratio, but `f64::clamp` returns NaN unchanged and `layout::master_stack`
+    /// then multiplies a width by it and casts - which saturates to zero, i.e. a
+    /// master column allocated no pixels at all. And `usize::MAX` for the count is
+    /// the value that would otherwise round-trip through the file for ever, since
+    /// every geometry path re-clamps it against the live pane count instead of
+    /// correcting it.
+    #[test]
+    fn a_projects_geometry_is_clamped_out_of_the_file() {
+        let mut session = a_session();
+        session.projects[0].master_ratio = f64::NAN;
+        session.projects[0].master_count = usize::MAX;
+        session.projects[0].agents = 2;
+        let fixed = session.clamped();
+
+        assert_eq!(
+            fixed.projects[0].master_ratio,
+            Project::default().master_ratio,
+            "a NaN ratio has to become a real one, not stay NaN through `clamp`",
+        );
+        assert_eq!(
+            fixed.projects[0].master_count, 2,
+            "the count is held to the agents the project actually has",
+        );
+
+        let mut extreme = a_session();
+        extreme.projects[0].master_ratio = 40.0;
+        extreme.projects[0].master_count = 0;
+        extreme.projects[0].agents = 0;
+        let fixed = extreme.clamped();
+        assert_eq!(fixed.projects[0].master_ratio, crate::layout::MASTER_RATIO_MAX);
+        assert_eq!(
+            fixed.projects[0].master_count, 1,
+            "a project saved with no agents still leaves a usable count",
+        );
+    }
+
 }

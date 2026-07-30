@@ -32,6 +32,24 @@ pub(super) const SIDEBAR_GRIP_PX: i32 = 5;
 pub(super) const SIDEBAR_MIN_PX: f64 = 170.0;
 pub(super) const SIDEBAR_MAX_PX: f64 = 560.0;
 
+/// And the same bounds as a share of the window, which is the unit the split view
+/// actually takes and the unit the session remembers.
+///
+/// `pub(crate)` for the session: `session::Session::clamped` holds a remembered
+/// fraction to this pair, so a file cannot reopen the window with a rack that
+/// takes almost all of it. Named here rather than restated there because this is
+/// the range a person dragging the grip is held to, and a second copy of it would
+/// eventually be a second answer.
+pub(crate) const SIDEBAR_FRACTION_MIN: f64 = 0.1;
+pub(crate) const SIDEBAR_FRACTION_MAX: f64 = 0.5;
+
+/// Where the pointer is horizontally, in the window surface's own coordinates.
+///
+/// Surface coordinates rather than widget ones because the widget being dragged
+/// is the edge being moved - see `build_sidebar_grip`. The surface stays put.
+fn pointer_x(gesture: &gtk4::GestureDrag) -> Option<f64> {
+    gesture.current_event()?.position().map(|(x, _)| x)
+}
 
 /// What share of a `total`-wide split view the rack should take, given the width
 /// it had when the drag started and how far the pointer has moved since.
@@ -45,20 +63,24 @@ pub(super) const SIDEBAR_MAX_PX: f64 = 560.0;
 /// being nonsense on a window narrower than the range itself - 560px of rack in
 /// a 700px window is not a sidebar, it is the whole application - and the panes
 /// are what this is supposed to be sharing with.
-/// Where the pointer is horizontally, in the window surface's own coordinates.
-///
-/// Surface coordinates rather than widget ones because the widget being dragged
-/// is the edge being moved - see `build_sidebar_grip`. The surface stays put.
-fn pointer_x(gesture: &gtk4::GestureDrag) -> Option<f64> {
-    gesture.current_event()?.position().map(|(x, _)| x)
-}
-
 fn sidebar_fraction(start_width: f64, offset_x: f64, total: f64) -> Option<f64> {
     if total <= 0.0 {
         return None;
     }
     let wanted = (start_width + offset_x).clamp(SIDEBAR_MIN_PX, SIDEBAR_MAX_PX);
-    Some((wanted / total).clamp(0.1, 0.5))
+    Some((wanted / total).clamp(SIDEBAR_FRACTION_MIN, SIDEBAR_FRACTION_MAX))
+}
+
+/// Whether a project that has asked for the user should be *shown* as asking.
+///
+/// One function rather than the same comparison written out at each site, and the
+/// sites are the point: `flash_row` asks it, and asks it again from an idle a
+/// main-loop turn later, while `App::show_project` answers the same question the
+/// other way round by clearing the class the moment a project becomes the active
+/// one. Three places, one condition - if they can drift apart, the row on screen
+/// ends up lit and nothing is left to unlight it.
+fn wants_attention(active: Option<ProjectId>, id: ProjectId) -> bool {
+    active != Some(id)
 }
 
 /// Takes the insertion line off a row - on leaving it, and on dropping onto it.
@@ -337,7 +359,13 @@ impl App {
             .spacing(3)
             .halign(gtk4::Align::End)
             .valign(gtk4::Align::Center)
-            .css_classes(["sidebar-row-agents"])
+            // No CSS class. It carried `.sidebar-row-agents` for a rule that was
+            // never written, and there is nothing for that rule to say: the only
+            // thing this box decides is its spacing, and GTK4 dropped
+            // `-GtkBox-spacing`, so spacing cannot come from the stylesheet at
+            // all. A class with no rule is the same invisible-in-both-directions
+            // problem `.sidebar-header` was fixed for, so it goes rather than
+            // acquiring a rule that pretends to own something it can't.
             .build();
 
         let close = gtk4::Button::builder()
@@ -454,11 +482,10 @@ impl App {
     /// what they can already see is just noise, and noise is what makes people
     /// stop reading notifications.
     pub(super) fn flash_row(&self, id: ProjectId) {
-        if self.0.store.borrow().active() == Some(id) {
+        if !wants_attention(self.0.store.borrow().active(), id) {
             return;
         }
         let Some(row) = self.row_for(id) else { return };
-        let toggle = self.0.sidebar_toggle.clone();
 
         // A CSS animation restarts only when the class is *newly* added, so
         // re-adding one the widget already carries would pulse nothing - which
@@ -466,15 +493,50 @@ impl App {
         // first is still waiting. Dropping the class and restoring it once GTK
         // has had a frame to notice it gone replays the pulses from the top.
         row.remove_css_class(ATTENTION_CLASS);
-        toggle.remove_css_class(ATTENTION_CLASS);
+        self.0.sidebar_toggle.remove_css_class(ATTENTION_CLASS);
+
+        // The condition is asked again inside the idle, because between the two
+        // the user gets a turn. An agent rings in a background project and, in
+        // that same turn of the main loop, the user clicks that project's row:
+        // `show_project` takes the class off - it is the choke point for "the
+        // user has now seen it" - and then this idle puts it back, leaving the
+        // project *on screen* flagged as wanting attention, with nothing left to
+        // clear it until the next switch or the next bell. One loop iteration
+        // sounds too narrow to matter, but idles run at default priority and
+        // this loop spends its life pumping agent output, so the gap is as wide
+        // as whatever else is queued.
+        //
+        // Weak references for the ordinary reason as well: a row whose project
+        // was closed in that same turn is a row this idle would otherwise keep
+        // alive purely in order to restyle it.
+        let inner = Rc::downgrade(&self.0);
+        let row = row.downgrade();
         glib::idle_add_local_once(move || {
-            row.add_css_class(ATTENTION_CLASS);
-            toggle.add_css_class(ATTENTION_CLASS);
+            let Some(inner) = inner.upgrade() else { return };
+            let app = App(inner);
+            if wants_attention(app.0.store.borrow().active(), id)
+                && let Some(row) = row.upgrade()
+            {
+                row.add_css_class(ATTENTION_CLASS);
+            }
+            // Whatever the answer was for this row, the toggle was cleared
+            // above and it speaks for every project at once - so it is put back
+            // from whoever is actually still asking, which may be nobody and may
+            // be some other project entirely.
+            app.refresh_attention();
         });
     }
 
-    /// The sidebar toggle speaks for every project at once, so it goes quiet
-    /// only once the *last* one still asking has been seen - or closed.
+    /// The sidebar toggle speaks for every project at once, so it is lit exactly
+    /// when at least one of them is still asking - and goes quiet only once the
+    /// *last* one has been seen, or closed.
+    ///
+    /// Derived from the rows rather than tracked alongside them, so the toggle
+    /// cannot come to disagree with the rack it summarises. That it *adds* the
+    /// class as well as removing it is what `flash_row` leans on: the animation
+    /// restart there takes the class off the toggle before it is known whether
+    /// the row it was called for still wants it, and if that row turns out not
+    /// to, some other row may still.
     pub(super) fn refresh_attention(&self) {
         let still_waiting = self
             .0
@@ -482,9 +544,7 @@ impl App {
             .borrow()
             .iter()
             .any(|v| v.row.has_css_class(ATTENTION_CLASS));
-        if !still_waiting {
-            self.0.sidebar_toggle.remove_css_class(ATTENTION_CLASS);
-        }
+        set_class(&self.0.sidebar_toggle, ATTENTION_CLASS, still_waiting);
     }
 
     /// Writes a project's agent tally onto its sidebar row.
@@ -584,5 +644,37 @@ mod tests {
     #[test]
     fn an_unallocated_split_view_is_left_alone() {
         assert_eq!(sidebar_fraction(300.0, 40.0, 0.0), None);
+    }
+
+    /// The condition both ends of the flash have to agree on, pinned at both
+    /// ends of the race it exists for: an agent rings in a background project,
+    /// and by the time the queued idle runs that project may be the one on
+    /// screen. Answered from the store's `active()`, which is what
+    /// `App::show_project` has just written - so the idle asking again is the
+    /// idle finding out that the user got there first.
+    #[test]
+    fn a_project_the_user_just_opened_no_longer_wants_attention() {
+        let mut store = crate::model::ProjectStore::new();
+        let work = store.add("/tmp/work", "work".to_string(), "folder-symbolic");
+        let other = store.add("/tmp/other", "other".to_string(), "folder-symbolic");
+
+        // `add` leaves the project it added active, so `other` is on screen.
+        assert_eq!(store.active(), Some(other));
+        assert!(
+            wants_attention(store.active(), work),
+            "a background project still wants its row lit",
+        );
+        assert!(
+            !wants_attention(store.active(), other),
+            "the project on screen never does - the agent is in front of the user",
+        );
+
+        // And the switch the race turns on: the row was flashed while `work` was
+        // in the background, and by the time the idle runs it is not.
+        store.set_active(work);
+        assert!(
+            !wants_attention(store.active(), work),
+            "opening a project must not leave it flagged as wanting to be opened",
+        );
     }
 }

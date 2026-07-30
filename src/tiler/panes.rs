@@ -313,6 +313,7 @@ impl Tiler {
         if !removed {
             return;
         }
+        settle_input_method(&pane.frame);
         pane.frame.unparent();
 
         let len = self.imp().panes.borrow().len();
@@ -356,6 +357,84 @@ impl Tiler {
         fade_out(&pane.frame);
         pane.hangup();
     }
+}
+
+/// Lets GTK's Wayland input-method plumbing finish coming up, before a pane's
+/// terminal - which may be the widget it believes the keyboard is in - is
+/// destroyed out from under it.
+///
+/// This works around a use-after-free in GTK itself
+/// (`gtk/gtkimcontextwayland.c`, read at 4.22.4), which a tiler trips far more
+/// easily than an ordinary app does. GTK keeps one `current` pointer per
+/// display, naming the input-method context that holds the text-input focus.
+/// `focus_in` writes it unconditionally; `focus_out` clears it only once the
+/// `zwp_text_input_v3` object exists - and that object is bound lazily, one
+/// Wayland round trip after the very first `focus_in` asks for the registry. A
+/// terminal focused inside that round trip and destroyed before it lands
+/// therefore leaves `current` pointing at freed memory, and the first
+/// text-input event the compositor sends afterwards dereferences it: three GTK
+/// criticals (`GTK_IS_WIDGET`, then `G_IS_OBJECT`, then `GDK_IS_WAYLAND_DISPLAY`
+/// failing in turn) and then a segfault in `wl_proxy_get_version`, reached from
+/// `wl_display_dispatch_queue_pending` with nothing of ours on the stack.
+///
+/// Two agents that exit the instant they are started is exactly that shape:
+/// taking the first pane down hands the keyboard to the second (the `set_focus`
+/// at the end of `remove_pane`), which is the first `focus_in` this process ever
+/// performs, and the second pane is gone again before the round trip completes.
+///
+/// A `sync` is that round trip, forced early. Unparenting is GTK's one chance to
+/// let go of the pane's context - afterwards the context has no widget and
+/// `focus_out` gives up for a second, unrelated reason - and it takes that
+/// chance only if the text-input object is already bound. Doing it before every
+/// removal rather than once keeps the guarantee whichever order a focus and an
+/// exit happen to arrive in, and it costs a sub-millisecond round trip on an
+/// operation that already re-tiles a whole group. A compositor with no
+/// text-input manager binds nothing and sends no such events either, so it was
+/// never at risk; the sync is simply wasted there, and on X11.
+///
+/// `pub(super)` because `remove_pane` is not the only way a pane leaves the
+/// widget tree: `imp::Tiler::dispose` unparents all of them at once when a
+/// project is closed or the window goes down, and that path needs the same round
+/// trip. One helper called from both, rather than the sync written out twice and
+/// only one copy maintained.
+pub(super) fn settle_input_method(frame: &gtk4::Frame) {
+    if let Some(display) = display_to_settle(frame) {
+        display.sync();
+    }
+}
+
+/// The display `settle_input_method` should round-trip, or `None` when there
+/// isn't one to round-trip to.
+///
+/// Deliberately not `frame.display()`, which is the natural spelling and the one
+/// that cannot be used here. `gtk_widget_get_display` answers with the root's
+/// display, or with the default display when the widget has no root, or with
+/// NULL when there is no default display either - and the Rust binding feeds
+/// that straight into `from_glib_none`, whose null check is a `debug_assert`. So
+/// the display-less case panics in a debug build and wraps a `Display` around a
+/// null pointer in a release one. Trading a segfault for a segfault is not a fix,
+/// and this function exists only to prevent one.
+///
+/// `Tiler::dispose` is what makes that reachable. `remove_pane` only ever runs
+/// with a live window on screen, so it could ask the frame directly and get away
+/// with it; dispose is also reached from widget teardown at process exit, where
+/// the display can already be closed or gone. So this walks the same path GTK
+/// does - root first, default second - and returns the NULL as a `None` instead
+/// of asserting on it.
+///
+/// A closed display is refused for a different reason: `sync` on one is a
+/// round trip on a `wl_display` GDK is in the middle of tearing down, and there
+/// is nothing left to protect anyway. The crash this guards against is a
+/// text-input event *arriving later*, and a closed display delivers no more
+/// events.
+fn display_to_settle(frame: &gtk4::Frame) -> Option<gdk::Display> {
+    // Spelled out because `gtk4::Root` extends `Widget`, so both preludes in
+    // scope here offer a `display` on it and neither wins.
+    let display = frame
+        .root()
+        .map(|root| gtk4::prelude::RootExt::display(&root))
+        .or_else(gdk::Display::default)?;
+    (!display.is_closed()).then_some(display)
 }
 
 /// How long a pane takes to arrive, and to leave. Short enough not to be a
@@ -426,5 +505,98 @@ pub struct Tally {
 impl Tally {
     pub fn total(self) -> usize {
         self.working + self.waiting + self.other
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::gtk_test;
+
+    /// `remove_pane` forces a display round trip on its way to unparenting a
+    /// pane - see `settle_input_method` for what that is buying - and it asks
+    /// the departing frame itself for the display to sync. So the round trip has
+    /// to be reachable from a frame in exactly that position, and this pins the
+    /// two properties the workaround rests on: a widget answers with a display
+    /// whether or not it is rooted (GTK falls back to the default one), and
+    /// syncing is safe to repeat.
+    ///
+    /// Both matter because the obvious spelling is `frame.root().unwrap()`, and
+    /// a frame on its way out of the tree is precisely the case with no root, so
+    /// that version would panic on every pane the app ever closes and on every
+    /// pane that dies before its group was ever shown. Which, since panes are
+    /// removed by their agent exiting, is the same startup race this whole
+    /// workaround exists for.
+    ///
+    /// It cannot go the whole way and reproduce the crash: that needs a
+    /// compositor holding the keyboard focus and a real `zwp_text_input_v3`
+    /// round trip, neither of which a unit test has.
+    #[test]
+    fn a_pane_on_its_way_out_can_still_reach_a_display_to_sync() {
+        gtk_test(|| {
+            let tiler = Tiler::new("/tmp".to_string());
+            let frame = gtk4::Frame::new(None);
+
+            // Never parented - a half-built pane, or one already let go of.
+            assert_eq!(
+                Some(frame.display()),
+                gdk::Display::default(),
+                "an unrooted frame still names the display to round-trip",
+            );
+            settle_input_method(&frame);
+
+            // Parented to its group, which is where `remove_pane` calls it from,
+            // one line before `unparent`.
+            frame.set_parent(&tiler);
+            settle_input_method(&frame);
+
+            // And after, which is the state `Tiler::dispose` leaves panes in.
+            frame.unparent();
+            settle_input_method(&frame);
+        });
+    }
+
+    /// `display_to_settle` replaced `frame.display()` so that a dispose running
+    /// with no display left does nothing instead of tripping a `debug_assert`
+    /// inside the binding. That swap is only correct if it still finds the same
+    /// display in every case where there *is* one - a guard that quietly answered
+    /// `None` for a live window would turn the segfault workaround off and leave
+    /// no trace of having done it.
+    ///
+    /// The no-display case itself is deliberately not tested: there is no way to
+    /// take the default display away from one test without taking it away from
+    /// the whole binary, and GTK's own null return is what the guard is written
+    /// against, not something a test can manufacture.
+    #[test]
+    fn the_display_guard_agrees_with_gtk_wherever_there_is_a_display() {
+        gtk_test(|| {
+            let tiler = Tiler::new("/tmp".to_string());
+            let frame = gtk4::Frame::new(None);
+
+            // The same three positions the test above walks, since those are the
+            // ones `remove_pane` and `dispose` between them actually call from.
+            let agrees = |position: &str| {
+                assert_eq!(
+                    display_to_settle(&frame),
+                    Some(frame.display()),
+                    "the guard dropped a display GTK was willing to name \
+                     ({position}); the round trip would silently stop happening",
+                );
+            };
+
+            agrees("never parented");
+            frame.set_parent(&tiler);
+            agrees("parented to its group");
+            frame.unparent();
+            agrees("unparented again");
+
+            // And the `is_closed` filter is not what produced those: an open
+            // display has to survive it, or the guard would be refusing every
+            // display there is and the assertions above would be vacuous.
+            assert!(
+                !frame.display().is_closed(),
+                "the display a test runs against should be open",
+            );
+        });
     }
 }

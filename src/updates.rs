@@ -54,9 +54,18 @@ pub struct State {
     pub checking: bool,
 }
 
+/// A slot for one of this module's outward-facing callbacks.
+///
+/// A name rather than the type written out twice, because written out it is
+/// `RefCell<Option<Box<dyn Fn(T)>>>` and the three layers all mean something:
+/// `RefCell` because it is installed after construction, `Option` because until
+/// then there is nobody to tell, and `Box<dyn>` because the caller's closure is
+/// the caller's business.
+type Callback<T> = RefCell<Option<Box<dyn Fn(T)>>>;
+
 struct Inner {
     /// Told the state whenever it changes - see `Updates::set_state_callback`.
-    on_state: RefCell<Option<Box<dyn Fn(State)>>>,
+    on_state: Callback<State>,
     /// What the last *conclusive* check found - the single source of truth
     /// behind `notify`, so every rendering of this fact is painted from the
     /// same one and they can't drift apart.
@@ -69,7 +78,7 @@ struct Inner {
     /// Handed the shell command that performs the update. The caller runs it in
     /// a pane and restarts the app if it succeeds - neither of which is this
     /// module's business, and both of which need the project stack.
-    on_install: RefCell<Option<Box<dyn Fn(String)>>>,
+    on_install: Callback<String>,
 }
 
 /// The update button and everything behind it.

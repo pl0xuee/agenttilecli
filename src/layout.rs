@@ -1,3 +1,18 @@
+/// How far the master column is allowed to be dragged, as a share of the width.
+///
+/// Named here because `layout` is what actually divides the space, and because
+/// the number was previously a bare `0.1, 0.9` written out at four separate
+/// sites - the two keybindings, the seam drag, and the restore path - plus a
+/// fifth copy in `session`, which held a *saved* ratio to a range it had guessed
+/// at. Five copies of one decision is four chances for it to stop being one
+/// decision.
+///
+/// Not zero and one, because either end is a master column with no width or a
+/// stack with none: a pane allocated nothing still exists, still holds a pty,
+/// and cannot be got back to without knowing the keybinding that widens it.
+pub(crate) const MASTER_RATIO_MIN: f64 = 0.1;
+pub(crate) const MASTER_RATIO_MAX: f64 = 0.9;
+
 /// Half the space between two neighbouring tiles.
 ///
 /// `shrink` insets every side of every tile by this, so two tiles sharing a
@@ -109,7 +124,7 @@ fn master_stack(n: usize, master_count: usize, master_ratio: f64, width: i32, he
     let master_width = if stack_count == 0 {
         width
     } else {
-        ((width as f64) * master_ratio.clamp(0.1, 0.9)) as i32
+        ((width as f64) * master_ratio.clamp(MASTER_RATIO_MIN, MASTER_RATIO_MAX)) as i32
     };
     let stack_width = width - master_width;
 

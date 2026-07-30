@@ -125,9 +125,32 @@ pub fn settings_json(hook_bin: &str, bell_hook: &str) -> String {
 
     let mut hooks = serde_json::Map::new();
     for event in Event::ALL {
-        // Quoted, because a great many people have a space in their home
-        // directory, and this is a shell command line.
-        let mut commands = vec![command(format!("\"{hook_bin}\" --hook {}", event.name()))];
+        // Single-quoted through `update::sh_quote`, because this string is a
+        // *shell command line* - claude hands it to `sh -c` - and the path in it
+        // is whatever prefix somebody installed the binary under.
+        //
+        // Double quotes were enough for the space in `/home/a b/` and for
+        // nothing else. Inside them `sh` still expands `$`, still runs a
+        // backtick, and still eats a backslash. So an install under
+        // `/home/dev/src/agent$tile/target/release/agenttilecli` loses `$tile`
+        // to an unset variable, all six hooks fail to exec a path that doesn't
+        // exist, claude discards their stderr, and every pane in the window sits
+        // on "starting…" for the entire session with nothing anywhere saying
+        // why. That is the same silent failure the escaping test below is about,
+        // arriving by a different route: claude runs a mangled command happily,
+        // and the pane simply never reports anything. A directory whose name
+        // contains a backtick or `$(…)` would be worse than broken - it would
+        // *execute*, six times per agent turn.
+        //
+        // Single quotes suspend all of it, and `sh_quote` handles the one
+        // character they cannot contain. `pane` already quotes the `--settings`
+        // path beside this one the same way; this is the same launch and the
+        // same problem.
+        let mut commands = vec![command(format!(
+            "{} --hook {}",
+            crate::update::sh_quote(hook_bin),
+            event.name(),
+        ))];
         if matches!(event, Event::Stop | Event::Notification) {
             commands.push(command(bell_hook.to_string()));
         }
@@ -254,18 +277,91 @@ mod tests {
         );
     }
 
-    /// A path with a space in it is a path a great many people have.
+    /// A path with a space in it is a path a great many people have - and a path
+    /// with a `$`, a backtick or a quote in it is a path somebody has, because
+    /// an install prefix is a directory name and a directory name can be
+    /// anything.
+    ///
+    /// The command this ends up in is a *shell* command line, so the whole
+    /// question is what `sh` does with the path once it is inside one. Hence a
+    /// real `sh` and a real executable rather than assertions about quoting
+    /// rules: a `$` that expands to nothing produces a path that doesn't exist,
+    /// all six hooks fail, claude swallows their stderr, and the only visible
+    /// symptom is every pane in the window sitting on "starting…" forever. That
+    /// is not a failure anyone traces back to a pair of quotes by reading.
+    ///
+    /// The second half asserts the *old* form is still broken, so that anyone
+    /// who "simplifies" this back to `"{hook_bin}"` gets a red test rather than
+    /// a silent window.
     #[test]
-    fn a_binary_path_with_spaces_stays_one_argument() {
-        let json = settings_json("/home/a b/.local/bin/agenttilecli", "true");
+    fn a_binary_path_the_shell_would_mangle_still_runs_one_binary() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::Command;
+
+        // Every character that has ever broken this: a space, a `$` that would
+        // expand to nothing, a backtick that would *run* what it encloses, and
+        // the single quote `sh_quote` has to escape by hand.
+        let dir = std::env::temp_dir().join(format!(
+            "agenttilecli hooks $tile `x` it's {}",
+            std::process::id(),
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+
+        let binary = dir.join("agenttilecli");
+        let arguments = dir.join("arguments");
+        std::fs::write(
+            &binary,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\n",
+                crate::update::sh_quote(&arguments.to_string_lossy()),
+            ),
+        )
+        .expect("write");
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+        let path = binary.to_string_lossy().into_owned();
+        let json = settings_json(&path, "true");
+
+        // Valid JSON first - the payload is a shell command inside a JSON string
+        // inside a JSON document, and the quoting added above is one more layer
+        // for the encoder to get right.
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
         let command = parsed["hooks"]["Stop"][0]["hooks"][0]["command"]
             .as_str()
             .expect("a command");
-        assert!(
-            command.starts_with(r#""/home/a b/.local/bin/agenttilecli""#),
-            "path not quoted: {command}",
+
+        let status = Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .status()
+            .expect("sh runs");
+        assert!(status.success(), "sh could not run the hook: {command}");
+        let ran_with = std::fs::read_to_string(&arguments)
+            .expect("the hook binary never ran - the path was mangled");
+        assert_eq!(
+            ran_with.lines().collect::<Vec<_>>(),
+            ["--hook", "Stop"],
+            "the hook ran, but not as one binary with two arguments",
         );
+
+        // And the form this replaced, on the same path: double quotes leave `$`
+        // and the backtick live, so `sh` builds a different path (and runs
+        // whatever the backtick encloses on the way) and execs nothing.
+        let _ = std::fs::remove_file(&arguments);
+        let double_quoted = format!("\"{path}\" --hook Stop");
+        let status = Command::new("sh")
+            .arg("-c")
+            .arg(&double_quoted)
+            .status()
+            .expect("sh runs");
+        assert!(
+            !status.success() && !arguments.exists(),
+            "double quotes turned out to be enough for {double_quoted} - if that \
+             is really true, this test and the quoting it guards can go",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn hooks_json(bell: &str) -> String {

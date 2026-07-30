@@ -34,6 +34,10 @@ pub(crate) struct GridDragState {
     pub(super) ratio_b: f64,
     pub(super) px_a: f64,
     pub(super) px_b: f64,
+    /// Which edition of the ratio vectors the four numbers above were measured
+    /// against - see `TilerLayout::grid_generation`. A drag is only meaningful
+    /// while this still matches; `drag_update` abandons it when it doesn't.
+    pub(super) generation: u64,
 }
 
 // ---------------------------------------------------------------------
@@ -67,6 +71,21 @@ mod layout_imp {
         pub col_ratios: RefCell<Vec<Vec<f64>>>,
         pub grid_shape_n: Cell<usize>,
         pub grid_shape_dims: Cell<(usize, usize)>,
+        /// Bumped every time the two vectors above are rebuilt, so anything
+        /// holding numbers measured out of them can tell whether it is still
+        /// holding numbers about the grid that exists.
+        ///
+        /// A seam drag is the one thing that does. It reads a weight and a pixel
+        /// extent at drag-begin and applies the pointer's cumulative offset to
+        /// them on every motion event, which is only arithmetic about the grid it
+        /// measured - and `ensure_grid_ratios` can replace that grid between two
+        /// of those events without anything telling the gesture. The index bounds
+        /// check in `resize::write_seam` catches the case where the new grid is a
+        /// different *size*, but a rebuild that lands on the same (cols, rows)
+        /// leaves every index valid and only the values wrong, so bounds cannot
+        /// see it. This can: it counts rebuilds rather than describing shapes, so
+        /// it is exactly as sensitive as the thing it is guarding.
+        pub grid_generation: Cell<u64>,
     }
 
     impl Default for TilerLayout {
@@ -80,6 +99,7 @@ mod layout_imp {
                 col_ratios: RefCell::new(Vec::new()),
                 grid_shape_n: Cell::new(usize::MAX),
                 grid_shape_dims: Cell::new((0, 0)),
+                grid_generation: Cell::new(0),
             }
         }
     }
@@ -108,6 +128,13 @@ mod layout_imp {
         /// becoming a 1x4 has nowhere to put the four column weights it was
         /// holding. Re-orienting is discarding them either way, and cells at
         /// twice the aspect ratio they should be is the worse of the two.
+        ///
+        /// Every rebuild bumps `grid_generation`, because throwing the ratios away
+        /// also invalidates anything that had measured itself against them - which
+        /// in practice means a seam drag the user still has hold of. This method is
+        /// reached from `allocate`, so it runs *during* drags, and a drag that went
+        /// on applying pointer offsets to a grid this replaced would write
+        /// proportions for an arrangement that no longer exists.
         // `pub(crate)` for the tests in `tiler/mod.rs`, which drive it directly:
         // reaching it through `allocate` would mean real panes, and a pane is a
         // PTY with a shell in it.
@@ -126,6 +153,13 @@ mod layout_imp {
             *self.col_ratios.borrow_mut() = vec![vec![1.0; cols]; rows];
             self.grid_shape_n.set(n);
             self.grid_shape_dims.set(shape);
+            // Note where this sits: past the early return, so it counts the
+            // rebuilds that actually happened rather than the calls. Every
+            // resize allocation calls this method and most of them change
+            // nothing, and a generation that ticked on those would cancel every
+            // seam drag the moment the window moved a pixel - which is most of
+            // them, since dragging a seam *is* an allocation.
+            self.grid_generation.set(self.grid_generation.get() + 1);
         }
     }
 
