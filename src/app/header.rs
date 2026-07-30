@@ -95,7 +95,13 @@ impl App {
         menu.append(Some("About AgentTileCLI"), Some("win.about"));
         let menu_button = gtk4::MenuButton::builder()
             .icon_name("open-menu-symbolic")
-            .css_classes(["app-menu", "header-action"])
+            // `flat` because this is the one control in the strip that is a
+            // `MenuButton`, which renders as `menubutton > button` - so
+            // libadwaita styles a node inside it that the app's own rules have
+            // to reach explicitly (see `.header-action` in style.css). Flat
+            // turns off the theme's raised treatment of that inner button, and
+            // the stylesheet then paints it like every other header control.
+            .css_classes(["app-menu", "header-action", "flat"])
             .valign(gtk4::Align::Center)
             .can_focus(false)
             .menu_model(&menu)
@@ -340,7 +346,13 @@ impl App {
         buttons.append(&agent);
         buttons.append(&hint);
 
+        // The floor, which this page has to paint for itself: it is the tiler's
+        // sibling in the project's stack rather than its child, and the floor is
+        // now painted per-region rather than by one fill behind everything (see
+        // `appearance::content_css`). Without this the empty state is a window
+        // with a desktop showing through it.
         adw::StatusPage::builder()
+            .css_classes(["workspace-floor"])
             .icon_name("tab-new-symbolic")
             .title("No agents running")
             .description(

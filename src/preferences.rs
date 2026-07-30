@@ -38,9 +38,10 @@ pub fn present(app: &App) {
     let group = adw::PreferencesGroup::builder()
         .title("Appearance")
         .description(
-            "The window's chrome is translucent; its panes are not. \
-             Raise the window's opacity if a bright wallpaper is showing through \
-             more than you want.",
+            "The window's chrome is translucent and its panes are solid, until you \
+             say otherwise. Raise either opacity if a bright wallpaper is showing \
+             through more than you want - and expect to want the panes higher than \
+             the chrome, since that is the surface with text on it.",
         )
         .build();
 

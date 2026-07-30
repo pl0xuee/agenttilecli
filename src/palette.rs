@@ -74,15 +74,21 @@ impl Rgb {
         self.to_rgba_alpha(1.0)
     }
 
-    /// The same colour at `alpha`, for the one place in the app that needs a
-    /// translucent one: the terminal's own background.
+    /// The same colour at `alpha`, for the two things in a pane that track its
+    /// surface: the terminal's background and ANSI 0.
     ///
-    /// VTE takes an alpha here and honours it, which is the only route a pane
-    /// has to being see-through - GTK CSS never reaches the surface the terminal
-    /// clears for itself. Nothing else takes this: a translucent *foreground*,
-    /// cursor or selection is text you can see the desk through, which is not a
-    /// setting anyone wants and is trivially reachable by mistake if this
-    /// defaulted the other way.
+    /// This comment used to say VTE takes an alpha here and honours it, and that
+    /// it was the only route a pane had to being see-through. Neither was true.
+    /// VTE's GTK4 backend discards the alpha and clears its surface opaquely, so
+    /// the setting had no effect at all until `pane::apply_theme` started telling
+    /// it not to clear and the pane's fill moved into CSS. The alpha is still
+    /// handed over - it is what a future VTE that honours it would use, and it is
+    /// what ANSI 0 needs so an explicitly-painted "black" cell matches the glass
+    /// around it.
+    ///
+    /// Nothing else takes this: a translucent *foreground*, cursor or selection is
+    /// text you can see the desk through, which is not a setting anyone wants and
+    /// is trivially reachable by mistake if this defaulted the other way.
     pub fn to_rgba_alpha(self, alpha: f32) -> gdk::RGBA {
         let c = |v: u8| v as f32 / 255.0;
         gdk::RGBA::new(c(self.r), c(self.g), c(self.b), alpha.clamp(0.0, 1.0))

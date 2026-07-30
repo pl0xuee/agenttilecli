@@ -113,13 +113,78 @@ fn base_title() -> String {
 }
 
 fn load_css() {
+    let display = gdk::Display::default().expect("no default display");
+
     let provider = CssProvider::new();
     provider.load_from_string(include_str!("style.css"));
     gtk4::style_context_add_provider_for_display(
-        &gdk::Display::default().expect("no default display"),
+        &display,
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+
+    // A second provider, for the handful of declarations `style.css` is not
+    // allowed to hold - see `standalone_colour_css`. Empty on an older GTK, and
+    // an empty provider costs nothing, so this is unconditional.
+    let standalone = CssProvider::new();
+    standalone.load_from_string(&standalone_colour_css());
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &standalone,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+}
+
+/// The five standalone signal colours, for the libadwaita that stopped reading
+/// them as `@define-color` names.
+///
+/// `style.css` aliases the ramp onto Adwaita's colour names, and for surfaces
+/// that still works. For the five *standalone* colours - `accent_color`,
+/// `destructive_color`, `success_color`, `warning_color`, `error_color`, which
+/// libadwaita uses for text, icons, check marks and links rather than for fills -
+/// it stopped working at 1.6: the compatibility shim maps the surface names onto
+/// CSS variables but *derives* these, as an oklab lightening of the matching
+/// `*_bg_color`. Nothing reads `@accent_color` on a modern install, so those five
+/// lines in the stylesheet are inert there - and the colour libadwaita picks
+/// instead is a lightened @filament rather than @filament, which is close enough
+/// to have gone unnoticed and is still not what the palette says.
+///
+/// They cannot be stated in `style.css`, because a custom property is a GTK 4.16
+/// feature and this crate's floor is 4.12 (see Cargo.toml): on the floor, the
+/// declarations would be parse errors - reported to a terminal a GUI app hasn't
+/// got, and failing `the_stylesheet_parses_without_errors` for anyone building
+/// there. Hence a runtime check, and hence this being generated rather than
+/// written down: it is built from `palette`, which reads the ramp out of the
+/// stylesheet, so there is no second copy of these values to drift.
+///
+/// The five `@define-color *_color` aliases stay where they are regardless. They
+/// are what libadwaita 1.5 reads, and 1.5 is the floor.
+fn standalone_colour_css() -> String {
+    // Custom properties and `:root` both arrived in GTK 4.16. Below that the
+    // aliases in `style.css` are what libadwaita is reading anyway.
+    if (gtk4::major_version(), gtk4::minor_version()) < (4, 16) {
+        return String::new();
+    }
+
+    // Property name, and the ramp rung it is meant to be.
+    const STANDALONE: [(&str, &str); 5] = [
+        ("--accent-color", "filament"),
+        ("--destructive-color", "hangup"),
+        ("--success-color", "fresh"),
+        ("--warning-color", "tally"),
+        ("--error-color", "hangup"),
+    ];
+
+    let mut css = String::from(":root {\n");
+    for (property, name) in STANDALONE {
+        let c = palette::color(name);
+        css.push_str(&format!(
+            "  {property}: #{:02x}{:02x}{:02x};\n",
+            c.r, c.g, c.b
+        ));
+    }
+    css.push_str("}\n");
+    css
 }
 
 /// The event named by `--hook <event>`, if this process was launched as one.
@@ -313,6 +378,85 @@ mod tests {
     /// the app, or the eye: it just quietly stops styling something, which is
     /// indistinguishable from the rule having worked and looked like that.
     ///
+    /// The standalone colours have to be the ramp's, and all five have to be
+    /// there.
+    ///
+    /// These are the one set of colours stated outside `style.css` (see
+    /// `standalone_colour_css` for why they have to be), so they are also the one
+    /// set that could quietly stop agreeing with it. Generated from `palette`
+    /// rather than written down, which makes drift impossible - and this is what
+    /// says the generation still happens at all, since a `String::new()` returned
+    /// by mistake would leave libadwaita deriving its own accent again and nothing
+    /// would look obviously wrong.
+    ///
+    /// Skipped rather than failed below GTK 4.16, where the properties are not a
+    /// thing and the `@define-color` aliases are what libadwaita is reading.
+    #[test]
+    fn the_standalone_colours_are_the_ramp() {
+        if (gtk4::major_version(), gtk4::minor_version()) < (4, 16) {
+            return;
+        }
+
+        let css = standalone_colour_css();
+        for (property, name) in [
+            ("--accent-color", "filament"),
+            ("--destructive-color", "hangup"),
+            ("--success-color", "fresh"),
+            ("--warning-color", "tally"),
+            ("--error-color", "hangup"),
+        ] {
+            let c = palette::color(name);
+            let expected = format!("{property}: #{:02x}{:02x}{:02x};", c.r, c.g, c.b);
+            assert!(
+                css.contains(&expected),
+                "{property} should be @{name} ({expected}), but the generated \
+                 block is:\n{css}",
+            );
+        }
+    }
+
+    /// The same check for the half of the stylesheet this file cannot hold.
+    ///
+    /// `appearance::content_css` builds its rules at runtime, so the test below
+    /// never sees them: it reads `style.css`, and the settings-dependent fills are
+    /// by definition not in there. That leaves the app's most fragile CSS as its
+    /// only unchecked CSS - a stray character in a `format!` reaches a provider
+    /// that drops the declaration and carries on, and the visible result is a
+    /// surface that silently stops being translucent.
+    ///
+    /// Run at a non-default opacity so every rule is exercised with an `alpha()`
+    /// wrapped around it rather than at the value where one might be skipped.
+    #[test]
+    fn the_dynamic_rules_parse_without_errors() {
+        gtk_test(|| {
+            appearance::set(appearance::Appearance {
+                window_opacity: 0.85,
+                pane_opacity: 0.6,
+                gap: 6,
+                font: String::new(),
+            });
+
+            let errors = Rc::new(RefCell::new(Vec::new()));
+            let provider = CssProvider::new();
+            let sink = errors.clone();
+            provider.connect_parsing_error(move |_, section, error| {
+                sink.borrow_mut()
+                    .push(format!("{}: {error}", section.to_str()));
+            });
+            let css = appearance::content_css(1.25);
+            provider.load_from_string(&css);
+
+            let errors = errors.borrow();
+            assert!(
+                errors.is_empty(),
+                "the dynamic rules have {} parse error(s) GTK would have silently \
+                 ignored:\n{}\nthe rules were:\n{css}",
+                errors.len(),
+                errors.join("\n"),
+            );
+        });
+    }
+
     /// GTK's CSS is also only a *subset* of the web's, and the gap is where this
     /// bites: `animation-name: none` to stop the update button's pulse under the
     /// pointer is valid CSS that GTK may or may not take. This is what says

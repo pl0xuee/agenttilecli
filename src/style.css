@@ -161,7 +161,17 @@
 /* The lamp is the accent, which keeps "the thing you're about to act on" and
    "the thing the keyboard is in" the same colour across chrome and panes alike.
    Its foreground is the floor, not white: @filament is a near-white, and white
-   text on it would be unreadable. */
+   text on it would be unreadable.
+
+   The five `*_color` names below - the *standalone* accent, destructive, success,
+   warning and error, the ones libadwaita paints text and check marks with rather
+   than fills - only reach libadwaita 1.5, which is this crate's floor. From 1.6
+   it derives them from the matching `*_bg_color` instead and reads these lines
+   not at all, so they are inert on a modern install and have to stay anyway for
+   the floor. What covers 1.6+ is `main::standalone_colour_css`, which emits them
+   as CSS custom properties at runtime - not here, because a custom property needs
+   GTK 4.16 and stating one in this file would be a parse error for everyone on
+   4.12, including in `the_stylesheet_parses_without_errors`. */
 @define-color accent_bg_color @filament;
 @define-color accent_fg_color @field;
 @define-color accent_color @filament;
@@ -205,8 +215,17 @@
    never less - so the sidebar cannot be made glassier than the thing behind it by
    asking for a lower number. There is only one arrangement that works, and it is
    the one the elevation ladder already describes: transparency falls as
-   elevation rises. Chrome is glass, content is solid, and the floor is the
-   glassiest thing in the window.
+   elevation rises. Chrome is glass, content is solid by default, and the floor is
+   the glassiest thing in the window.
+
+   "By default" is doing real work in that sentence now. A pane may be glass too,
+   if someone asks for it - `pane_opacity` below 1.0 - and until recently it
+   could not, because the setting was handed to VTE and VTE throws it away (see
+   `appearance::content_css`). What makes it possible is that the pane's fill is
+   CSS like everything else here, and that VTE is told not to clear its own
+   surface when there is something behind it worth seeing. The default is still
+   1.0, and the reason is unchanged: a terminal is the one surface here whose job
+   is being read.
 
    Which is why `window` paints nothing at all. If it painted the floor, the
    floor would sit under the sidebar too, and the sidebar's own alpha would
@@ -221,10 +240,14 @@ window {
   background-color: transparent;
 }
 
-/* The panes are the only opaque thing in the window, and that is the point: a
-   terminal is the one surface here whose entire job is being read, and text on
-   glass is text competing with a wallpaper. Everything around them may be seen
-   through; they may not.
+/* The panes are the only opaque thing in the window by default, and that is the
+   point: a terminal is the one surface here whose entire job is being read, and
+   text on glass is text competing with a wallpaper. Everything around them is
+   seen through; they are not, unless asked.
+
+   Asking is `pane_opacity`, and the fill it lands on is written by the dynamic
+   provider rather than by the `.pane` rule below - which is why that rule states
+   the opaque tone and gets overridden. See `appearance::content_css`.
 
    The gutters between tiles stay flat and ungradiented for the reason they
    always did - they are the app's own diagram of which pane is where, and a
@@ -270,10 +293,18 @@ window {
    GTK's CSS has no `var()`, so this is a convention rather than a mechanism and
    the numbers are repeated by hand wherever they're used:
 
-     0.3em   small controls - close buttons, the mode switcher, a scrollbar
+     0.15em  a scrollbar slider - thin enough that a rung would round it away
+     0.3em   small controls - close buttons, the status dot's neighbours
+     0.48em  the mode switcher's own buttons, inset in the switcher below
      0.5em   panes
-     0.6em   sidebar strips
-     0.85em  anything floating - the find bar, dialogs, the palette
+     0.6em   sidebar strips, and the mode switcher around its buttons
+     0.85em  anything floating - the find bar, dialogs, the palette, toasts
+
+   Two of those look like near-misses for their neighbours and are not: the mode
+   switcher is a strip *containing* buttons, so it takes the strip rung and its
+   buttons sit one step inside it - which is where 0.48 comes from, and why it is
+   not 0.5. The scrollbar is its own rung for the opposite reason: at 4px wide,
+   anything above about 0.15em is a capsule rather than a rounded bar.
 
    The scale climbs with elevation, which is not a coincidence: the higher a
    surface floats the more it wants to look like an object rather than a region,
@@ -303,12 +334,17 @@ window {
    the border can't: a pane pushed flush against a screen edge or a neighbour,
    where there's no backdrop left around it for a bloom to land on.
 
-   That fill has to be painted by VTE, not by this rule. The terminal fills the
-   whole of the frame's content box and clears its own background opaquely, so
-   everything declared here is covered by it except the border - which is why
-   `Pane::set_focused` sets the same colour on the terminal. This declaration is
-   still worth making: it's what the pane is during the frame before VTE has
-   painted.
+   At full opacity that fill has to be painted by VTE, not by this rule: the
+   terminal fills the whole of the frame's content box and clears its own
+   background opaquely, so everything declared here is covered by it except the
+   border - which is why `Pane::set_focused` sets the same colour on the terminal.
+   This declaration is still worth making: it's what the pane is during the frame
+   before VTE has painted.
+
+   Below full opacity it is the other way round. VTE is told not to clear at all
+   (`pane::apply_theme`), so this rule - re-emitted with the alpha by
+   `appearance::content_css` - is what actually reaches the screen, and the colour
+   VTE is handed only matters for the cells it paints explicitly.
 
    Both surfaces are named rungs rather than a `shade()` of one, because
    `pane.rs` resolves these two names to paint the terminal with (see
@@ -355,13 +391,41 @@ window {
    That line is the whole point. An inset that didn't agree with the strip's
    would just be a second arbitrary margin.
 
-   VTE fills the padding with its own background, so this costs no seam - unlike
-   a margin, which would leave the `.pane` fill showing through at a different
-   alpha the moment anyone turned the pane opacity down. */
+   Padding rather than a margin, and that still matters at every opacity, though
+   not for the reason first written here. At 1.0 VTE fills the padding with its own
+   background, so there is no seam. Below 1.0 VTE fills nothing and the `.pane`
+   fill shows through the padding - but that is the same fill, at the same alpha,
+   as the surface behind the terminal itself, so there is still no seam. A margin
+   would have put the gap outside the frame's fill instead, which is the one
+   arrangement that does produce a visible step. */
+/* A tint, not a fill, and that is the whole trick. The strip is a *child* of
+   `.pane`, so any fill of its own composites on top of the pane's: at pane
+   opacity p a child at alpha a lands on p + a(1-p), which is strictly more
+   opaque than the tile it is supposed to recess from. Give it @rack outright and
+   the one solid object in a glass tile is its own chrome - a black bar across the
+   top of a window you can see through, getting worse the glassier the pane gets.
+   And it cannot simply be handed p either: no positive alpha composites to p.
+
+   So it darkens what is already there instead of replacing it. 0.55 of @shadow
+   over @tile is #0e151a, which is @rack to within one unit in red - the strip is
+   pixel-for-pixel what it always was at full opacity, and stays exactly one rung
+   below the tile at every other opacity, over any wallpaper.
+
+   The hairline gets the same treatment, and for a reason worth stating because a
+   1px line looks like it could not matter: an opaque rule keeps its own colour
+   while the tile around it lightens toward a bright wallpaper, so past a point the
+   separator that is meant to be *lighter* than the strip comes out darker than it
+   - the line inverts. 0.14 of @text over @tile is @hairline to within four units
+   per channel, which is as close as a tint of @text can get since @hairline
+   carries more blue than @text has to give.
+
+   The two numbers are therefore derived, not chosen, and they are derived from
+   the ramp above: change @rack or @hairline and these stop agreeing with them.
+   That is what `the_head_strip_still_reads_as_rack` in `pane.rs` is for. */
 .pane-head {
   padding: 0.32em 0.4em 0.32em 0.7em;
-  background-color: @rack;
-  border-bottom: 1px solid @hairline;
+  background-color: alpha(@shadow, 0.55);
+  border-bottom: 1px solid alpha(@text, 0.14);
   transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1),
     border-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
@@ -373,10 +437,15 @@ window {
 /* The focused tile's strip picks up the same warmth its border does, so the
    lamp reaches the whole tile rather than stopping at the terminal. Shallow:
    the border is what says "focused", and this only has to avoid contradicting
-   it by staying conspicuously cold. */
+   it by staying conspicuously cold.
+
+   A tint again, and derived the same way: 0.55 of @shadow warmed 6% toward
+   @filament, laid over @tile-lit, is what `mix(@rack, @filament, 0.05)` used to
+   be. The border matches `mix(@hairline, @filament, 0.18)` at 0.27 of @filament
+   over the same. See `.pane-head` above for why a fill is not an option here. */
 .pane.focused .pane-head {
-  background-color: mix(@rack, @filament, 0.05);
-  border-bottom-color: mix(@hairline, @filament, 0.18);
+  background-color: alpha(mix(@shadow, @filament, 0.06), 0.55);
+  border-bottom-color: alpha(@filament, 0.27);
 }
 
 .pane-close {
@@ -418,7 +487,21 @@ window {
    radius on a box taller than it is wide is an oval, and the reason the window
    controls next to them never had the problem is that `windowcontrols` centres
    its own children. */
-.header-action {
+/* Two selectors per state, and the second one is the app menu.
+   A `GtkMenuButton` is not one node, it is `menubutton > button`, and the theme
+   styles the inner one - which meant this treatment was landing on a wrapper
+   that draws nothing while libadwaita's own button painted inside it: a 9px
+   rounded rectangle of theme fill in the middle of a 50% circle, in the one
+   control in the strip whose shape was not the platform's. Worse for the update
+   pulse, which animated the wrapper *behind* the inner button and so survived
+   only as a green halo around it.
+
+   Every other control here is a plain `Button` or `ToggleButton` whose own node
+   *is* `button`, which is why this is one exception rather than a systematic
+   mistake - and why the bare class has to stay alongside the `> button` form.
+   The wrapper is told to paint nothing, below. */
+.header-action,
+menubutton.header-action > button {
   min-width: 1.95em;
   min-height: 1.95em;
   padding: 0;
@@ -429,7 +512,19 @@ window {
     background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.header-action:hover {
+/* The wrapper. It still gets the class, because the class is what Rust puts on
+   the widget, so it has to be told explicitly that the button inside it is the
+   one carrying the look - otherwise both paint and the circle sits on a
+   rectangle of the same colour. */
+menubutton.header-action {
+  padding: 0;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+.header-action:hover,
+menubutton.header-action > button:hover {
   color: @text;
   background-color: alpha(@text, 0.12);
 }
@@ -439,12 +534,14 @@ window {
    be pressed, and a filled button in the header bar would be the brightest
    thing on screen - competing with the focused pane, which is the one thing
    allowed to look lit. */
-.header-action:checked {
+.header-action:checked,
+menubutton.header-action > button:checked {
   color: @filament;
   background-color: alpha(@filament, 0.16);
 }
 
-.header-action:checked:hover {
+.header-action:checked:hover,
+menubutton.header-action > button:checked:hover {
   background-color: alpha(@filament, 0.22);
 }
 
@@ -640,6 +737,32 @@ searchbar > revealer > box {
 .search-row button:hover {
   color: @text;
   background-color: alpha(@text, 0.08);
+}
+
+/* ── Toasts ────────────────────────────────────────────────────────────────
+   Level 4, and the one floating surface the alias block above cannot reach.
+   libadwaita's own sheet hard-codes it - `toast { background: #505053; color:
+   white; border-radius: 150px }` - derived from none of its named colours, so
+   there is no alias to point at the ramp. Left alone, "Copied" arrives as a stock
+   mid-grey capsule with pure white text: the one object in the window that is
+   neither on the ramp nor in the app's own type colour, and now also the one
+   opaque thing floating over a workspace that may be glass. Exactly the "two
+   applications sharing a window" the alias block exists to prevent, in the widget
+   the trick can't cover.
+
+   Stated at the fill a dialog takes, because a toast is a dialog that leaves on
+   its own, and at the floating rung's radius rather than libadwaita's capsule -
+   150px on a two-line toast is a pill, and a pill reads as a badge rather than as
+   a surface with a message on it.
+
+   `background-image: none` because the property being overridden is the
+   `background` shorthand, and a shorthand sets the image too. */
+toast {
+  background-color: alpha(@tile, 0.94);
+  background-image: none;
+  color: @text;
+  border-radius: 0.85em;
+  box-shadow: 0 2px 6px alpha(@shadow, 0.5), 0 12px 28px alpha(@shadow, 0.34);
 }
 
 /* ── The command palette ───────────────────────────────────────────────────
@@ -1061,7 +1184,11 @@ row.sidebar-row.needs-attention .sidebar-row-label {
 
 .broadcast-toggle:checked:hover,
 .broadcast-toggle.broadcast-active:hover {
-  background-color: mix(@tally, #ffffff, 0.12);
+  /* Toward @filament, not toward white: every other lightening in this sheet
+     mixes toward the lamp or toward @text, which is what lets one edit to
+     @filament carry through every hover in the app. A hover that reached for
+     pure white was the one control here that got cooler as it lit up. */
+  background-color: mix(@tally, @filament, 0.12);
 }
 
 /* ── What an agent is doing ────────────────────────────────────────────────
@@ -1261,23 +1388,35 @@ row.sidebar-row.drop-below:selected {
   background-color: alpha(@filament, 0.35);
 }
 
-/* The list only overflows once there are more projects open than fit, so the
-   scrollbar is a rare visitor - and the theme's default arrives with its own
-   trough colour, which is a grey stripe glued to the rack's edge. Strip it back
-   to a slider that appears against the flat backdrop and goes away again. */
-.sidebar scrollbar {
+/* Every scrollable surface the app owns, which until now meant only the rack.
+   The list overflows only once there are more projects open than fit, so a
+   scrollbar here is a rare visitor - but the command palette has one too, and
+   scoping this to `.sidebar` left the palette on the theme's own slider: 8px
+   wide at 20% of the current colour, against the rack's 0.3em at
+   `alpha(@text, 0.12)`. Two of the app's own surfaces, two visibly different
+   scrollbars, for no reason anybody chose.
+
+   The original note here said the theme arrives with its own trough colour "glued
+   to the rack's edge", and that is no longer true of libadwaita 1.9 - its trough
+   carries no background at all. Stripping it is still right, because the floor
+   this app paints is not the surface the theme assumes and a future version is
+   free to put the stripe back. */
+.sidebar scrollbar,
+.palette scrollbar {
   background-color: transparent;
   border: none;
 }
 
-.sidebar scrollbar slider {
+.sidebar scrollbar slider,
+.palette scrollbar slider {
   min-width: 0.3em;
   margin: 0.2em;
   border-radius: 0.15em;
   background-color: alpha(@text, 0.12);
 }
 
-.sidebar scrollbar slider:hover {
+.sidebar scrollbar slider:hover,
+.palette scrollbar slider:hover {
   background-color: alpha(@text, 0.22);
 }
 
@@ -1295,7 +1434,9 @@ row.sidebar-row.drop-below:selected {
    rather than the theme's default blue-on-white. */
 .sidebar-version selection {
   background-color: alpha(@filament, 0.25);
-  color: #ffffff;
+  /* @text, for the same reason the rule above gives: this was the only piece of
+     text in the app not set in the app's own ink. */
+  color: @text;
 }
 
 /* ── An update is waiting ──────────────────────────────────────────────────
@@ -1321,7 +1462,11 @@ row.sidebar-row.drop-below:selected {
   to   { background-color: alpha(@fresh, 0); }
 }
 
-.app-menu.update-available {
+/* On the inner button, not the wrapper - see `.header-action`. The pulse is an
+   animation, and animations outrank plain declarations, so a copy left on the
+   wrapper would keep painting behind the button that covers it: the green would
+   read as a ring around the icon rather than as the icon lighting up. */
+menubutton.app-menu.update-available > button {
   color: @fresh;
   animation-name: update-available-pulse;
   animation-duration: 1200ms;
@@ -1333,7 +1478,7 @@ row.sidebar-row.drop-below:selected {
    Without the reset the animation would keep overpainting `background-color` -
    animations outrank plain declarations - and the hover would flicker instead
    of landing. */
-.app-menu.update-available:hover {
+menubutton.app-menu.update-available > button:hover {
   color: @field;
   background-color: @fresh;
   animation-name: none;

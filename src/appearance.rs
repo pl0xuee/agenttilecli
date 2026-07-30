@@ -167,14 +167,68 @@ pub fn set(next: Appearance) {
 /// distance in the same direction and the ramp's ordering survives whatever the
 /// user's wallpaper happens to be.
 ///
-/// The panes take no alpha from here at all - they are opaque, they are painted
-/// by VTE, and they are the reason the ordering has something to stay below.
+/// The panes are here too now, and for a while they weren't - the note that used
+/// to sit on this line said they took no alpha from here at all, because they
+/// were painted by VTE rather than by CSS. That was true and it was also the
+/// whole bug: `pane_opacity` was handed to VTE as the alpha on the terminal's
+/// background colour, and VTE's GTK4 backend discards it and clears its surface
+/// opaquely regardless. The slider in the preferences dialog moved a number that
+/// reached the terminal and died there, which is the worst kind of setting - one
+/// that looks implemented.
+///
+/// So the pane's fill is a CSS fill like every other surface in this window, and
+/// `pane::apply_theme` tells VTE not to clear its own background when there is
+/// glass to see through. What the terminal sits on is then `.pane`'s fill, at
+/// the alpha written here.
+///
+/// The two pane rules carry *different* colours at the *same* alpha, which is
+/// the elevation ladder surviving translucency again: @tile-lit has to stay
+/// above @tile after both have been dragged toward the desktop, and equal alphas
+/// are what guarantees they are dragged the same distance.
+///
+/// The floor is emitted twice and in neither of the obvious places, which needs
+/// saying. It used to be one rule on `.scaled-content` - the toolbar view holding
+/// the header and every tiler - and that single fill sat underneath the panes,
+/// which capped how glassy a pane could be at whatever the floor was (alpha only
+/// climbs: 0.6 over 0.92 is 0.968). Cutting it up is what makes `pane_opacity`
+/// mean its own number. So the workspace floor is now painted by `Tiler` itself,
+/// masked to the gutters, and what is left here are the two regions of the
+/// content half that no tiler covers: the header bar, and the empty state that
+/// stands in for a project with nothing running.
+///
+/// `.workspace-floor` is that empty state (see `App::build_empty_state`). It is a
+/// sibling of the tiler rather than a child, so it cannot inherit the floor from
+/// it and has to be given one, or a project with no agents would open onto a
+/// window with nothing in it but a desktop.
+///
+/// `.top-bar` is libadwaita's own class on the revealer `AdwToolbarView` puts its
+/// top bars in, and it is deliberately not `headerbar` - which is what this rule
+/// said first, and which left a visible hole. The revealer spans the full strip
+/// (y 0..46 in a default window); the header bar inside it paints a shorter box,
+/// so a 1px line above it and a 3px band below it belonged to no surface at all
+/// once the floor stopped being painted behind everything. That reads as a bright
+/// seam across the window under the header, over any wallpaper lighter than the
+/// chrome.
+///
+/// Exactly one of the two may paint it, for the reason this whole function
+/// exists: two translucent fills stacked composite to more opaque than either, so
+/// a floor on the revealer *and* on the header bar would make the strip visibly
+/// denser than the gutters it is supposed to match. The revealer is the one that
+/// covers the whole region, so the revealer is the one that paints; the header bar
+/// itself stays `transparent` (see `headerbar_bg_color` in `style.css`).
 pub fn content_css(font_scale: f64) -> String {
-    let Appearance { window_opacity, .. } = get();
+    let Appearance {
+        window_opacity,
+        pane_opacity,
+        ..
+    } = get();
     format!(
-        ".scaled-content {{ font-size: {font_scale}em; \
-         background-color: alpha(@field, {window_opacity:.3}); }}\n\
-         .sidebar {{ background-color: alpha(@rack, {window_opacity:.3}); }}"
+        ".scaled-content {{ font-size: {font_scale}em; }}\n\
+         .scaled-content .top-bar {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
+         .workspace-floor {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
+         .sidebar {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
+         .pane {{ background-color: alpha(@tile, {pane_opacity:.3}); }}\n\
+         .pane.focused {{ background-color: alpha(@tile-lit, {pane_opacity:.3}); }}"
     )
 }
 
@@ -274,6 +328,79 @@ mod tests {
         assert_eq!(overrides.gap, Some(appearance.gap));
         assert_eq!(overrides.window_opacity, None);
         assert_eq!(overrides.pane_opacity, None);
+    }
+
+    /// The strip behind the header bar is painted by its container, and by only
+    /// its container.
+    ///
+    /// Both halves of that sentence are a bug that happened. Painting `headerbar`
+    /// instead of `.top-bar` covers a shorter box than the strip, and since the
+    /// floor is no longer painted behind everything, the 1px above it and the 3px
+    /// below it end up painted by nothing at all - a bright seam across the window
+    /// wherever the desktop is lighter than the chrome. Painting *both* would
+    /// stack two translucent fills into something denser than the gutters the strip
+    /// is supposed to match, which is the trap the rest of this module is about.
+    #[test]
+    fn the_header_strip_is_painted_once_by_its_container() {
+        set(Appearance {
+            window_opacity: 0.9,
+            pane_opacity: 1.0,
+            gap: 6,
+            font: String::new(),
+        });
+        let css = content_css(1.0);
+        assert!(
+            css.contains(".top-bar {") && css.contains("alpha(@field, 0.900)"),
+            "the top-bar strip has no floor, so it will show the desktop: {css}",
+        );
+        assert!(
+            !css.contains("headerbar"),
+            "the header bar paints the strip as well as its container, which \
+             composites to denser than the floor it should match: {css}",
+        );
+    }
+
+    /// The pane fills have to be here, and this is the load-bearing test of the
+    /// pair.
+    ///
+    /// `pane::apply_theme` stops VTE clearing its own surface whenever the pane
+    /// opacity is below 1.0, on the understanding that something else is painting
+    /// what the text sits on. That something is these two rules. Delete them and
+    /// the app does not fall back to an opaque terminal - it renders agent output
+    /// onto whatever happens to be behind the window, which is unreadable, and
+    /// nothing in the build says so.
+    #[test]
+    fn a_glass_pane_is_given_a_fill_to_sit_on() {
+        set(Appearance {
+            window_opacity: 1.0,
+            pane_opacity: 0.6,
+            gap: 6,
+            font: String::new(),
+        });
+        let css = content_css(1.0);
+        assert!(
+            css.contains(".pane {") && css.contains("alpha(@tile, 0.600)"),
+            "an unfocused glass pane has no fill behind its text: {css}",
+        );
+        assert!(
+            css.contains(".pane.focused {") && css.contains("alpha(@tile-lit, 0.600)"),
+            "a focused glass pane has no fill behind its text: {css}",
+        );
+    }
+
+    /// The two pane surfaces share an alpha for the same reason the floor and the
+    /// rack do - see the note on `content_css`.
+    #[test]
+    fn the_two_pane_surfaces_are_equally_transparent() {
+        set(Appearance {
+            window_opacity: 1.0,
+            pane_opacity: 0.7,
+            gap: 6,
+            font: String::new(),
+        });
+        let css = content_css(1.0);
+        assert!(css.contains("alpha(@tile, 0.700)"), "{css}");
+        assert!(css.contains("alpha(@tile-lit, 0.700)"), "{css}");
     }
 
     /// The floor and the rack have to be emitted at the *same* alpha, or the

@@ -4,7 +4,7 @@ use std::rc::Rc;
 use gtk4::gio::prelude::*;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use gtk4::{glib, Widget};
+use gtk4::{gdk, glib, graphene, gsk, Widget};
 use vte4::prelude::*;
 
 mod manager;
@@ -46,24 +46,38 @@ pub struct LayoutState {
 mod imp {
     use super::*;
 
+    /// A slot for one of the tiler's outward-facing callbacks.
+    ///
+    /// Named rather than written out, because written out it is
+    /// `RefCell<Option<Box<dyn Fn(T)>>>` five times over and each layer means
+    /// something: `RefCell` because the app installs these after construction,
+    /// `Option` because until it does there is nobody to tell, and `Box<dyn>`
+    /// because whose closure it is, is the app's business and not the tiler's.
+    type Callback<T> = RefCell<Option<Box<dyn Fn(T)>>>;
+
+    /// The same, for the one that is handed a borrow rather than a value. It
+    /// cannot go through `Callback<T>`: `Fn(&str)` is higher-ranked over the
+    /// lifetime, and `Callback<&str>` would demand one be named here.
+    type TextCallback = RefCell<Option<Box<dyn Fn(&str)>>>;
+
     #[derive(Default)]
     pub struct Tiler {
         pub panes: RefCell<Vec<Rc<Pane>>>,
         pub focus: Cell<usize>,
         pub cwd: RefCell<String>,
-        pub title_cb: RefCell<Option<Box<dyn Fn(&str)>>>,
+        pub title_cb: TextCallback,
         /// Invoked when a pane in this group wants the user - see
         /// `Tiler::set_attention_callback`.
         pub attention_cb: RefCell<Option<Box<dyn Fn()>>>,
         /// Invoked whenever the layout mode changes, however it changed - see
         /// `Tiler::set_mode_callback`.
-        pub mode_cb: RefCell<Option<Box<dyn Fn(Mode)>>>,
+        pub mode_cb: Callback<Mode>,
         /// Invoked whenever the master ratio, master count or focus index
         /// changes - see `Tiler::set_layout_callback`.
-        pub layout_cb: RefCell<Option<Box<dyn Fn(LayoutState)>>>,
+        pub layout_cb: Callback<LayoutState>,
         /// Invoked with the new pane count whenever a pane is attached or
         /// removed - see `Tiler::set_pane_count_callback`.
-        pub count_cb: RefCell<Option<Box<dyn Fn(usize)>>>,
+        pub count_cb: Callback<usize>,
         pub resizing: Cell<bool>,
         pub drag_start_ratio: Cell<f64>,
         pub drag_start_width: Cell<i32>,
@@ -98,16 +112,170 @@ mod imp {
             self.obj().set_layout_manager(Some(super::TilerLayout::new()));
         }
 
+        /// Unparents every pane, because a `GtkWidget` subclass has to take its
+        /// own children down - GTK will not do it, and a child still parented to
+        /// a finalized widget is a dangling parent pointer.
+        ///
+        /// The round trip first is the same use-after-free `remove_pane` guards
+        /// against, reached by the other route panes leave the tree by. See
+        /// `panes::settle_input_method` for the mechanism; the short version is
+        /// that GTK's Wayland IM context keeps a per-display `current` pointer
+        /// which `focus_out` only clears once `zwp_text_input_v3` has been bound,
+        /// so a terminal focused and then destroyed inside that first round trip
+        /// leaves it dangling and the next text-input event segfaults the process.
+        /// Unparenting is the moment GTK could let go of the pane's context, and
+        /// it only does if the text-input object has landed by then.
+        ///
+        /// This is a narrower trigger than `remove_pane`'s, not a different bug: it
+        /// needs a whole project removed (`App::remove_project`) inside one round
+        /// trip of the process's first `focus_in`. Narrow is not a reason to leave
+        /// the same dangling pointer behind on a path that unparents *every* pane
+        /// in the group.
+        ///
+        /// Once for the loop rather than once per pane. What the sync buys is
+        /// display-wide and monotonic - the text-input object is either bound or
+        /// it isn't, and once bound it stays bound - so the second round trip
+        /// would guarantee nothing the first one didn't, and this is the path that
+        /// can be holding six of them.
+        ///
+        /// Safe to force here, which is the part worth being explicit about, since
+        /// `dispose` runs during teardown and can be reached with no display at
+        /// all. Two things make it safe rather than lucky. The borrow is released
+        /// before the round trip, so a Wayland event dispatched inside it cannot
+        /// re-enter this and find `panes` already borrowed. And
+        /// `settle_input_method` resolves the display through
+        /// `root()`/`Display::default()` rather than asserting one exists, so a
+        /// dispose running with the display gone or already closed does nothing
+        /// instead of crashing - see `display_to_settle` for why the obvious
+        /// spelling is the dangerous one.
         fn dispose(&self) {
+            let frame = self.panes.borrow().first().map(|pane| pane.frame.clone());
+            if let Some(frame) = frame {
+                super::panes::settle_input_method(&frame);
+            }
             for pane in self.panes.borrow().iter() {
                 pane.frame.unparent();
             }
         }
     }
 
+    /// `.pane`'s corner radius, in pixels, for the widget the tiles sit in.
+    ///
+    /// `style.css` states it as `0.5em` and GTK will not tell anyone what it
+    /// resolved that to - border-radius is not a queryable property - so this
+    /// re-derives it from the same font size the `em` was relative to. The two
+    /// have to agree: this radius is used to cut the tiles out of the floor, and
+    /// a radius smaller than the tile's own leaves a sliver of floor inside each
+    /// corner, while a larger one shows desktop outside it.
+    ///
+    /// The fallback is the size Adwaita's default font resolves to, and is only
+    /// reached if a context has no font description at all.
+    fn tile_radius(widget: &Widget) -> f32 {
+        const PANE_RADIUS_EM: f32 = 0.5;
+        const FALLBACK_PX_PER_EM: f32 = 15.0;
+
+        let px_per_em = widget
+            .pango_context()
+            .font_description()
+            .map(|desc| {
+                let size = desc.size() as f32 / gtk4::pango::SCALE as f32;
+                // An absolute size is already in device pixels; a plain one is
+                // in points, which is the usual case for a theme font.
+                if desc.is_size_absolute() {
+                    size
+                } else {
+                    size * 96.0 / 72.0
+                }
+            })
+            .filter(|px| *px > 0.0)
+            .unwrap_or(FALLBACK_PX_PER_EM);
+
+        PANE_RADIUS_EM * px_per_em
+    }
+
+    impl Tiler {
+        /// The workspace floor - the gutters between tiles and the margin around
+        /// them - with the tiles themselves cut out of it.
+        ///
+        /// Painted here rather than by an ancestor, and that is the whole point.
+        /// It used to be `.scaled-content`'s fill, which is the `AdwToolbarView`
+        /// that *contains* every tiler, so the floor was painted underneath every
+        /// pane. That is invisible while panes are opaque and ruinous the moment
+        /// they aren't: alpha in GTK only ever climbs, so a pane at 0.6 sitting on
+        /// a floor at 0.92 composites to 0.968 against the desktop. The pane
+        /// opacity setting could not do what it said no matter what value it was
+        /// given, because the floor beneath it was always most of the answer.
+        ///
+        /// So exactly one surface paints each pixel of the workspace: the floor in
+        /// the gutters, the tile inside a tile. That is the rule `style.css`
+        /// already states for the sidebar, where two fills stacked to within a
+        /// percent of opaque and the answer was to let only one of them paint.
+        ///
+        /// The cut is a mask rather than a clip because GSK has no way to subtract
+        /// one shape from another: the tiles are drawn as the mask, and
+        /// `InvertedAlpha` then paints the floor everywhere they are not. The
+        /// focused pane's ring and bloom are unaffected - they are drawn outside
+        /// the tile's own allocation, which is exactly the region the floor keeps.
+        fn snapshot_floor(&self, snapshot: &gtk4::Snapshot) {
+            let obj = self.obj();
+            let (width, height) = (obj.width() as f32, obj.height() as f32);
+            if width <= 0.0 || height <= 0.0 {
+                return;
+            }
+
+            let bounds = graphene::Rect::new(0.0, 0.0, width, height);
+            let floor = crate::palette::color("field")
+                .to_rgba_alpha(crate::appearance::get().window_opacity as f32);
+
+            // The tiles as they are allocated in *this* frame, read off the widget
+            // tree rather than recomputed: the layout manager has already placed
+            // them, and asking it again is a second answer that can disagree.
+            let radius = tile_radius(obj.upcast_ref::<Widget>());
+            let mut tiles = Vec::new();
+            let mut child = obj.first_child();
+            while let Some(current) = child {
+                child = current.next_sibling();
+                if !current.is_visible() {
+                    continue;
+                }
+                // `compute_bounds` rather than `allocation`, which is deprecated
+                // as of GTK 4.12: a child placed by a transform (which is how
+                // `TilerLayout` places these) has its position in that transform
+                // rather than in an allocation rectangle, and this asks the
+                // question in the coordinate space the answer is wanted in.
+                let Some(rect) = current.compute_bounds(obj.upcast_ref::<Widget>()) else {
+                    continue;
+                };
+                tiles.push(gsk::RoundedRect::from_rect(rect, radius));
+            }
+
+            // Nothing to cut out: an empty group is all floor. (The empty state
+            // is a sibling of this widget rather than a child of it, so it paints
+            // its own - see `appearance::content_css`.)
+            if tiles.is_empty() {
+                snapshot.append_color(&floor, &bounds);
+                return;
+            }
+
+            // The mask is recorded first and the source second - see
+            // `gtk_snapshot_push_mask`. The mask's colour is irrelevant; only its
+            // alpha is read.
+            snapshot.push_mask(gsk::MaskMode::InvertedAlpha);
+            let solid = gdk::RGBA::new(1.0, 1.0, 1.0, 1.0);
+            for tile in &tiles {
+                snapshot.push_rounded_clip(tile);
+                snapshot.append_color(&solid, tile.bounds());
+                snapshot.pop();
+            }
+            snapshot.pop();
+            snapshot.append_color(&floor, &bounds);
+            snapshot.pop();
+        }
+    }
+
     impl WidgetImpl for Tiler {
-        /// Paints the children in order, except the focused one, which goes
-        /// last.
+        /// Paints the floor, then the children in order, except the focused one,
+        /// which goes last.
         ///
         /// The focused tile is the only thing in the app that draws outside its
         /// own allocation - a two-pixel warm ring and a soft bloom, both of
@@ -127,6 +295,10 @@ mod imp {
         /// only what is drawn on top of what.
         fn snapshot(&self, snapshot: &gtk4::Snapshot) {
             let obj = self.obj();
+
+            // Before any child, and cut to fit them - see `snapshot_floor`.
+            self.snapshot_floor(snapshot);
+
             let focused: Option<Widget> = self
                 .panes
                 .borrow()
@@ -264,7 +436,7 @@ impl Tiler {
 
     pub fn inc_master_ratio(&self) {
         let lm = self.layout_mgr();
-        let r = (lm.imp().master_ratio.get() + 0.05).min(0.9);
+        let r = (lm.imp().master_ratio.get() + 0.05).min(crate::layout::MASTER_RATIO_MAX);
         lm.imp().master_ratio.set(r);
         self.queue_allocate();
         self.notify_layout();
@@ -272,7 +444,7 @@ impl Tiler {
 
     pub fn dec_master_ratio(&self) {
         let lm = self.layout_mgr();
-        let r = (lm.imp().master_ratio.get() - 0.05).max(0.1);
+        let r = (lm.imp().master_ratio.get() - 0.05).max(crate::layout::MASTER_RATIO_MIN);
         lm.imp().master_ratio.set(r);
         self.queue_allocate();
         self.notify_layout();
@@ -395,7 +567,11 @@ impl Tiler {
     pub fn restore_layout(&self, mode: Mode, state: LayoutState) {
         let lm = self.layout_mgr();
         lm.imp().mode.set(mode);
-        lm.imp().master_ratio.set(state.master_ratio.clamp(0.1, 0.9));
+        lm.imp().master_ratio.set(
+            state
+                .master_ratio
+                .clamp(crate::layout::MASTER_RATIO_MIN, crate::layout::MASTER_RATIO_MAX),
+        );
         lm.imp().master_count.set(state.master_count.max(1));
         self.queue_allocate();
     }

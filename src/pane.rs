@@ -272,12 +272,45 @@ fn apply_theme(terminal: &Terminal, focused: bool) {
     // cursor's *foreground* is painted with the opaque form below for the same
     // reason it isn't `alpha`'d - it is the character under the block cursor,
     // which has to be legible against the cursor rather than through it.
-    let background = theme
-        .background
-        .to_rgba_alpha(crate::appearance::get().pane_opacity as f32);
+    let pane_opacity = crate::appearance::get().pane_opacity;
+
+    // VTE does not honour the alpha it is handed below, and this is the line that
+    // works around it. Its GTK4 backend clears the terminal's own surface with
+    // the background colour and throws the alpha away, so `set_colors` alone
+    // produces a fully opaque terminal at every setting - which is what
+    // `pane_opacity` did for its entire life before this.
+    //
+    // Told not to clear, VTE draws its text and its explicitly-coloured cells and
+    // nothing else, and what shows behind them is `.pane`'s CSS fill - which
+    // `appearance::content_css` writes at exactly this alpha. The alpha on the
+    // colour below is still worth setting: it is what VTE would use if a future
+    // version starts honouring it, and it costs nothing if it never does.
+    //
+    // Only when there is something to see through. At 1.0 the terminal clears its
+    // own surface exactly as it always has, which keeps the common case on the
+    // path VTE is best at rather than on this one.
+    terminal.set_clear_background(pane_opacity >= 1.0);
+
+    let background = theme.background.to_rgba_alpha(pane_opacity as f32);
     let opaque_background = theme.background.to_rgba();
     let foreground = theme.foreground.to_rgba();
-    let ansi = theme.ansi.map(|c| c.to_rgba());
+
+    // ANSI 0 takes the surface's alpha, and only ANSI 0. `ansi_palette` defines
+    // it as the surface rather than as black precisely so that a program painting
+    // a "black" background lands on the pane's own colour instead of a foreign
+    // grey - and the moment the pane is glass, opaque is a foreign colour too. A
+    // `git log` drawing its own background would otherwise stamp solid rectangles
+    // through the translucency, which is the same bug that comment exists to
+    // prevent, one layer up.
+    //
+    // The other fifteen stay opaque. They are deliberate colours a program asked
+    // for by name, not the surface, and text you can see the desktop through is
+    // not what "red" means.
+    let ansi = {
+        let mut ansi = theme.ansi.map(|c| c.to_rgba());
+        ansi[0] = theme.ansi[0].to_rgba_alpha(pane_opacity as f32);
+        ansi
+    };
     let ansi_refs: Vec<&gdk::RGBA> = ansi.iter().collect();
     terminal.set_colors(Some(&foreground), Some(&background), &ansi_refs);
 
@@ -289,6 +322,26 @@ fn apply_theme(terminal: &Terminal, focused: bool) {
     terminal.set_color_cursor_foreground(Some(&opaque_background));
     terminal.set_color_highlight(Some(&theme.selection.to_rgba()));
     terminal.set_color_highlight_foreground(Some(&foreground));
+}
+
+/// Writes the app's own words into a pane, for the two cases where there is no
+/// agent to write anything and no state that will ever arrive.
+///
+/// Fed to the terminal rather than shown as a toast or a dialog, and that is the
+/// point: the pane is where the user is already looking, a toast is gone in four
+/// seconds, and both of the failures this reports leave a tile sitting in the
+/// grid afterwards. A tile with the reason in it can be read whenever it is
+/// noticed - which for an agent started in a project the user then walked away
+/// from may be some time.
+///
+/// `\r\n` rather than `\n` because this goes to a terminal, where a bare newline
+/// moves down a row without returning to column one, and the second line would
+/// start under the end of the first.
+///
+/// Dim, and prefixed with a blank line, so it reads as the app talking rather
+/// than as output from something that ran: SGR 2 is faint, 0 resets.
+fn report_in_pane(terminal: &Terminal, message: &str) {
+    terminal.feed(format!("\r\n\x1b[2m  {message}\x1b[0m\r\n").as_bytes());
 }
 
 /// Sets the terminal's font from the appearance, or leaves VTE on the desktop's
@@ -312,77 +365,6 @@ fn apply_font(terminal: &Terminal) {
     terminal.set_font(Some(&gtk4::pango::FontDescription::from_string(&font)));
 }
 
-#[cfg(test)]
-mod theme_tests {
-    use super::*;
-
-    /// Builds both themes, which resolves every `@define-color` name the
-    /// terminal asks for and parses every terminal-only hex literal. Either
-    /// one going wrong is a panic here rather than a crash on the first pane.
-    ///
-    /// No manually-kept list of names to fall out of date: this calls the same
-    /// function the app calls, so a lookup added to `theme` or `ansi_palette`
-    /// is covered the moment it's written.
-    #[test]
-    fn every_colour_the_terminal_needs_resolves() {
-        for focused in [false, true] {
-            let theme = theme(focused);
-            assert_eq!(
-                theme.ansi.len(),
-                16,
-                "VTE wants a full 16-colour ANSI palette",
-            );
-            // Text has to be legible on the surface it's drawn on, and both
-            // are greys - so if they ever converge, the pane goes blank.
-            assert!(
-                theme.foreground.r.abs_diff(theme.background.r) > 100,
-                "foreground and background have converged: {:?} on {:?}",
-                theme.foreground,
-                theme.background,
-            );
-        }
-    }
-
-    /// ANSI 0 is the surface, not literal black: programs paint "black"
-    /// backgrounds far more often than they mean the colour, and a mismatch
-    /// leaves rectangles of a foreign grey in the middle of the pane. It has
-    /// to keep matching when the pane lightens under focus, which is the part
-    /// a fixed hex would get wrong.
-    #[test]
-    fn ansi_black_tracks_the_surface_through_a_focus_change() {
-        for focused in [false, true] {
-            let theme = theme(focused);
-            assert_eq!(
-                theme.ansi[0], theme.background,
-                "ANSI black left a seam against the surface (focused: {focused})",
-            );
-        }
-    }
-
-    /// The focused pane is painted in a lighter surface than an unfocused one,
-    /// and everything mixed over that surface follows it. This is the fill
-    /// that `.pane.focused` declares but can't deliver.
-    #[test]
-    fn focus_lightens_the_surface_and_everything_mixed_over_it() {
-        let unfocused = theme(false);
-        let focused = theme(true);
-
-        assert!(
-            focused.background.r > unfocused.background.r,
-            "focus didn't lighten the surface: {:?} vs {:?}",
-            unfocused.background,
-            focused.background,
-        );
-        assert_ne!(
-            focused.selection, unfocused.selection,
-            "the selection tint ignored the surface it's mixed over",
-        );
-        // The accent-carried colours are the app's constants and shouldn't
-        // drift with focus - only the greys under them move.
-        assert_eq!(focused.cursor, unfocused.cursor);
-        assert_eq!(focused.foreground, unfocused.foreground);
-    }
-}
 
 /// The `--settings` layer every claude pane is launched with: `BELL_HOOK`,
 /// wired to the two events worth interrupting someone for.
@@ -619,7 +601,31 @@ impl Pane {
         }
         let envv: Vec<&str> = env.iter().map(String::as_str).collect();
 
+        // A folder that isn't there any more, which a saved session makes ordinary:
+        // quit with a project open on a worktree, remove the worktree, reopen. VTE
+        // spawns into a missing cwd without complaining - it reports success, the
+        // shell dies immediately, and what the user gets is a black tile with a
+        // hollow "starting…" dot that stays that way for ever, because the state
+        // only ever arrives from an agent's hooks and there is no agent.
+        //
+        // So this says so, in the one place the user is already looking: the pane.
+        // Nothing is spawned, which means no `child-exited`, which means the pane
+        // stays put with its explanation on screen rather than vanishing.
+        let folder_is_there = std::path::Path::new(cwd).is_dir();
+        if !folder_is_there {
+            report_in_pane(
+                &terminal,
+                &format!(
+                    "{cwd}\r\n\r\nThis folder no longer exists, so there is nowhere \
+                     to start an agent.\r\nClose this pane and open the project \
+                     again from wherever it went."
+                ),
+            );
+        }
+
         let pid_slot = pid.clone();
+        let failure_terminal = terminal.downgrade();
+        if folder_is_there {
         terminal.spawn_async(
             PtyFlags::DEFAULT,
             Some(cwd),
@@ -630,11 +636,26 @@ impl Pane {
             -1,
             None::<&gtk4::gio::Cancellable>,
             move |result| {
-                if let Ok(spawned_pid) = result {
-                    pid_slot.set(Some(spawned_pid.0));
+                match result {
+                    Ok(spawned_pid) => pid_slot.set(Some(spawned_pid.0)),
+                    // The other silent pane. A spawn that fails records no pid, so
+                    // `hangup` has nothing to signal and `child-exited` never fires
+                    // - the pane cannot report, cannot be closed by its agent
+                    // ending, and holds its share of the tiling indefinitely with
+                    // nothing drawn in it. Whatever VTE refused to do, the reason
+                    // belongs on screen.
+                    Err(e) => {
+                        if let Some(terminal) = failure_terminal.upgrade() {
+                            report_in_pane(
+                                &terminal,
+                                &format!("This pane could not be started.\r\n\r\n{e}"),
+                            );
+                        }
+                    }
                 }
             },
         );
+        }
 
         // Poll rather than rely on shell-side OSC7 "report my cwd" hooks
         // (not every shell config sources those) - reading the PTY's
@@ -659,7 +680,7 @@ impl Pane {
             gtk4::glib::ControlFlow::Continue
         });
 
-        Pane {
+        let pane = Pane {
             id: id.clone(),
             frame,
             terminal,
@@ -668,7 +689,17 @@ impl Pane {
             head: head_state,
             pid,
             focused: Cell::new(false),
+        };
+
+        // A pane with no folder to run in has already been told so above, in
+        // words. The dot has to agree with them: left alone it reads "starting…"
+        // for the life of the window, which is the one thing this pane is
+        // definitely not doing, and it is the reading the rack repeats as well.
+        if !folder_is_there {
+            pane.set_state(PaneState::Exited);
         }
+
+        pane
     }
 
     /// Repaints the terminal in the focused or unfocused surface, to match the
@@ -763,5 +794,138 @@ impl Pane {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+
+    /// What `alpha(tint, a)` laid over `base` comes out as.
+    fn tinted(base: palette::Rgb, tint: palette::Rgb, a: f64) -> (i32, i32, i32) {
+        let mix = |b: u8, t: u8| (f64::from(b) + a * (f64::from(t) - f64::from(b))).round() as i32;
+        (
+            mix(base.r, tint.r),
+            mix(base.g, tint.g),
+            mix(base.b, tint.b),
+        )
+    }
+
+    /// The head strip's tints have to land on the ramp rungs they replaced.
+    ///
+    /// `.pane-head` cannot carry a fill: it is a child of `.pane`, so any alpha
+    /// of its own composites to *more* opaque than the tile it recesses from, and
+    /// a glass pane would get an opaque bar across the top of it. It darkens the
+    /// tile instead - and the two numbers that does it with, 0.55 of @shadow and
+    /// 0.14 of @text, are derived from @rack and @hairline rather than chosen.
+    ///
+    /// Which means they are a duplication of the ramp that nothing else would
+    /// notice going stale: move @rack, and the strip quietly stops being one rung
+    /// below the tile at *every* opacity, including the fully opaque one that
+    /// every screenshot of this app is taken at. This is the only thing that says
+    /// so.
+    #[test]
+    fn the_head_strip_still_reads_as_rack() {
+        let tile = palette::color("tile");
+        let rack = palette::color("rack");
+        let hairline = palette::color("hairline");
+
+        let strip = tinted(tile, palette::color("shadow"), 0.55);
+        for (got, want, channel) in [
+            (strip.0, i32::from(rack.r), "red"),
+            (strip.1, i32::from(rack.g), "green"),
+            (strip.2, i32::from(rack.b), "blue"),
+        ] {
+            assert!(
+                (got - want).abs() <= 1,
+                "the head strip's {channel} is {got}, @rack's is {want}: \
+                 `alpha(@shadow, 0.55)` over @tile no longer reads as @rack, so \
+                 the strip has stopped sitting one rung below the tile",
+            );
+        }
+
+        // Four rather than one: @hairline is bluer than any tint of @text can
+        // make @tile, so this one is a closest fit rather than an identity. It is
+        // still worth pinning - the point is that the rule stays *lighter* than
+        // the strip, which is what stops it inverting over a bright wallpaper.
+        let rule = tinted(tile, palette::color("text"), 0.14);
+        for (got, want, channel) in [
+            (rule.0, i32::from(hairline.r), "red"),
+            (rule.1, i32::from(hairline.g), "green"),
+            (rule.2, i32::from(hairline.b), "blue"),
+        ] {
+            assert!(
+                (got - want).abs() <= 4,
+                "the strip's rule is {got} in {channel} where @hairline is {want}: \
+                 `alpha(@text, 0.14)` over @tile no longer reads as @hairline",
+            );
+        }
+    }
+
+    /// Builds both themes, which resolves every `@define-color` name the
+    /// terminal asks for and parses every terminal-only hex literal. Either
+    /// one going wrong is a panic here rather than a crash on the first pane.
+    ///
+    /// No manually-kept list of names to fall out of date: this calls the same
+    /// function the app calls, so a lookup added to `theme` or `ansi_palette`
+    /// is covered the moment it's written.
+    #[test]
+    fn every_colour_the_terminal_needs_resolves() {
+        for focused in [false, true] {
+            let theme = theme(focused);
+            assert_eq!(
+                theme.ansi.len(),
+                16,
+                "VTE wants a full 16-colour ANSI palette",
+            );
+            // Text has to be legible on the surface it's drawn on, and both
+            // are greys - so if they ever converge, the pane goes blank.
+            assert!(
+                theme.foreground.r.abs_diff(theme.background.r) > 100,
+                "foreground and background have converged: {:?} on {:?}",
+                theme.foreground,
+                theme.background,
+            );
+        }
+    }
+
+    /// ANSI 0 is the surface, not literal black: programs paint "black"
+    /// backgrounds far more often than they mean the colour, and a mismatch
+    /// leaves rectangles of a foreign grey in the middle of the pane. It has
+    /// to keep matching when the pane lightens under focus, which is the part
+    /// a fixed hex would get wrong.
+    #[test]
+    fn ansi_black_tracks_the_surface_through_a_focus_change() {
+        for focused in [false, true] {
+            let theme = theme(focused);
+            assert_eq!(
+                theme.ansi[0], theme.background,
+                "ANSI black left a seam against the surface (focused: {focused})",
+            );
+        }
+    }
+
+    /// The focused pane is painted in a lighter surface than an unfocused one,
+    /// and everything mixed over that surface follows it. This is the fill
+    /// that `.pane.focused` declares but can't deliver.
+    #[test]
+    fn focus_lightens_the_surface_and_everything_mixed_over_it() {
+        let unfocused = theme(false);
+        let focused = theme(true);
+
+        assert!(
+            focused.background.r > unfocused.background.r,
+            "focus didn't lighten the surface: {:?} vs {:?}",
+            unfocused.background,
+            focused.background,
+        );
+        assert_ne!(
+            focused.selection, unfocused.selection,
+            "the selection tint ignored the surface it's mixed over",
+        );
+        // The accent-carried colours are the app's constants and shouldn't
+        // drift with focus - only the greys under them move.
+        assert_eq!(focused.cursor, unfocused.cursor);
+        assert_eq!(focused.foreground, unfocused.foreground);
     }
 }

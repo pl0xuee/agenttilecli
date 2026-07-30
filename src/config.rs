@@ -88,6 +88,20 @@ pub struct Config {
     /// How opaque a pane's terminal surface is. Fully opaque by default, and
     /// deliberately: everything in this window may be seen through except the
     /// surfaces whose job is being read.
+    ///
+    /// Below 1.0 the terminal is glass, and what that costs is contrast, which is
+    /// worth writing down because it is the whole argument for the default. @text
+    /// on @tile is 13.6:1 against anything while the pane is opaque. Over a pure
+    /// white desktop it falls to 5.1:1 at 0.7, crosses the 4.5:1 that normal text
+    /// wants at about 0.66, and reaches 2.7:1 at the 0.5 floor - which is not
+    /// text, it is a suggestion of text. Over a dark desktop none of this happens:
+    /// the same numbers stay above 6.8:1 all the way down, because the fill and
+    /// what is behind it are pulling in the same direction.
+    ///
+    /// So this is a setting whose safe range depends on someone's wallpaper, and
+    /// the app cannot know it. The clamp keeps it out of the absurd; the
+    /// preferences dialog applies it live so the judgement can be made by looking,
+    /// which is the only way it can honestly be made at all.
     pub pane_opacity: f64,
     /// The terminal font, as Pango describes one ("Fira Mono 10"). Empty means
     /// the desktop's own monospace.

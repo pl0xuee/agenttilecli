@@ -143,9 +143,10 @@ you want to nudge it.
   the space around tiles, applied as you move them, with the window behind the
   dialog as the preview. They're remembered in your session; `config.toml` still
   says what the app opens as.
-- **Glass chrome, solid panes** — the gutters, the header strip and the project
-  rack are translucent to your desktop; the terminals are not, so agent output
-  never competes with a wallpaper. Turn it up or off in Preferences.
+- **Glass chrome, solid panes by default** — the gutters, the header strip and the
+  project rack are translucent to your desktop; the terminals are opaque, so agent
+  output never competes with a wallpaper. Take the terminals to glass as well if
+  you want that — `pane_opacity`, or the slider in Preferences.
 
 ## Configuration
 
@@ -180,6 +181,14 @@ over a bright desktop climbs toward that desktop while the opaque panes stay
 put, so past about 0.93 against a very light wallpaper the floor stops reading
 as the floor. On a dark desktop you can go a good deal lower. Whether the
 translucency is *blurred* is your compositor's business, not the app's.
+
+If you do take `pane_opacity` down, what you are spending is contrast. Terminal
+text sits at 13.6:1 against its own surface while the pane is opaque; over a
+*white* desktop that falls to about 5:1 at `0.7`, crosses the 4.5:1 that normal
+text wants at roughly `0.66`, and is down to 2.7:1 at the `0.5` floor. Over a dark
+desktop it stays above 6.8:1 the whole way. Which is to say: how low you can go is
+a fact about your wallpaper, not about the app — so the slider applies live, and
+your own eyes are the guard.
 
 The three appearance settings are also in Preferences, and what you set there is
 remembered in your session rather than written back here — this file is meant to
