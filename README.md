@@ -24,6 +24,29 @@ you want to nudge it.
   folder and it opens, with no second dialog asking a question you answer the
   same way every time. On a narrow window the sidebar stops squeezing the
   panes and slides over them instead.
+- **Every project's files, in the rack** — a chevron beside a project's icon
+  unfolds its folder tree right inside the sidebar strip, one level at a time.
+  Each unfold re-reads that level from disk: the agents' whole job is changing
+  these files, so a tree cached at startup would be wrong within a minute. A
+  folder nobody opens costs nothing — `target/` with its hundred thousand
+  artefacts is one lazy row until you click it, and shows at most 100 entries
+  with a "+N more" note if you do. Folders sort first, dotfiles stay hidden,
+  and a project whose folder has vanished says "unreadable" rather than
+  pretending to be empty.
+- **Click a file and it opens as a tile** — an editor pane wearing the same
+  frame, head strip, dot and ✕ as every other tile, docked at the workspace's
+  left edge; the agents tile in what remains, under whatever layout mode is
+  set. Syntax highlighting (GtkSourceView), line numbers, and lines wrapped to
+  the tile's width, since these tiles get narrow the moment another agent
+  arrives. The strip's verbs are undo, redo and save, and the dot speaks the
+  vocabulary the other dots already do — amber is "waiting on you", which for
+  a buffer means unsaved changes. One editor per project: the first file opens
+  it, every later click switches what it holds, asking Save / Discard /
+  Keep editing first if there's unsaved work, exactly as closing does. It is
+  deliberately not an agent — broadcast typing skips it, the sidebar's tally
+  doesn't count it, and reopening a session never starts a `claude` for it.
+  What it won't open it refuses out loud, as a toast naming the reason: a
+  file that isn't UTF-8 text (editing would corrupt it), or one past 2 MB.
 - **Every pane says what its agent is doing** — a dot in each pane's head
   strip: hollow while it starts, green while it works (hover it to see which
   tool), amber when it stops to ask you something, red when it has exited. The
