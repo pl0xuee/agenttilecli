@@ -475,7 +475,7 @@ impl Tiler {
     pub(crate) fn set_font_scale(&self, scale: f64) {
         self.imp().font_scale.set(scale);
         for pane in self.imp().panes.borrow().iter() {
-            pane.terminal.set_font_scale(scale);
+            pane.set_font_scale(scale);
         }
     }
 
@@ -497,14 +497,31 @@ impl Tiler {
         true
     }
 
-    /// The terminal of the pane the keyboard is in.
+    /// Where the agents' area sits in this widget's own coordinates: `(x, width)`.
+    ///
+    /// The docked editor column (see `layout::editor_split`) pushes the agents
+    /// right, and every piece of geometry that divides *their* space - the
+    /// master seam, the grid seams - has to measure against this area rather
+    /// than the whole widget, or the seams drift left of the tiles they
+    /// belong to by exactly one editor's width.
+    pub(super) fn agents_area(&self) -> (i32, i32) {
+        let panes = self.imp().panes.borrow();
+        let editor = panes.iter().any(|p| p.editor().is_some());
+        let agents = panes.iter().filter(|p| p.editor().is_none()).count();
+        crate::layout::editor_split(self.width(), editor, agents)
+    }
+
+    /// The terminal of the pane the keyboard is in - `None` when there isn't
+    /// one, which now includes the keyboard being in an editor pane. The
+    /// callers are terminal verbs (find, copy-output), and over a file they
+    /// quietly do nothing rather than act on some other pane's terminal.
     pub fn focused_terminal(&self) -> Option<vte4::Terminal> {
         let focus = self.imp().focus.get();
         self.imp()
             .panes
             .borrow()
             .get(focus)
-            .map(|pane| pane.terminal.clone())
+            .and_then(|pane| pane.terminal().cloned())
     }
 
     /// Whether keystrokes are being echoed to every pane in this group.
@@ -607,7 +624,7 @@ impl Tiler {
     fn grab_focus_on_current(&self) {
         let focus = self.imp().focus.get();
         if let Some(pane) = self.imp().panes.borrow().get(focus) {
-            pane.terminal.grab_focus();
+            pane.focus_input();
         }
         self.notify_title();
     }
@@ -649,8 +666,7 @@ impl Tiler {
             .panes
             .borrow()
             .get(focus)
-            .and_then(|p| p.terminal.window_title())
-            .map(|t| t.to_string())
+            .and_then(|p| p.title())
             .unwrap_or_default();
         if let Some(cb) = self.imp().title_cb.borrow().as_ref() {
             cb(&title);

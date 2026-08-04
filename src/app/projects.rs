@@ -54,9 +54,13 @@ impl App {
                 if app.0.store.borrow().active() == Some(id) {
                     app.sync_mode_sensitivity(count);
                     // What the next project gets opened with - see
-                    // `Inner::last_agent_count`.
-                    if count > 0 {
-                        app.0.last_agent_count.set(count);
+                    // `Inner::last_agent_count`. The *agent* tally rather than
+                    // the pane count it used to be: "I work with two agents
+                    // and had a file open" is a preference for two agents, not
+                    // three.
+                    let agents = app.tiler_for(id).map_or(0, |t| t.agent_tally().total());
+                    if agents > 0 {
+                        app.0.last_agent_count.set(agents);
                     }
                 }
             }
@@ -212,6 +216,25 @@ impl App {
             self.select(fallback);
         }
         self.schedule_save();
+    }
+
+    /// Opens `file` in an editor pane of the project whose tree it was clicked
+    /// in - tiled in with the agents, because that is what this window is, and
+    /// a dialog floating over the workspace covered the very agents whose work
+    /// you opened the file to check on. Switching to the project is part of
+    /// the same promise: the pane appears in that project's grid, and a click
+    /// whose result lands behind the sidebar is a click that did nothing.
+    ///
+    /// The editor's refusals (not text, too big, unreadable) arrive as the
+    /// `Err` sentence and land as a toast.
+    pub(super) fn edit_file(&self, id: ProjectId, file: &std::path::Path) {
+        let Some(tiler) = self.tiler_for(id) else {
+            return;
+        };
+        self.select(id);
+        if let Err(why) = tiler.open_editor_pane(file) {
+            self.toast(&why);
+        }
     }
 
     /// Hands an agent's report to whichever project owns the pane that sent it.

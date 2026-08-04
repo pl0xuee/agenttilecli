@@ -45,6 +45,10 @@ use crate::updates::Updates;
 
 mod header;
 mod projects;
+// The folder tree a sidebar strip unfolds into - split out for the same reason
+// `sidebar` itself was: it answers "what is in this project", which is its own
+// question, and the listing rules are testable without a display.
+mod tree;
 // `pub(crate)` for the rack's fraction bounds alone: `session::Session::clamped`
 // holds a remembered sidebar fraction to the range the grip holds a drag to, and
 // the range is worth sharing rather than copying (see `sidebar_fraction`).
@@ -564,10 +568,14 @@ impl App {
                 mode: project.mode,
                 master_ratio: project.master_ratio,
                 master_count: project.master_count,
+                // The agent tally, not the pane count: this number is what a
+                // restore with `restore_agents` on will *spawn claudes from*,
+                // and an open editor pane counted here would come back as an
+                // extra agent nobody started.
                 agents: views
                     .iter()
                     .find(|v| v.id == project.id)
-                    .map_or(0, |v| v.tiler.pane_count()),
+                    .map_or(0, |v| v.tiler.agent_tally().total()),
                 active: active == Some(project.id),
             })
             .collect();
@@ -769,6 +777,14 @@ impl App {
             view.tiler.refresh_appearance();
         }
         self.schedule_save();
+    }
+
+    /// A quiet aside over the workspace - the editor's refusals and save
+    /// failures land here, because a click or a Ctrl+S that silently does
+    /// nothing reads as a broken app, and a modal alert for "that file is a
+    /// PNG" is a speed bump where a sentence would do.
+    pub fn toast(&self, message: &str) {
+        self.0.toasts.add_toast(adw::Toast::new(message));
     }
 
     pub fn copy_focused_output(&self) {

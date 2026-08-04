@@ -329,6 +329,7 @@ impl App {
         };
         let name = project.name.clone();
         let hue = project.hue.clone();
+        let path = project.path.clone();
         let row_icon = gtk4::Image::builder()
             .icon_name(&project.icon)
             .css_classes(["sidebar-row-icon"])
@@ -377,16 +378,78 @@ impl App {
         let this = self.clone();
         close.connect_clicked(move |_| this.remove_project(id));
 
+        // The chevron that unfolds the strip into its folder tree. A button
+        // rather than a bare gesture on the strip, because the strip's own
+        // click already means "open this project" - and because a button
+        // swallows its click, unfolding a background project's tree doesn't
+        // also switch to it. Every strip gets one, the welcome entry included:
+        // it names a real folder like any other row, and a chevron only some
+        // rows carry would put every other row's icon a slot out of line.
+        let expand = gtk4::ToggleButton::builder()
+            .icon_name("pan-end-symbolic")
+            .css_classes(["sidebar-row-expand"])
+            .valign(gtk4::Align::Center)
+            .can_focus(false)
+            .tooltip_text("Show the files in this project")
+            .build();
+
+        let tree = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .css_classes(["sidebar-tree"])
+            .build();
+        // A revealer rather than `set_visible`, so the tree unfolds at the same
+        // tempo everything else in this window moves at instead of snapping in.
+        let revealer = gtk4::Revealer::builder()
+            .transition_type(gtk4::RevealerTransitionType::SlideDown)
+            .transition_duration(160)
+            .child(&tree)
+            .build();
+
+        // What a clicked file does: opens as an editor pane in this project's
+        // own grid. The tree carries the closure down every level rather than
+        // knowing the app - see `tree::OpenFile`.
+        let this = self.clone();
+        let open: Rc<super::tree::OpenFile> = Rc::new(move |file| this.edit_file(id, file));
+
+        // Rebuilt from disk on every unfold - see `tree`'s module comment for
+        // why fresh beats cached in an app whose agents exist to change these
+        // files. Folding only hides it; the stale rows are invisible, and the
+        // next unfold overwrites them before they are shown again.
+        let tree_of_toggle = tree.clone();
+        let revealer_of_toggle = revealer.clone();
+        expand.connect_toggled(move |button| {
+            if button.is_active() {
+                button.set_icon_name("pan-down-symbolic");
+                super::tree::rebuild(&tree_of_toggle, std::path::Path::new(&path), &open);
+                revealer_of_toggle.set_reveal_child(true);
+            } else {
+                button.set_icon_name("pan-end-symbolic");
+                revealer_of_toggle.set_reveal_child(false);
+            }
+        });
+
         let content = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
             .spacing(8)
             .build();
+        content.append(&expand);
         content.append(&row_icon);
         content.append(&label);
         content.append(&agents);
         content.append(&close);
 
-        let row = gtk4::ListBoxRow::builder().child(&content).build();
+        // The strip is a column now: the row everything always was, and the
+        // tree it can unfold into beneath it. Inside the `ListBoxRow` rather
+        // than a sibling of it, so the tree keeps the strip's fill, rail and
+        // selection - it is part of the strip, not a second widget the sort
+        // function would have to be taught to skip.
+        let column = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .build();
+        column.append(&content);
+        column.append(&revealer);
+
+        let row = gtk4::ListBoxRow::builder().child(&column).build();
         row.set_widget_name(&id.as_name());
         row.add_css_class("sidebar-row");
         row.add_css_class(&hue);

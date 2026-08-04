@@ -194,39 +194,30 @@ mod layout_imp {
         }
 
         fn allocate(&self, widget: &Widget, width: i32, height: i32, _baseline: i32) {
-            let mut children = Vec::new();
+            // The editor is a fixture, not a tile: it docks at the left edge
+            // (beside the project tree that opens files into it) and the mode
+            // arranges only the agents, in whatever width remains. Partitioned
+            // by the marker class `Pane::open_file` stamps, because this
+            // manager sees widgets, not panes.
+            let mut editors = Vec::new();
+            let mut agents = Vec::new();
             let mut next = widget.first_child();
             while let Some(child) = next {
                 next = child.next_sibling();
-                children.push(child);
+                if child.has_css_class("editor-tile") {
+                    editors.push(child);
+                } else {
+                    agents.push(child);
+                }
             }
-            let n = children.len();
-            if n == 0 {
+            if editors.is_empty() && agents.is_empty() {
                 return;
             }
 
-            let rects = if self.mode.get() == Mode::Grid {
-                self.ensure_grid_ratios(n, width, height);
-                layout::grid_weighted(
-                    n,
-                    width,
-                    height,
-                    &self.row_ratios.borrow(),
-                    &self.col_ratios.borrow(),
-                )
-            } else {
-                layout::compute(
-                    n,
-                    self.focus.get(),
-                    self.mode.get(),
-                    self.master_count.get(),
-                    self.master_ratio.get(),
-                    width,
-                    height,
-                )
-            };
+            let (editor_width, agents_width) =
+                layout::editor_split(width, !editors.is_empty(), agents.len());
 
-            for (child, rect) in children.iter().zip(rects.iter()) {
+            let place = |child: &Widget, rect: &layout::Rect| {
                 let visible = rect.width > 0 && rect.height > 0;
                 child.set_child_visible(visible);
                 if visible {
@@ -234,6 +225,74 @@ mod layout_imp {
                         .translate(&graphene::Point::new(rect.x as f32, rect.y as f32));
                     child.allocate(rect.width, rect.height, -1, Some(transform));
                 }
+            };
+
+            for child in &editors {
+                place(
+                    child,
+                    &layout::shrink(layout::Rect {
+                        x: 0,
+                        y: 0,
+                        width: editor_width,
+                        height,
+                    }),
+                );
+            }
+
+            let n = agents.len();
+            if n == 0 {
+                return;
+            }
+            // The focus cell indexes the whole pane list, editor included; the
+            // modes arrange only the agents, so it is re-based to "how many
+            // agents sit before the focused pane" - which is the focused
+            // agent's own index when an agent holds the focus, and the first
+            // agent when the editor does (monocle has to show *something*
+            // beside a focused editor, and the first agent is the stable
+            // choice).
+            let agent_focus = {
+                let focus = self.focus.get().min(editors.len() + n);
+                let mut child = widget.first_child();
+                let mut seen = 0usize;
+                let mut before = 0usize;
+                while let Some(c) = child {
+                    if seen >= focus {
+                        break;
+                    }
+                    if !c.has_css_class("editor-tile") {
+                        before += 1;
+                    }
+                    seen += 1;
+                    child = c.next_sibling();
+                }
+                before.min(n - 1)
+            };
+
+            let rects = if self.mode.get() == Mode::Grid {
+                self.ensure_grid_ratios(n, agents_width, height);
+                layout::grid_weighted(
+                    n,
+                    agents_width,
+                    height,
+                    &self.row_ratios.borrow(),
+                    &self.col_ratios.borrow(),
+                )
+            } else {
+                layout::compute(
+                    n,
+                    agent_focus,
+                    self.mode.get(),
+                    self.master_count.get(),
+                    self.master_ratio.get(),
+                    agents_width,
+                    height,
+                )
+            };
+
+            for (child, rect) in agents.iter().zip(rects.iter()) {
+                let mut rect = *rect;
+                rect.x += editor_width;
+                place(child, &rect);
             }
         }
     }

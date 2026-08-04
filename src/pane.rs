@@ -113,8 +113,10 @@ fn status_words(state: &PaneState) -> String {
 struct Head {
     label: gtk4::Label,
     /// The folder the pane was started in - which is the project's own, and
-    /// therefore the one thing the strip should never bother saying.
-    root: String,
+    /// therefore the one thing the strip should never bother saying. For an
+    /// editor pane it is the file's name instead, and mutable because the
+    /// file can change under the same strip - see `Pane::refresh_file_name`.
+    root: RefCell<String>,
     /// The folder its foreground process is in now, once anything is known.
     cwd: RefCell<Option<String>>,
     state: RefCell<PaneState>,
@@ -142,9 +144,9 @@ impl Head {
         let text = match self.cwd.borrow().as_deref() {
             // It has moved out of the project's folder, which is the one case
             // where naming a folder tells you something you didn't know.
-            Some(cwd) if cwd != self.root => cwd.to_string(),
+            Some(cwd) if cwd != self.root.borrow().as_str() => cwd.to_string(),
             _ if self.reports => status_words(&self.state.borrow()),
-            _ => self.root.clone(),
+            _ => self.root.borrow().clone(),
         };
         self.label.set_label(&text);
     }
@@ -403,7 +405,7 @@ pub struct Pane {
     /// life of the process, which is the life of the socket it reports over.
     pub id: String,
     pub frame: Frame,
-    pub terminal: Terminal,
+    body: Body,
     pub close_button: gtk4::Button,
     /// The dot in the head strip, repainted by `set_state`.
     status: gtk4::Box,
@@ -416,6 +418,20 @@ pub struct Pane {
     /// every pane after any pane operation, and all but one of those panes
     /// were already in the state it's about to set them to.
     focused: Cell<bool>,
+}
+
+/// What fills the frame under the head strip.
+///
+/// Almost every pane is a terminal, and for a long time the terminal *was* a
+/// field, which made "a pane is a tile with a PTY in it" true by construction.
+/// The editor is the second thing a tile can hold, and an enum rather than an
+/// `Option<Terminal>` because the two are not "a terminal, maybe": every
+/// operation the tiler performs either means something to both (focus, close,
+/// the head strip) or belongs to exactly one (broadcast and search to the
+/// terminal, save to the editor), and a match is where that split is legible.
+enum Body {
+    Terminal(Terminal),
+    Editor(crate::editor::Editor),
 }
 
 impl Pane {
@@ -458,6 +474,15 @@ impl Pane {
         crate::clipboard::install(&terminal);
         crate::links::install(&terminal);
 
+        let (frame, head, status, close_button) = Self::shell(&terminal);
+        (frame, terminal, head, status, close_button)
+    }
+
+    /// The tile every body wears: a framed column of head strip over content.
+    /// Split out of `bare` when the editor became the second thing a frame
+    /// could hold, so both bodies get the same strip, the same dot slot and
+    /// the same close button - a tile is a tile, whatever is in it.
+    fn shell(content: &impl IsA<gtk4::Widget>) -> (Frame, gtk4::Box, gtk4::Box, gtk4::Button) {
         let close_button = gtk4::Button::builder()
             .icon_name("window-close-symbolic")
             .css_classes(["flat", "pane-close"])
@@ -501,14 +526,167 @@ impl Pane {
             .orientation(gtk4::Orientation::Vertical)
             .build();
         body.append(&head);
-        body.append(&terminal);
+        body.append(content);
 
         let frame = Frame::new(None);
         frame.add_css_class("pane");
         frame.set_overflow(gtk4::Overflow::Hidden);
         frame.set_child(Some(&body));
 
-        (frame, terminal, head, status, close_button)
+        (frame, head, status, close_button)
+    }
+
+    /// A pane holding `path` open in the editor rather than an agent - the
+    /// same tile, with a file where the terminal would be. `Err` is the
+    /// editor's own refusal (not text, too big, unreadable), worded for a
+    /// toast.
+    ///
+    /// The head strip does the same jobs it does over a terminal, translated:
+    /// the label names the file (a folder would name what every neighbouring
+    /// strip already says), the dot says whether there is unsaved work in the
+    /// vocabulary the dots already speak - amber is "waiting on you", and a
+    /// buffer that differs from its file is exactly that - and the editor's
+    /// three verbs sit where a terminal pane keeps its close button company.
+    pub fn open_file(path: &std::path::Path) -> Result<Self, String> {
+        let editor = crate::editor::Editor::load(path)?;
+        let (frame, head, status, close_button) = Self::shell(&editor.root);
+        // A marker, not a style hook: `TilerLayout::allocate` reads this class
+        // to dock the editor at the workspace's left edge rather than tiling
+        // it with the agents, and `resize` reads it to measure seams against
+        // the area the agents actually divide. The stylesheet deliberately has
+        // no rule for it - the editor tile wears the same `.pane` costume as
+        // every other tile.
+        frame.add_css_class("editor-tile");
+
+        let head_label = gtk4::Label::builder()
+            .css_classes(["pane-head-label"])
+            .halign(gtk4::Align::Start)
+            .hexpand(true)
+            .xalign(0.0)
+            .ellipsize(gtk4::pango::EllipsizeMode::Middle)
+            .can_target(false)
+            .build();
+        head.insert_child_after(&head_label, Some(&status));
+        head.insert_child_after(&editor.controls, Some(&head_label));
+
+        // `reports: false` and `root` = the file name: the strip shows the one
+        // fact this pane has (which file), exactly as a command pane's shows
+        // its folder, and nothing will ever arrive over the socket to rewrite
+        // it.
+        let head_state = Rc::new(Head {
+            label: head_label,
+            root: RefCell::new(editor.name()),
+            cwd: RefCell::new(None),
+            state: RefCell::new(PaneState::Idle),
+            reports: false,
+        });
+        head_state.refresh();
+
+        // The dot, driven by the buffer rather than by hooks: quiet grey while
+        // the file matches the disk, the amber "waiting on you" while it
+        // doesn't - which is what unsaved changes are.
+        status.remove_css_class("starting");
+        status.add_css_class("idle");
+        status.set_tooltip_text(Some("Saved"));
+        {
+            let status = status.clone();
+            editor.buffer.connect_modified_changed(move |buffer| {
+                let modified = buffer.is_modified();
+                for class in STATUS_CLASSES {
+                    status.remove_css_class(class);
+                }
+                status.add_css_class(if modified { "waiting" } else { "idle" });
+                status.set_tooltip_text(Some(if modified {
+                    "Unsaved changes (Ctrl+S)"
+                } else {
+                    "Saved"
+                }));
+            });
+        }
+
+        Ok(Pane {
+            id: next_pane_id(),
+            frame,
+            body: Body::Editor(editor),
+            close_button,
+            status,
+            head: head_state,
+            pid: Rc::new(Cell::new(None)),
+            focused: Cell::new(false),
+        })
+    }
+
+    /// The terminal, for the operations that only mean anything to one -
+    /// broadcast, copy-output, search, the process signals. An editor pane
+    /// answers `None` and those operations pass it by.
+    pub fn terminal(&self) -> Option<&Terminal> {
+        match &self.body {
+            Body::Terminal(terminal) => Some(terminal),
+            Body::Editor(_) => None,
+        }
+    }
+
+    /// The editor, for the operations that only mean anything to one - the
+    /// close flow's "anything unsaved?" question.
+    pub fn editor(&self) -> Option<&crate::editor::Editor> {
+        match &self.body {
+            Body::Terminal(_) => None,
+            Body::Editor(editor) => Some(editor),
+        }
+    }
+
+    /// Puts the keyboard where typing lands in this pane.
+    pub fn focus_input(&self) {
+        match &self.body {
+            Body::Terminal(terminal) => {
+                terminal.grab_focus();
+            }
+            Body::Editor(editor) => {
+                editor.view.grab_focus();
+            }
+        }
+    }
+
+    /// What the header's subtitle should call this pane, if anything: a
+    /// terminal's own window title when it has set one, or the fact of the
+    /// file for an editor.
+    pub fn title(&self) -> Option<String> {
+        match &self.body {
+            Body::Terminal(terminal) => terminal.window_title().map(|t| t.to_string()),
+            Body::Editor(editor) => Some(format!("editing {}", editor.name())),
+        }
+    }
+
+    /// Re-reads the strip after the editor switched files - the one fact the
+    /// strip shows for an editor pane is which file, and it just changed.
+    /// Nothing to do for a terminal pane, whose strip answers to the cwd poll
+    /// and the agent's state instead.
+    pub fn refresh_file_name(&self) {
+        if let Body::Editor(editor) = &self.body {
+            *self.head.root.borrow_mut() = editor.name();
+            self.head.refresh();
+        }
+    }
+
+    /// This pane's agent state, or `None` for a pane no agent will ever speak
+    /// for. The rack's dots and the "3 agents" tally read this rather than
+    /// `state`, so an open editor is never counted as an agent - it is a file,
+    /// not something working on your behalf.
+    pub fn agent_state(&self) -> Option<PaneState> {
+        match &self.body {
+            Body::Terminal(_) => Some(self.state()),
+            Body::Editor(_) => None,
+        }
+    }
+
+    /// VTE's font scale, for the bodies that have VTE in them. The editor's
+    /// text stays put for now, the way the sidebar's does: its type is chrome-
+    /// sized, and scaling it means deciding how a source view should track the
+    /// terminals - a decision worth making once, not implying here.
+    pub fn set_font_scale(&self, scale: f64) {
+        if let Body::Terminal(terminal) = &self.body {
+            terminal.set_font_scale(scale);
+        }
     }
 
     /// The usual pane: `claude`, running in `cwd` - with `BELL_HOOK` installed,
@@ -561,7 +739,7 @@ impl Pane {
 
         let head_state = Rc::new(Head {
             label: head_label,
-            root: folder_name(cwd),
+            root: RefCell::new(folder_name(cwd)),
             cwd: RefCell::new(None),
             state: RefCell::new(PaneState::Starting),
             reports,
@@ -683,7 +861,7 @@ impl Pane {
         let pane = Pane {
             id: id.clone(),
             frame,
-            terminal,
+            body: Body::Terminal(terminal),
             close_button,
             status,
             head: head_state,
@@ -749,8 +927,13 @@ impl Pane {
     /// both of those need backdrop around the pane to land on, which a pane
     /// pushed flush against a screen edge or a neighbour doesn't have.
     pub fn set_focused(&self, focused: bool) {
-        if self.focused.replace(focused) != focused {
-            apply_theme(&self.terminal, focused);
+        if self.focused.replace(focused) != focused
+            && let Body::Terminal(terminal) = &self.body
+        {
+            // Editor bodies need nothing here: their focus treatment is the
+            // frame's `.focused` ring and fill, which the tiler's CSS class
+            // already carries, and there is no VTE clearing to keep in step.
+            apply_theme(terminal, focused);
         }
     }
 
@@ -762,8 +945,10 @@ impl Pane {
     /// wrong one here: nothing about the pane has changed, the settings have,
     /// and every pane needs the new ones whatever it was doing.
     pub fn refresh_appearance(&self) {
-        apply_theme(&self.terminal, self.focused.get());
-        apply_font(&self.terminal);
+        if let Body::Terminal(terminal) = &self.body {
+            apply_theme(terminal, self.focused.get());
+            apply_font(terminal);
+        }
     }
 
     /// Politely ask the child (shell + claude) to exit, mirroring how a real

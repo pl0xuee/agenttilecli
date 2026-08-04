@@ -126,11 +126,11 @@ pub struct Project {
     pub id: ProjectId,
     /// The directory panes in this project are spawned in.
     ///
-    /// Written but not yet read: the live copy panes actually spawn against is
-    /// `Tiler`'s own `cwd`. This one is the record of it, and it is what a
-    /// restored session reopens a project *from* - the one field here that phase
-    /// 3 cannot be written without.
-    #[allow(dead_code)]
+    /// The live copy panes actually spawn against is `Tiler`'s own `cwd`; this
+    /// one is the record of it. It is what a session on disk reopens a project
+    /// *from*, and what the strip's folder tree reads - both readers that
+    /// arrived after the `allow(dead_code)` this field wore, which is why it
+    /// no longer does.
     pub path: String,
     /// What the sidebar calls it - the folder name, except for the startup
     /// project, which is named for what it holds rather than where it is.

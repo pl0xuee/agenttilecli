@@ -3,6 +3,7 @@ mod appearance;
 mod clipboard;
 mod commands;
 mod config;
+mod editor;
 mod hooks;
 mod ipc;
 mod keybindings;

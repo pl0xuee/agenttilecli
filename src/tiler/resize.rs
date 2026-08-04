@@ -26,7 +26,16 @@ impl Tiler {
         if lm.imp().mode.get() != Mode::MasterStack {
             return None;
         }
-        let n = self.imp().panes.borrow().len();
+        // The agents are what the master/stack division divides - the docked
+        // editor is outside it, so it neither counts toward "is there a
+        // divider" nor shifts where the ratio lands within the agents' area.
+        let n = self
+            .imp()
+            .panes
+            .borrow()
+            .iter()
+            .filter(|p| p.editor().is_none())
+            .count();
         if n == 0 {
             return None;
         }
@@ -34,7 +43,8 @@ impl Tiler {
         if master_count >= n {
             return None;
         }
-        Some((self.width() as f64 * lm.imp().master_ratio.get()) as i32)
+        let (origin, width) = self.agents_area();
+        Some(origin + (width as f64 * lm.imp().master_ratio.get()) as i32)
     }
 
     /// Which draggable seam (if any) is under `(x, y)`, in this widget's own
@@ -59,6 +69,19 @@ impl Tiler {
         }
         let row_spans = layout::weighted_spans(self.height(), &row_ratios);
 
+        // The grid lives in the agents' area (the docked editor sits to its
+        // left), so the pointer's x is re-based into that area before it is
+        // compared with anything - the seams the spans describe are seams of
+        // the agents' own width.
+        let (origin, agents_width) = self.agents_area();
+        let x = x - f64::from(origin);
+        // Left of the agents' area is the editor - there are no grid seams
+        // over it, row seams included, and a drag that started there must not
+        // grab one it isn't touching.
+        if x < -RESIZE_HANDLE_PX {
+            return None;
+        }
+
         // Every row carries a full `cols` worth of ratios (so all cells stay
         // the same size - see `TilerLayout::col_ratios`), but a partial last
         // row has real panes in only the first few of them. Only seams
@@ -66,7 +89,13 @@ impl Tiler {
         // empty cells of a partial row would offer phantom seams over blank
         // space, and dragging one would resize the row's real panes away from
         // the uniform cell size every other row keeps.
-        let n = self.imp().panes.borrow().len();
+        let n = self
+            .imp()
+            .panes
+            .borrow()
+            .iter()
+            .filter(|p| p.editor().is_none())
+            .count();
         let cols = lm.imp().grid_shape_dims.get().0;
 
         // Column seams take priority: only reachable within their own row's
@@ -80,7 +109,7 @@ impl Tiler {
                 continue;
             };
             let panes_in_row = n.saturating_sub(row_i * cols).min(cols);
-            let col_spans = layout::weighted_spans(self.width(), ratios);
+            let col_spans = layout::weighted_spans(agents_width, ratios);
             for j in 0..panes_in_row.saturating_sub(1) {
                 let boundary = col_spans[j + 1].0;
                 if (x - boundary as f64).abs() <= RESIZE_HANDLE_PX {
@@ -124,7 +153,10 @@ impl Tiler {
             Handle::GridCol(row_i, j) => {
                 let col_ratios = lm.imp().col_ratios.borrow();
                 let ratios = col_ratios.get(row_i)?;
-                let spans = layout::weighted_spans(self.width(), ratios);
+                // The agents' width, not the widget's: these spans are what
+                // the drag's pixel delta is measured against, and the ratios
+                // divide the area the grid actually occupies.
+                let spans = layout::weighted_spans(self.agents_area().1, ratios);
                 seam_state(handle, ratios, &spans, j, generation)
             }
             Handle::Master => None,
@@ -165,7 +197,11 @@ impl Tiler {
                     this.imp()
                         .drag_start_ratio
                         .set(this.layout_mgr().imp().master_ratio.get());
-                    this.imp().drag_start_width.set(this.width());
+                    // The agents' width: the ratio the drag rewrites divides
+                    // their area, so a pixel of travel is a pixel of *that*
+                    // width, or a drag beside a docked editor moves the seam
+                    // slower than the hand.
+                    this.imp().drag_start_width.set(this.agents_area().1);
                     gesture.set_state(EventSequenceState::Claimed);
                 }
                 Some(handle @ (Handle::GridRow(_) | Handle::GridCol(_, _))) => {

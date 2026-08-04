@@ -13,11 +13,11 @@ if ! have cargo; then
     exit 1
 fi
 
-# Covers pkg-config itself plus the GTK4/VTE4 dev packages below, since every
-# distro bundles them in one install command anyway.
-PKG_HINT="  Arch/CachyOS:   sudo pacman -S pkgconf gtk4 vte4 libadwaita
-  Fedora:         sudo dnf install pkg-config gtk4-devel vte291-gtk4-devel libadwaita-devel
-  Debian/Ubuntu:  sudo apt install pkg-config libgtk-4-dev libvte-2.91-gtk4-dev libadwaita-1-dev"
+# Covers pkg-config itself plus the GTK4/VTE4/GtkSourceView dev packages below,
+# since every distro bundles them in one install command anyway.
+PKG_HINT="  Arch/CachyOS:   sudo pacman -S pkgconf gtk4 vte4 libadwaita gtksourceview5
+  Fedora:         sudo dnf install pkg-config gtk4-devel vte291-gtk4-devel libadwaita-devel gtksourceview5-devel
+  Debian/Ubuntu:  sudo apt install pkg-config libgtk-4-dev libvte-2.91-gtk4-dev libadwaita-1-dev libgtksourceview-5-dev"
 
 if ! have pkg-config; then
     echo "error: pkg-config is not installed." >&2
@@ -39,6 +39,14 @@ if ! pkg-config --atleast-version=0.70 vte-2.91-gtk4 2>/dev/null; then
     echo "$PKG_HINT" >&2
     echo "       Note: this package is fairly recent upstream, so older distro releases" >&2
     echo "       (e.g. Debian 12 bookworm) may not carry it at all." >&2
+    exit 1
+fi
+
+if ! pkg-config --exists gtksourceview-5 2>/dev/null; then
+    echo "error: GtkSourceView 5 development files not found (pkg-config gtksourceview-5)." >&2
+    echo "       It draws the file editor behind the sidebar's folder tree." >&2
+    echo "       Install your distro's GtkSourceView 5 dev package and try again, e.g.:" >&2
+    echo "$PKG_HINT" >&2
     exit 1
 fi
 

@@ -739,6 +739,60 @@ searchbar > revealer > box {
   background-color: alpha(@text, 0.08);
 }
 
+/* ── The editor pane ───────────────────────────────────────────────────────
+   A tile holding a file instead of an agent - same frame, same head strip,
+   same close button; see `Pane::editor`. The code itself is painted by
+   GtkSourceView's Adwaita-dark scheme rather than by this sheet: a scheme is
+   a palette for *languages*, and restating one here would be a second copy of
+   two hundred files' worth of colour rules. The seam between the scheme's
+   near-black and the ramp's gunmetal is real and accepted; a scheme of our
+   own in the app's palette is its own piece of work.
+
+   The strip's three verbs - undo, redo, save - take the close button's own
+   geometry, because a strip is one row of small controls or it is clutter.
+   They rest at @faint like the close button does; what they do not take is
+   its @hangup hover, which means "this destroys something" and undo is the
+   opposite claim. */
+.pane-editor-action {
+  min-width: 1.5em;
+  min-height: 1.5em;
+  padding: 0;
+  border-radius: 0.3em;
+  color: @faint;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1),
+    color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.pane-editor-action:hover {
+  color: @text;
+  background-color: alpha(@text, 0.08);
+}
+
+/* Save carries the lamp while there is anything to save - the one control in
+   the strip whose sensitivity is a fact about your work rather than about the
+   widget - and the theme's own dimming carries "nothing to save". */
+.pane-editor-save {
+  color: @filament;
+}
+
+.pane-editor-save:hover {
+  background-color: alpha(@filament, 0.16);
+}
+
+/* Where a failed save says why, since an editor pane has no terminal to say
+   it in. Amber, not red: the file is unsaved, which is a claim on your
+   attention, not a destruction. */
+.editor-error {
+  padding: 0.3em 0.7em;
+  color: @tally;
+  background-color: alpha(@tally, 0.08);
+  font-family: monospace;
+  font-size: 0.8em;
+}
+
 /* ── Toasts ────────────────────────────────────────────────────────────────
    Level 4, and the one floating surface the alias block above cannot reach.
    libadwaita's own sheet hard-codes it - `toast { background: #505053; color:
@@ -1104,6 +1158,117 @@ row.sidebar-row:hover .sidebar-row-close {
   opacity: 1;
   color: @field;
   background-color: @hangup;
+}
+
+/* ── The strip's folder tree ───────────────────────────────────────────────
+   A strip names a folder; the chevron beside its icon unfolds what the folder
+   holds, one level at a time, inside the strip itself. Inside on purpose: the
+   tree keeps the strip's fill, rail and selection, so an unfolded project
+   still reads as one strip that has opened rather than as a second widget
+   wedged into the rack.
+
+   Everything here is subordinate to the strip that owns it. The names are set
+   a step smaller than the project's own and a step dimmer, folders a shade
+   brighter than files because they are the rows that go somewhere - and
+   nothing in the tree is allowed a fill at rest, for the same reason the rack
+   itself went borderless: a hundred outlined rows in a 170px column is a
+   texture, and the lit strip is the only thing here with a right to shine. */
+.sidebar-row-expand {
+  min-width: 1.35em;
+  min-height: 1.35em;
+  padding: 0;
+  border-radius: 0.3em;
+  color: @muted;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.sidebar-row-expand:hover {
+  color: @text;
+  background-color: alpha(@text, 0.08);
+}
+
+/* Checked is not a state worth a fill here: the unfolded tree below the strip
+   is its own evidence, and the theme's pressed wash would sit on the strip
+   like a stuck button the whole time the tree is open. The chevron's rotation
+   (swapped in Rust, not drawn here) carries the state instead. */
+.sidebar-row-expand:checked {
+  color: @text;
+  background-color: transparent;
+}
+
+.sidebar-row-expand:checked:hover {
+  background-color: alpha(@text, 0.08);
+}
+
+.sidebar-tree {
+  margin-top: 0.4em;
+}
+
+/* A folder row is a button so it can swallow its own click - unfolding a level
+   of a background project's tree must not also switch to that project. It
+   gives up every part of the theme's button costume for the same reason the
+   palette's rows did: it is a line in an index, and only the pointer resting
+   on it earns it a wash. */
+button.sidebar-tree-dir {
+  padding: 0.18em 0.3em;
+  border: none;
+  border-radius: 0.3em;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: @dim;
+  transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+button.sidebar-tree-dir:hover {
+  color: @text;
+  background-color: alpha(@text, 0.06);
+}
+
+/* A file row opens the file in a pager pane of its own project (see
+   `App::view_file`), so it is a button like the folders, and undressed the
+   same way. It still sits a step quieter at rest: a tree is mostly files, and
+   the folders are the rows that change what the tree shows, so they are the
+   ones allowed a little more presence. */
+button.sidebar-tree-file {
+  padding: 0.18em 0.3em;
+  border: none;
+  border-radius: 0.3em;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: @muted;
+  transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+button.sidebar-tree-file:hover {
+  color: @text;
+  background-color: alpha(@text, 0.06);
+}
+
+/* The same humanist sans the project names wear, a step down in size: a file
+   name is prose from the same family as the name above it, not a second voice.
+   The icons inherit each row's own colour rather than taking one of their own,
+   so a hovered folder brightens whole. */
+.sidebar-tree-label {
+  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-size: 0.98em;
+}
+
+/* The tree's asides - "empty", "unreadable", "+30 more". Engraved like every
+   other footnote in the app, so a fact about the listing can never be misread
+   as a file that happens to be called that. */
+.sidebar-tree-note {
+  padding: 0.18em 0.3em;
+  color: @faint;
+  font-family: monospace;
+  font-size: 0.78em;
 }
 
 /* ── Attention ─────────────────────────────────────────────────────────────

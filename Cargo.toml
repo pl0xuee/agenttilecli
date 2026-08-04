@@ -21,6 +21,15 @@ adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
 # needs is itself recent enough that every distro in the README's install table
 # ships 0.76 or newer.
 vte4 = { version = "0.10", features = ["v0_70"] }
+# The editor the sidebar's folder tree opens files into. This is the one job
+# where hand-rolling loses on every axis at once: syntax highlighting for a
+# couple of hundred languages, line numbers, and undo integration are exactly
+# what GtkSourceView is, and a home-made lexer would be a permanent maintenance
+# surface bought to avoid a ~1 MB library whose every dependency the GTK4 stack
+# already pulls in. It does raise the install floor by one package
+# (`gtksourceview5` / `gtksourceview5-devel` / `libgtksourceview-5-dev`), which
+# the README's table and install.sh's check both state.
+sourceview5 = "0.11"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

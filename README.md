@@ -232,14 +232,15 @@ by name, and Preferences.
 
 ## Requirements
 
-- `git`, `pkg-config`, GTK4 (>= 4.12), libadwaita (>= 1.5), and the
-  GTK4-flavored VTE terminal widget (>= 0.70), including their dev files:
+- `git`, `pkg-config`, GTK4 (>= 4.12), libadwaita (>= 1.5), the GTK4-flavored
+  VTE terminal widget (>= 0.70), and GtkSourceView 5 (the sidebar's file
+  editor), including their dev files:
 
   | Distro | Install command |
   |---|---|
-  | Arch / CachyOS / Manjaro | `sudo pacman -S git pkgconf gtk4 vte4 libadwaita` |
-  | Fedora | `sudo dnf install git pkg-config gtk4-devel vte291-gtk4-devel libadwaita-devel` |
-  | Debian / Ubuntu (trixie/24.10+ or newer) | `sudo apt install git pkg-config libgtk-4-dev libvte-2.91-gtk4-dev libadwaita-1-dev` |
+  | Arch / CachyOS / Manjaro | `sudo pacman -S git pkgconf gtk4 vte4 libadwaita gtksourceview5` |
+  | Fedora | `sudo dnf install git pkg-config gtk4-devel vte291-gtk4-devel libadwaita-devel gtksourceview5-devel` |
+  | Debian / Ubuntu (trixie/24.10+ or newer) | `sudo apt install git pkg-config libgtk-4-dev libvte-2.91-gtk4-dev libadwaita-1-dev libgtksourceview-5-dev` |
 
   The libadwaita floor is 1.5, which is older than every release in the table
   above — the app deliberately builds against the 1.5 API rather than the

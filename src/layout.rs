@@ -28,6 +28,35 @@ fn gap() -> i32 {
     crate::appearance::get().gap
 }
 
+/// The docked editor column's share of the workspace.
+///
+/// The editor is not one of the tiles the mode arranges - it is a fixture,
+/// docked on the workspace's left so it always sits beside the project tree
+/// that opens files into it, with the agents tiling in whatever remains. A
+/// fixed share rather than a per-mode answer, because the editor's usefulness
+/// is a function of line length, not of how many agents happen to be running.
+///
+/// Under half on purpose: the agents are the workspace's job and the editor is
+/// a place to look at one file, so the majority of the width stays theirs.
+const EDITOR_SHARE: f64 = 0.42;
+
+/// How the workspace divides when an editor pane is docked at its left edge:
+/// `(editor width, agents width)`.
+///
+/// No editor, no column. No agents, no division - a lone editor takes the
+/// whole workspace rather than leaving 58% of the window empty beside it.
+pub fn editor_split(width: i32, editor: bool, agents: usize) -> (i32, i32) {
+    let width = width.max(0);
+    if !editor {
+        return (0, width);
+    }
+    if agents == 0 {
+        return (width, 0);
+    }
+    let editor_width = (f64::from(width) * EDITOR_SHARE) as i32;
+    (editor_width, width - editor_width)
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mode {
     MasterStack,
@@ -54,7 +83,10 @@ pub struct Rect {
     pub height: i32,
 }
 
-fn shrink(r: Rect) -> Rect {
+// `pub(crate)` for one caller: the layout manager insets the docked editor's
+// column with the same gap every tile gets, so the seam between the editor and
+// the agents reads exactly like the seam between any two tiles.
+pub(crate) fn shrink(r: Rect) -> Rect {
     let gap = gap();
     Rect {
         x: r.x + gap,
@@ -356,6 +388,26 @@ pub fn grid_weighted(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The docked editor's column: present only when both sides of the split
+    /// have something to show, always summing back to the width it divided,
+    /// and always leaving the agents the larger share.
+    #[test]
+    fn the_editor_column_only_exists_when_both_sides_do() {
+        assert_eq!(editor_split(1000, false, 3), (0, 1000));
+        assert_eq!(editor_split(1000, true, 0), (1000, 0));
+
+        let (editor, agents) = editor_split(1000, true, 3);
+        assert_eq!(editor + agents, 1000, "the split must cover the workspace");
+        assert!(editor > 0, "a docked editor gets a real column");
+        assert!(
+            agents > editor,
+            "the agents keep the larger share - they are the workspace's job",
+        );
+
+        // A degenerate width stays degenerate rather than going negative.
+        assert_eq!(editor_split(-50, true, 2), (0, 0));
+    }
 
     #[test]
     fn single_pane_fills_area() {
