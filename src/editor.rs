@@ -67,12 +67,12 @@ fn load(path: &Path) -> Result<String, String> {
 /// cheap clone while the pane owns the original.
 ///
 /// "One editor", not "one open file": which file it holds changes over its
-/// life (see `open`), which is why the path and name sit behind `Rc<RefCell>`
-/// - a `Clone` of this struct is a second handle to the *same* editor, the
-/// way its widget fields already are, and the clones the close flow and the
-/// save shortcut hold have to see a switch. A derived clone of a bare
-/// `RefCell` would copy the path instead of sharing it, and Ctrl+S after
-/// switching files would write the new text over the old file.
+/// life (see `open`), which is why the path and name sit behind
+/// `Rc<RefCell>`. A `Clone` of this struct is a second handle to the *same*
+/// editor, the way its widget fields already are, and the clones the close
+/// flow and the save shortcut hold have to see a switch. A derived clone of
+/// a bare `RefCell` would copy the path instead of sharing it, and Ctrl+S
+/// after switching files would write the new text over the old file.
 #[derive(Clone)]
 pub struct Editor {
     /// The body the pane frames: the error line, then the scrolled view.
