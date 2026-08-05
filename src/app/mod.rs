@@ -330,7 +330,7 @@ impl App {
             .css_classes(["sidebar-toggle", "header-action"])
             .valign(gtk4::Align::Center)
             .can_focus(false)
-            .tooltip_text("Toggle the project sidebar (Super+Alt+g)")
+            .tooltip_text("Toggle the project drawer (Super+Alt+g)")
             .build();
 
         let css_provider = gtk4::CssProvider::new();

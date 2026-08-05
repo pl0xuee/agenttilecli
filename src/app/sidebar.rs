@@ -252,7 +252,7 @@ impl App {
             .orientation(gtk4::Orientation::Vertical)
             .width_request(SIDEBAR_GRIP_PX)
             .css_classes(["sidebar-grip"])
-            .tooltip_text("Drag to resize the sidebar")
+            .tooltip_text("Drag to resize the drawer")
             .build();
         // The pointer has to say this is draggable before it's dragged - a grip
         // this thin is invisible until the cursor changes over it.

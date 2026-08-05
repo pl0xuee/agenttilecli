@@ -154,7 +154,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         section: "Projects",
-        title: "Toggle the project sidebar",
+        title: "Toggle the project drawer",
         accelerator: "<Super><Alt>g",
         shift: Shift::Any,
         run: Some(Action::App(App::toggle_sidebar)),
@@ -180,14 +180,14 @@ pub const COMMANDS: &[Command] = &[
     // produces a brace. Which is exactly why their `Shift` is `Any`.
     Command {
         section: "Projects",
-        title: "Move this project up the sidebar",
+        title: "Move this project up the rail",
         accelerator: "<Super><Alt>braceleft",
         shift: Shift::Any,
         run: Some(Action::App(|app| app.move_active_project(-1))),
     },
     Command {
         section: "Projects",
-        title: "Move this project down the sidebar",
+        title: "Move this project down the rail",
         accelerator: "<Super><Alt>braceright",
         shift: Shift::Any,
         run: Some(Action::App(|app| app.move_active_project(1))),

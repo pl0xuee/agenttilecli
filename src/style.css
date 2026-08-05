@@ -1002,10 +1002,9 @@ toast {
   text-transform: uppercase;
 }
 
-/* The "+" here wears `.header-action`, like every other button in either
-   header bar - so it has no rules of its own any more. It used to have a pair,
-   which had never applied to anything: nothing wore `.sidebar-header` until
-   that was fixed, and by then the button had been unified. */
+/* No "+" up here any more at all - the rail's foot carries it (`.rail-add`),
+   and the "Open a project..." row below carries the other. The heading is the
+   drawer header's whole cargo now. */
 
 .sidebar-list {
   background-color: transparent;
