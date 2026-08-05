@@ -332,11 +332,29 @@ impl App {
             .css_classes(["empty-hint"])
             .build();
 
+        // Our own label rather than the StatusPage's `description`: the stock
+        // one wraps at its clamp's width, not the window's, so a window
+        // narrower than the clamp (a quarter-snap on a tiled desktop) clipped
+        // the sentence mid-word at the frame. A label told to wrap with a
+        // bounded natural width shrinks instead.
+        let description = gtk4::Label::builder()
+            .label(
+                "Open a project folder and choose how many agents to start it with. \
+                 They tile themselves \u{2014} spawn, close or promote a pane and the rest re-arrange.",
+            )
+            .wrap(true)
+            .justify(gtk4::Justification::Center)
+            .max_width_chars(58)
+            .halign(gtk4::Align::Center)
+            .css_classes(["empty-description"])
+            .build();
+
         let buttons = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(10)
             .halign(gtk4::Align::Center)
             .build();
+        buttons.append(&description);
         buttons.append(&start);
         buttons.append(&agent);
         buttons.append(&hint);
@@ -350,10 +368,6 @@ impl App {
             .css_classes(["workspace-floor"])
             .icon_name("tab-new-symbolic")
             .title("No agents running")
-            .description(
-                "Open a project folder and choose how many agents to start it with. \
-                 They tile themselves \u{2014} spawn, close or promote a pane and the rest re-arrange.",
-            )
             .child(&buttons)
             .build()
     }

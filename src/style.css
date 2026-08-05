@@ -634,6 +634,14 @@ menubutton.header-action > button:checked:hover {
   border-color: alpha(@text, 0.22);
 }
 
+/* The page's own description label, in the StatusPage voice it replaces - see
+   `build_empty_state` for why it is ours rather than the widget's. The margin
+   restates the gap the StatusPage put between description and child. */
+.empty-description {
+  margin-bottom: 1.4em;
+  color: @dim;
+}
+
 /* Quieter than the description above it and set in the engraved monospace the
    rest of the app's footnotes use, so it reads as a note rather than a third
    button. */
