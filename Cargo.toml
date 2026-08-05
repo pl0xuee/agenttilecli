@@ -37,4 +37,4 @@ sourceview5 = "0.11"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.9"
+toml = "1"
