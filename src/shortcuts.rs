@@ -19,7 +19,7 @@
 //!
 //! Built from `AdwPreferencesDialog` rather than `GtkShortcutsWindow`, which is
 //! deprecated as of GTK 4.18, or `AdwShortcutsDialog`, which would raise this
-//! app's libadwaita floor to 1.8 for no gain over what 1.5 already draws well.
+//! app's libadwaita floor to 1.8 for no gain over what 1.7 already draws well.
 
 use adw::prelude::*;
 

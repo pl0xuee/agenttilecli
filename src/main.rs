@@ -164,23 +164,17 @@ fn load_css() {
 /// instead is a lightened @filament rather than @filament, which is close enough
 /// to have gone unnoticed and is still not what the palette says.
 ///
-/// They cannot be stated in `style.css`, because a custom property is a GTK 4.16
-/// feature and this crate's floor is 4.12 (see Cargo.toml): on the floor, the
-/// declarations would be parse errors - reported to a terminal a GUI app hasn't
-/// got, and failing `the_stylesheet_parses_without_errors` for anyone building
-/// there. Hence a runtime check, and hence this being generated rather than
-/// written down: it is built from `palette`, which reads the ramp out of the
-/// stylesheet, so there is no second copy of these values to drift.
+/// Generated rather than written down: it is built from `palette`, which reads
+/// the ramp out of the stylesheet, so there is no second copy of these values
+/// to drift. (It used to be runtime-gated as well, when the GTK floor was 4.12
+/// and a custom property in a stylesheet was a parse error there; the floor is
+/// 4.16 now - see Cargo.toml - and the gate went with it.)
 ///
-/// The five `@define-color *_color` aliases stay where they are regardless. They
-/// are what libadwaita 1.5 reads, and 1.5 is the floor.
+/// The five `@define-color *_color` aliases stay in `adwaita-colors.css`
+/// regardless. They are what a libadwaita older than 1.6 reads, they cost
+/// nothing on a newer one, and they keep that file the complete statement of
+/// what Adwaita is told.
 fn standalone_colour_css() -> String {
-    // Custom properties and `:root` both arrived in GTK 4.16. Below that the
-    // aliases in `style.css` are what libadwaita is reading anyway.
-    if (gtk4::major_version(), gtk4::minor_version()) < (4, 16) {
-        return String::new();
-    }
-
     // Property name, and the ramp rung it is meant to be.
     const STANDALONE: [(&str, &str); 5] = [
         ("--accent-color", "filament"),
@@ -423,14 +417,8 @@ mod tests {
     /// by mistake would leave libadwaita deriving its own accent again and nothing
     /// would look obviously wrong.
     ///
-    /// Skipped rather than failed below GTK 4.16, where the properties are not a
-    /// thing and the `@define-color` aliases are what libadwaita is reading.
     #[test]
     fn the_standalone_colours_are_the_ramp() {
-        if (gtk4::major_version(), gtk4::minor_version()) < (4, 16) {
-            return;
-        }
-
         let css = standalone_colour_css();
         for (property, name) in [
             ("--accent-color", "filament"),

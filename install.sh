@@ -26,8 +26,8 @@ if ! have pkg-config; then
     exit 1
 fi
 
-if ! pkg-config --atleast-version=4.12 gtk4 2>/dev/null; then
-    echo "error: GTK4 >= 4.12 development files not found (pkg-config gtk4)." >&2
+if ! pkg-config --atleast-version=4.16 gtk4 2>/dev/null; then
+    echo "error: GTK4 >= 4.16 development files not found (pkg-config gtk4)." >&2
     echo "       Install your distro's GTK4 dev package and try again, e.g.:" >&2
     echo "$PKG_HINT" >&2
     exit 1
@@ -51,11 +51,11 @@ if ! pkg-config --exists gtksourceview-5 2>/dev/null; then
 fi
 
 # The app's chrome (header bar, split view, toasts, dialogs) is libadwaita's.
-# 1.5 is the floor the code is written against deliberately - see the comment on
+# 1.7 is the floor the code is written against deliberately - see the comment on
 # the `adw` dependency in Cargo.toml - and every distro in the README's table
 # ships at least that.
-if ! pkg-config --atleast-version=1.5 libadwaita-1 2>/dev/null; then
-    echo "error: libadwaita >= 1.5 development files not found (pkg-config libadwaita-1)." >&2
+if ! pkg-config --atleast-version=1.7 libadwaita-1 2>/dev/null; then
+    echo "error: libadwaita >= 1.7 development files not found (pkg-config libadwaita-1)." >&2
     echo "       Install your distro's libadwaita dev package and try again, e.g.:" >&2
     echo "$PKG_HINT" >&2
     exit 1

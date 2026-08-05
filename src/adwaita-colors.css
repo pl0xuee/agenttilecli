@@ -78,27 +78,21 @@
    Its foreground is the floor, not white: @filament is a near-white, and white
    text on it would be unreadable.
 
-   The five `*_color` names below - the *standalone* accent, destructive, success,
-   warning and error, the ones libadwaita paints text and check marks with rather
-   than fills - only reach libadwaita 1.5, which is this crate's floor. From 1.6
-   it derives them from the matching `*_bg_color` instead and reads these lines
-   not at all, so they are inert on a modern install and have to stay anyway for
-   the floor. What covers 1.6+ is `main::standalone_colour_css`, which emits them
-   as CSS custom properties at runtime - not here, because a custom property needs
-   GTK 4.16 and stating one in this file would be a parse error for everyone on
-   4.12, including in `the_adwaita_colours_parse_without_errors`. */
+   Only the fill pairs are stated. The *standalone* accent, destructive,
+   success, warning and error - the ones libadwaita paints text and check
+   marks with rather than fills - stopped being `@define-color` names at 1.6,
+   which the 1.7 floor (see Cargo.toml) is safely past: libadwaita derives
+   them from the matching `*_bg_color` unless told otherwise, and what tells
+   it otherwise is `main::standalone_colour_css`, which emits them as CSS
+   custom properties generated from `palette` so the values cannot drift from
+   the ramp. This file's job is the names, not copies of the numbers. */
 @define-color accent_bg_color @filament;
 @define-color accent_fg_color @field;
-@define-color accent_color @filament;
 @define-color destructive_bg_color @hangup;
 @define-color destructive_fg_color @field;
-@define-color destructive_color @hangup;
 @define-color success_bg_color @fresh;
 @define-color success_fg_color @field;
-@define-color success_color @fresh;
 @define-color warning_bg_color @tally;
 @define-color warning_fg_color @field;
-@define-color warning_color @tally;
 @define-color error_bg_color @hangup;
 @define-color error_fg_color @field;
-@define-color error_color @hangup;

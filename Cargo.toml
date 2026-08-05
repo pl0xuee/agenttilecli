@@ -4,15 +4,19 @@ version = "1.0.0"
 edition = "2024"
 
 [dependencies]
-gtk4 = { version = "0.11", features = ["v4_12"] }
-# Pinned to the 1.5 API rather than the newest available. Everything this app
-# uses landed at or before 1.5 (OverlaySplitView 1.4, ToastOverlay and Banner
-# 1.0, PreferencesDialog / AlertDialog / AboutDialog 1.5), and asking for a
-# later one would raise the libadwaita floor on every distro in the README's
-# install table for widgets there are perfectly good 1.5 answers to - a linked
-# ToggleButton row instead of AdwToggleGroup (1.7), GtkShortcutsWindow instead
-# of AdwShortcutsDialog (1.8).
-adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
+# `v4_16` buys CSS custom properties and `:root` - which the accent colours
+# already needed at runtime (see `main::standalone_colour_css`), previously
+# behind a version check because the floor was 4.12. Every distro in the
+# README's install table ships 4.16 or later now; the one release the raise
+# actually drops is Ubuntu 24.10, which is past EOL.
+gtk4 = { version = "0.11", features = ["v4_16"] }
+# Pinned to the 1.7 API rather than the newest available. 1.7 is where
+# AdwToggleGroup landed, which the header's mode switcher wants to be instead
+# of a linked ToggleButton row - and it is also where Debian trixie, the
+# oldest distro in the README's table, froze. 1.8's additions
+# (AdwShortcutsDialog) stay declined for exactly that reason: the shortcuts
+# sheet has a perfectly good 1.7 answer and trixie does not have a 1.8.
+adw = { package = "libadwaita", version = "0.9", features = ["v1_7"] }
 # `v0_70` is for `check_match_at`, which is the only way this binding offers to
 # ask "is there a link under this pointer" - and without it, clickable URLs
 # would be limited to OSC 8 hyperlinks, which is a small fraction of the links
