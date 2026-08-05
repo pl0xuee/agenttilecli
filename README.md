@@ -9,21 +9,24 @@ you want to nudge it.
 
 ## Features
 
-- **Project groups in a sidebar** — every project lives in its own group,
-  each with its own independent tiling layout and set of agent panes.
-  Toggle the sidebar with the button at the left of the header bar or
-  `Super+Alt+g`, click a row to switch groups, and background groups keep
-  their agents running while hidden. Drag a row to reorder it (or
-  `Super+Alt+{` / `}`), and each row carries a tally of how many agents that
-  project is running — the one thing you can't see about a project you aren't
-  looking at. Drag the seam on the sidebar's right edge to make it wider or
-  narrower. Closing a group's row (✕) hangs up every agent in
-  it; the **+** button in the header bar (or `Super+Alt+Return`) opens a new
-  project as a new group via a native folder picker, and starts it with as
-  many agents as the project you were last working in had running — pick the
-  folder and it opens, with no second dialog asking a question you answer the
-  same way every time. On a narrow window the sidebar stops squeezing the
-  panes and slides over them instead.
+- **Project groups on a rail, detailed in a drawer** — every project lives in
+  its own group, each with its own independent tiling layout and set of agent
+  panes. The rail on the window's left edge is always on screen: one glyph
+  per project, wearing that project's identity colour, pulsing amber when a
+  background agent wants you, lit for the group you're in. Click a glyph to
+  switch groups; click the lit one (or `Super+Alt+g`, or the header-bar
+  button) to summon the drawer — the full rack, with names, per-agent tally
+  dots, folder trees, and each group's ✕ (closing a group hangs up every
+  agent in it). Background groups keep their agents running while hidden.
+  Drag a row to reorder it (or `Super+Alt+{` / `}`), and drag the seam on the
+  drawer's right edge to make it wider or narrower. The dashed **+** at the
+  rail's foot (or `Super+Alt+Return`, or the drawer's "Open a project…" row)
+  opens a new project as a new group via a native folder picker, and starts
+  it with as many agents as the project you were last working in had running
+  — pick the folder and it opens, with no second dialog asking a question you
+  answer the same way every time. On a narrow window the rail stays put and
+  the drawer floats over the panes as a near-opaque sheet instead of
+  squeezing them.
 - **Every project's files, in the rack** — a chevron beside a project's icon
   unfolds its folder tree right inside the sidebar strip, one level at a time.
   Each unfold re-reads that level from disk: the agents' whole job is changing
