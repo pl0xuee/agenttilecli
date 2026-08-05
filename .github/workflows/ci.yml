@@ -1,0 +1,57 @@
+# 146 tests and, until this file, nothing that ran them on a push.
+#
+# Fedora rather than the runner's own Ubuntu because the app's floors are
+# GTK 4.16 / libadwaita 1.7 (see Cargo.toml) and ubuntu-latest trails them;
+# Fedora tracks the stack the app is actually written against.
+#
+# Tests run under Xvfb deliberately: `testing::gtk_test` skips silently on a
+# headless machine, and the tests it guards are the CSS parse checks - the
+# ones that catch a stylesheet quietly dropping the glass. A CI without a
+# display would go green while asserting nothing about them.
+#
+# No `cargo fmt --check`: the codebase is hand-formatted where it reads
+# better than rustfmt's answer (string continuations, aligned tables), and a
+# gate that fights 50-odd deliberate sites is a gate that gets deleted.
+# Clippy runs with warnings denied instead - the tree is clean and staying so.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain and the GTK stack
+        run: |
+          dnf install -y gcc git rust cargo clippy \
+            gtk4-devel libadwaita-devel vte291-gtk4-devel gtksourceview5-devel \
+            xorg-x11-server-Xvfb dejavu-sans-fonts dejavu-sans-mono-fonts
+
+      # The update tests build real throwaway git repos, which needs an
+      # identity; the checkout is owned by a different uid than the container
+      # user, which needs the safe.directory waiver.
+      - name: Give git an identity
+        run: |
+          git config --global user.name "ci"
+          git config --global user.email "ci@localhost"
+          git config --global --add safe.directory '*'
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Clippy, warnings denied
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests, with a display so the CSS guards actually run
+        run: xvfb-run -a cargo test
