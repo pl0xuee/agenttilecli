@@ -199,8 +199,8 @@ struct Inner {
     /// a change in how many agents are running - and whichever fires second
     /// has to know what the other one had to say.
     pane_title: RefCell<String>,
-    /// The three layout-mode toggles, in `MODE_BUTTONS` order.
-    mode_buttons: RefCell<Vec<gtk4::ToggleButton>>,
+    /// The layout-mode switcher, its toggles in `MODE_BUTTONS` order.
+    mode_switcher: RefCell<Option<adw::ToggleGroup>>,
     /// True while the mode toggles are being repainted *from* the tiler, so the
     /// `toggled` handlers know not to write the mode straight back and start a
     /// loop. Setting a `ToggleButton` active fires `toggled` exactly as a click
@@ -363,7 +363,7 @@ impl App {
             updates: updates.clone(),
             title: title_widget.clone(),
             pane_title: RefCell::new(String::new()),
-            mode_buttons: RefCell::new(Vec::new()),
+            mode_switcher: RefCell::new(None),
             syncing_mode: Cell::new(false),
             broadcast_button: RefCell::new(None),
             syncing_broadcast: Cell::new(false),

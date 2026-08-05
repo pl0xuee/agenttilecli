@@ -98,20 +98,10 @@ impl App {
             .label("Projects")
             .css_classes(["sidebar-header-label"])
             .build();
-        let new_project = gtk4::Button::builder()
-            .icon_name("list-add-symbolic")
-            // The same shape the content header's buttons take. Unifying that
-            // bar and leaving this one on `flat circular` didn't remove the
-            // second button language, it just moved the seam from inside one
-            // header to between two.
-            .css_classes(["header-action"])
-            .valign(gtk4::Align::Center)
-            .can_focus(false)
-            .tooltip_text("Open a new project as a new group (Super+Alt+Return)")
-            .build();
-        let this = self.clone();
-        new_project.connect_clicked(move |_| this.new_project());
-
+        // No "+" up here any more. The rail carries one at its foot and the
+        // "Open a project..." row below carries the other; a third copy in
+        // this corner was the drawer answering a question the rail already
+        // answers whether or not the drawer is open.
         let header = adw::HeaderBar::builder()
             // An empty title, with the real one packed at the start below: an
             // AdwHeaderBar centres whatever it's given as a title, and a heading
@@ -134,7 +124,6 @@ impl App {
             .css_classes(["sidebar-header"])
             .build();
         header.pack_start(&header_label);
-        header.pack_end(&new_project);
 
         // A ghost of the row you'd get, sitting where that row would go.
         //

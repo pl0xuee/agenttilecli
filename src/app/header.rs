@@ -214,54 +214,50 @@ impl App {
     /// invisible: `Super+Alt+Tab` cycled grid to master-stack to monocle and the
     /// only evidence of which one you'd landed in was the shape of the panes -
     /// readable with four panes open, and a guess with one.
-    fn build_mode_switcher(&self) -> gtk4::Box {
-        // Centred rather than filling the bar's height, for the same reason the
-        // round buttons beside it are: a header bar stretches what it is given,
-        // and a control with a fixed shape has to say it doesn't want that.
-        let row = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
+    fn build_mode_switcher(&self) -> adw::ToggleGroup {
+        // AdwToggleGroup rather than a linked row of ToggleButtons - this is
+        // the widget the libadwaita 1.7 floor was raised for. The old row
+        // hand-rolled what the group means natively: exactly one active, the
+        // active one refusing to un-toggle, and one keyboard stop instead of
+        // three. Centred rather than filling the bar's height, for the same
+        // reason the round buttons beside it are.
+        let group = adw::ToggleGroup::builder()
             .valign(gtk4::Align::Center)
             .css_classes(["mode-switcher"])
+            .can_focus(false)
             .build();
-
-        let mut buttons: Vec<gtk4::ToggleButton> = Vec::new();
-        for (mode, icon, tooltip) in MODE_BUTTONS {
-            let button = gtk4::ToggleButton::builder()
-                .icon_name(icon)
-                .can_focus(false)
-                .tooltip_text(tooltip)
-                .build();
-            // Grouping makes these behave as radio buttons: exactly one active,
-            // and clicking the active one doesn't turn the layout off.
-            if let Some(first) = buttons.first() {
-                button.set_group(Some(first));
-            }
-            let this = self.clone();
-            button.connect_toggled(move |button| {
-                if !button.is_active() || this.0.syncing_mode.get() {
-                    return;
-                }
-                if let Some(tiler) = this.active_tiler() {
-                    tiler.set_mode(mode);
-                }
-            });
-            row.append(&button);
-            buttons.push(button);
+        for (_, icon, tooltip) in MODE_BUTTONS {
+            let toggle = adw::Toggle::builder().icon_name(icon).build();
+            toggle.set_tooltip(tooltip);
+            group.add(toggle);
         }
-        *self.0.mode_buttons.borrow_mut() = buttons;
-        row
+        let this = self.clone();
+        group.connect_active_notify(move |group| {
+            if this.0.syncing_mode.get() {
+                return;
+            }
+            let Some((mode, _, _)) = MODE_BUTTONS.get(group.active() as usize) else {
+                return;
+            };
+            if let Some(tiler) = this.active_tiler() {
+                tiler.set_mode(*mode);
+            }
+        });
+        *self.0.mode_switcher.borrow_mut() = Some(group.clone());
+        group
     }
 
-    /// Points the mode toggles at `mode` without letting their `toggled` signal
+    /// Points the mode toggles at `mode` without letting their `active` signal
     /// write it straight back - see `Inner::syncing_mode`.
     pub(super) fn sync_mode_buttons(&self, mode: Mode) {
         let Some(index) = MODE_BUTTONS.iter().position(|(m, _, _)| *m == mode) else {
             return;
         };
+        let Some(group) = self.0.mode_switcher.borrow().clone() else {
+            return;
+        };
         self.0.syncing_mode.set(true);
-        if let Some(button) = self.0.mode_buttons.borrow().get(index) {
-            button.set_active(true);
-        }
+        group.set_active(index as u32);
         self.0.syncing_mode.set(false);
     }
 
@@ -286,9 +282,8 @@ impl App {
     /// through `Tiler::set_mode`, which is a no-op on an empty group, and taking
     /// a key away is a bigger claim than greying a button out.
     pub(super) fn sync_mode_sensitivity(&self, pane_count: usize) {
-        let usable = pane_count > 0;
-        for button in self.0.mode_buttons.borrow().iter() {
-            button.set_sensitive(usable);
+        if let Some(group) = self.0.mode_switcher.borrow().clone() {
+            group.set_sensitive(pane_count > 0);
         }
     }
 

@@ -309,7 +309,11 @@ overlay-split-view .background {
   border-color: @filament;
   border-top-color: @filament;
   border-bottom-color: @filament;
-  box-shadow: 0 0 0 2px alpha(@filament, 0.15), 0 0 2em alpha(@filament, 0.1),
+  /* The one bold thing in the window. With the rail and the drawer holding
+     themselves to quiet glass, the lit tile is where the boldness budget goes:
+     the ring a step brighter and the bloom a shade wider than they were, so
+     the pane the keyboard is in reads across a full grid at a glance. */
+  box-shadow: 0 0 0 2px alpha(@filament, 0.22), 0 0 2.4em alpha(@filament, 0.14),
     0 2px 4px alpha(@shadow, 0.5), 0 10px 24px alpha(@shadow, 0.34);
 }
 
@@ -399,7 +403,9 @@ overlay-split-view .background {
    over the same. See `.pane-head` above for why a fill is not an option here. */
 .pane.focused .pane-head {
   background-color: alpha(mix(@shadow, @filament, 0.06), 0.55);
-  border-bottom-color: alpha(@filament, 0.27);
+  /* The underline is the head strip joining the lit-tile statement: the same
+     filament, drawn where the head meets the agent's own text. */
+  border-bottom-color: alpha(@filament, 0.45);
 }
 
 .pane-close {
@@ -505,20 +511,20 @@ menubutton.header-action > button:checked:hover {
    evidence in the shape of the panes, which is readable with four of them open
    and a guess with one.
 
-   It is one control, and it now looks like one. GTK's `.linked` joins buttons
-   by squaring their inner corners, which needs each button to have a fill to
-   square - and these had none, so three "linked" toggles came out as three
-   loose icons floating next to a fourth loose icon that wasn't part of the
-   group at all. A trough behind them does what `.linked` was being asked to:
-   it draws the boundary of the control once, and the selected segment moves
-   around inside it. */
+   It is one control, and it is one widget now: an `AdwToggleGroup`, whose
+   nodes are `toggle-group > toggle` rather than a row of `button`s - the
+   trough-and-segment idea the old hand-rolled version drew is what the widget
+   *is*. These rules restate the app's own trough (Adwaita's is a currentColor
+   mix that shifts with the theme) and quiet the segment shadows Adwaita adds,
+   which are a raised-chip language this flat header has never spoken. */
 .mode-switcher {
   padding: 0.14em;
   border-radius: 0.62em;
   background-color: alpha(@text, 0.06);
+  box-shadow: none;
 }
 
-.mode-switcher button {
+.mode-switcher > toggle {
   min-width: 2em;
   min-height: 1.65em;
   padding: 0;
@@ -531,17 +537,18 @@ menubutton.header-action > button:checked:hover {
     background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.mode-switcher button:hover {
+.mode-switcher > toggle:hover {
   color: @text;
   background-color: alpha(@text, 0.08);
 }
 
-.mode-switcher button:checked {
+.mode-switcher > toggle:checked {
   color: @filament;
   background-color: alpha(@filament, 0.16);
+  box-shadow: none;
 }
 
-.mode-switcher button:checked:hover {
+.mode-switcher > toggle:checked:hover {
   background-color: alpha(@filament, 0.22);
 }
 
