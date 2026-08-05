@@ -238,6 +238,18 @@ fn report_hook(event: hooks::Event) {
 }
 
 fn build_window(application: &adw::Application) {
+    // `activate` fires again every time another launch forwards to this
+    // process - GApplication is single-instance per id, and a second
+    // `agenttilecli` from a terminal is the common way. That launch means
+    // "show me the window", not "build me another": a second `App::new` would
+    // add one more dynamic CSS provider to the shared display (they are never
+    // removed), and re-run `appearance::restore` from disk over live settings
+    // the 1500ms debounce hadn't saved yet.
+    if let Some(window) = application.active_window() {
+        window.present();
+        return;
+    }
+
     gtk4::Window::set_default_icon_name("agenttilecli");
 
     let cwd = std::env::current_dir()
@@ -575,6 +587,22 @@ mod tests {
             below.contains(".sidebar-pane"),
             "style.css has lost the rule silencing the split view's own region \
              fill - the second lock on the door adwaita-colors.css guards",
+        );
+    }
+
+    /// The static `.sidebar` fallback is what renders whenever the dynamic
+    /// provider has nothing to give - the frame before it loads, or every
+    /// frame after a parse error made GTK drop the glass rule without a word.
+    /// It must fail *to glass*, because an opaque rack is indistinguishable
+    /// from the palette working, and that disguise once kept a real bug
+    /// invisible for weeks.
+    #[test]
+    fn the_static_rack_fallback_is_glass() {
+        let css = include_str!("style.css");
+        assert!(
+            css.contains(".sidebar {\n  background-color: alpha(@rack,"),
+            "the .sidebar fallback in style.css is not glass - a dropped \
+             dynamic rule now degrades to a solid rack instead of a default one",
         );
     }
 }

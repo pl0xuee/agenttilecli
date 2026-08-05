@@ -858,9 +858,14 @@ toast {
 /* The fill is written by `appearance.rs`, not here, and at the same alpha the
    workspace floor gets - see `appearance::content_css` for why the two have to
    match. This rule is what the dynamic one overrides, and it is the colour the
-   rack is during the frame before that provider has loaded. */
+   rack is during the frame before that provider has loaded - and for as long
+   as that provider has nothing to give, which is the failure mode: a stray
+   character in the generated rules and GTK drops the glass without a word.
+   So the fallback fails *to the default glass* - 0.92 is `window_opacity`'s
+   config default - rather than to a solid the eye reads as the palette
+   working. An opaque rack here is how a real bug hid for weeks. */
 .sidebar {
-  background-color: @rack;
+  background-color: alpha(@rack, 0.92);
 }
 
 /* No bottom border, unlike the footer: monospace caps at this tracking already

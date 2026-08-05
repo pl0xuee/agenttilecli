@@ -308,6 +308,15 @@ impl App {
             .build();
 
         let css_provider = gtk4::CssProvider::new();
+        // A parse error in the generated rules is GTK dropping a declaration
+        // and carrying on, and what that looks like is a surface quietly
+        // wearing the static fallback instead of its glass - which is exactly
+        // how the rack once read as solid for weeks. The test on `content_css`
+        // guards the shapes it knows about; this says so at runtime for the
+        // one it doesn't, to a terminal when there is one.
+        css_provider.connect_parsing_error(|_, section, error| {
+            eprintln!("appearance css dropped a declaration at {section}: {error}");
+        });
         if let Some(display) = gdk::Display::default() {
             gtk4::style_context_add_provider_for_display(
                 &display,
