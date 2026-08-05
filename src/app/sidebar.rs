@@ -549,6 +549,7 @@ impl App {
                 // and a sort kicked off while it was still mutably borrowed
                 // would panic.
                 this.0.list.invalidate_sort();
+                this.refresh_rail();
             }
             moved
         });
@@ -626,6 +627,9 @@ impl App {
             .iter()
             .any(|v| v.row.has_css_class(ATTENTION_CLASS));
         set_class(&self.0.sidebar_toggle, ATTENTION_CLASS, still_waiting);
+        // The rail mirrors the rows' attention the same way the toggle does,
+        // and this is the one place every attention change passes through.
+        self.refresh_rail();
     }
 
     /// Writes a project's agent tally onto its sidebar row.
@@ -688,6 +692,9 @@ impl App {
         if is_active {
             self.refresh_subtitle();
         }
+        // The rail glyph's tooltip carries this same tally in words, so it
+        // goes stale at the same moments the dots would.
+        self.refresh_rail();
     }
 }
 

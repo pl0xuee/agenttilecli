@@ -844,6 +844,112 @@ toast {
   color: @muted;
 }
 
+/* ── The rail ──────────────────────────────────────────────────────────────
+   Every project, one glyph, always on screen - the part of the rack that must
+   never be off it. It says three things and no more: which projects exist
+   (the initial), which is which (the hue bar the rows also wear), and which
+   one wants you (amber, the same pulse). The lit glyph is the project on
+   screen. Everything else a strip used to say - the name, the tally dots, the
+   tree, the close button - lives in the drawer the rail summons.
+
+   The fill is written by `appearance.rs`, at the same alpha as the rack and
+   the floor: one glass, three surfaces, one law. */
+.rail {
+  min-width: 3.4em;
+  padding: 0.55em 0.45em;
+}
+
+.rail-glyph {
+  min-width: 2.5em;
+  min-height: 2.5em;
+  padding: 0;
+  border: none;
+  border-radius: 0.6em;
+  background-color: alpha(@text, 0.032);
+  background-image: none;
+  box-shadow: inset 0.18em 0 0 0 alpha(@muted, 0.4);
+  color: @dim;
+  transition:
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 140ms cubic-bezier(0.2, 0, 0, 1),
+    color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+.rail-glyph:hover {
+  background-color: alpha(@text, 0.075);
+  color: @text;
+}
+
+/* The face is an initial, set in the mono the panes are set in: the rail is
+   an index into a terminal workspace, and it can say so in one letter. */
+.rail-glyph .rail-glyph-face {
+  font-family: monospace;
+  font-weight: 600;
+}
+
+/* The identity bar, exactly the rows': same edge, dimmed until lit. */
+.rail-glyph.hue-1 { box-shadow: inset 0.18em 0 0 0 alpha(@hue-1, 0.6); }
+.rail-glyph.hue-2 { box-shadow: inset 0.18em 0 0 0 alpha(@hue-2, 0.6); }
+.rail-glyph.hue-3 { box-shadow: inset 0.18em 0 0 0 alpha(@hue-3, 0.6); }
+.rail-glyph.hue-4 { box-shadow: inset 0.18em 0 0 0 alpha(@hue-4, 0.6); }
+.rail-glyph.hue-5 { box-shadow: inset 0.18em 0 0 0 alpha(@hue-5, 0.6); }
+.rail-glyph.hue-neutral { box-shadow: inset 0.18em 0 0 0 alpha(@muted, 0.4); }
+
+/* Lit: the project on screen. The row-selection wash and the bar at full
+   strength - recognition, not celebration; the one bold thing in this window
+   is the focused pane, and the rail does not compete with it. */
+.rail-glyph.lit {
+  background-color: alpha(@filament, 0.11);
+  color: @text;
+}
+.rail-glyph.lit.hue-1 { box-shadow: inset 0.18em 0 0 0 @hue-1; }
+.rail-glyph.lit.hue-2 { box-shadow: inset 0.18em 0 0 0 @hue-2; }
+.rail-glyph.lit.hue-3 { box-shadow: inset 0.18em 0 0 0 @hue-3; }
+.rail-glyph.lit.hue-4 { box-shadow: inset 0.18em 0 0 0 @hue-4; }
+.rail-glyph.lit.hue-5 { box-shadow: inset 0.18em 0 0 0 @hue-5; }
+.rail-glyph.lit.hue-neutral { box-shadow: inset 0.18em 0 0 0 @muted; }
+
+/* Attention on the rail, mirroring the rows: below the hue rules because it
+   ties the two-class ones on specificity and has to win on source order, and
+   carrying `!important`-free victory over `.lit.hue-N` is not needed - a
+   glyph is never lit and asking at once, since showing a project answers it. */
+.rail-glyph.needs-attention {
+  color: mix(@tally, @text, 0.55);
+  box-shadow: inset 0.18em 0 0 0 @tally;
+  animation-name: sidebar-attention;
+  animation-duration: 900ms;
+  animation-iteration-count: 3;
+  animation-timing-function: ease-in-out;
+}
+
+/* The drawer's "Open a project..." said in the rail's vocabulary. */
+.rail-add {
+  min-height: 2.2em;
+  padding: 0.2em;
+  border: 1px dashed alpha(@text, 0.13);
+  border-radius: 0.6em;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: @faint;
+  transition:
+    color 140ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 140ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+.rail-add:hover {
+  color: @dim;
+  border-color: alpha(@filament, 0.3);
+  background-color: alpha(@text, 0.045);
+}
+
+/* The version, compressed to a presence. The words are in the tooltip and the
+   drawer footer still spells them out; down here it only has to exist. */
+.rail-version-dot {
+  color: alpha(@muted, 0.6);
+  font-size: 0.6em;
+  padding: 0.3em 0;
+}
+
 /* ── The rack ──────────────────────────────────────────────────────────────
    The sidebar is a rack of channel strips: every open project gets a strip,
    every strip carries a tally rail in that project's own colour, and exactly

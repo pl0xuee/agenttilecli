@@ -243,6 +243,7 @@ pub fn content_css(font_scale: f64) -> String {
          .workspace-floor {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
          .sidebar {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
          .sidebar.overlay {{ background-color: alpha(@rack, {OVERLAY_ALPHA:.3}); }}\n\
+         .rail {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
          .pane {{ background-color: alpha(@tile, {pane_opacity:.3}); }}\n\
          .pane.focused {{ background-color: alpha(@tile-lit, {pane_opacity:.3}); }}"
     )
@@ -436,6 +437,12 @@ mod tests {
         let css = content_css(1.0);
         assert!(css.contains("alpha(@field, 0.750)"), "{css}");
         assert!(css.contains("alpha(@rack, 0.750)"), "{css}");
+        // The rail is the third surface in the same law: rack colour, floor
+        // alpha. A rail denser than the drawer beside it reads as two racks.
+        assert!(
+            css.contains(".rail { background-color: alpha(@rack, 0.750); }"),
+            "{css}"
+        );
     }
 
     /// The overlaid rack is pinned, not scaled: whatever the floor slider says,

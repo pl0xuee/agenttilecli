@@ -14,10 +14,18 @@
 //! ```text
 //! AdwApplicationWindow
 //! └── AdwToastOverlay
-//!     └── AdwOverlaySplitView          collapses to an overlay on a narrow window
-//!         ├── sidebar: AdwToolbarView  header / project rows / version footer
-//!         └── content: AdwToolbarView  header / Stack of Tilers
+//!     └── GtkBox (horizontal)
+//!         ├── rail: GtkWindowHandle        every project, one glyph, always visible
+//!         └── AdwOverlaySplitView          collapses to an overlay on a narrow window
+//!             ├── sidebar: AdwToolbarView  the drawer: header / project rows / version footer
+//!             └── content: AdwToolbarView  header / Stack of Tilers
 //! ```
+//!
+//! The rail is the part of the rack that must never be off screen - which
+//! project is which, and which one wants you - so it sits *beside* the split
+//! view rather than inside it, untouched by the collapse. The drawer is the
+//! rest: names, tallies, folder trees, close buttons, summoned from the rail
+//! and dismissed the moment it has answered.
 //!
 //! The split view is worth the dependency on its own. What it replaces was a
 //! `Revealer` inside a `Box`, plus three separate `hexpand(false)` workarounds
@@ -45,6 +53,10 @@ use crate::updates::Updates;
 
 mod header;
 mod projects;
+// The always-visible project strip beside the split view. Split out for the
+// same reason `sidebar` was: it is one question - "which projects, and which
+// one am I in" - answered by one column of glyphs.
+mod rail;
 // The folder tree a sidebar strip unfolds into - split out for the same reason
 // `sidebar` itself was: it answers "what is in this project", which is its own
 // question, and the listing rules are testable without a display.
@@ -176,6 +188,9 @@ struct Inner {
     stack: gtk4::Stack,
     list: gtk4::ListBox,
     split: adw::OverlaySplitView,
+    /// The rail's column of project glyph buttons, rebuilt whole by
+    /// `refresh_rail` - see `rail`'s module comment for why whole.
+    rail_glyphs: gtk4::Box,
     toasts: adw::ToastOverlay,
     updates: Updates,
     title: adw::WindowTitle,
@@ -278,7 +293,13 @@ impl App {
             .min_sidebar_width(sidebar::SIDEBAR_MIN_PX)
             .max_sidebar_width(sidebar::SIDEBAR_MAX_PX)
             .build();
-        toasts.set_child(Some(&split));
+        // The rail sits beside the split view, not inside it, so the collapse
+        // that folds the drawer over the panes never touches it - a narrow
+        // window keeps its project index. The rail itself is prepended below,
+        // once there is an `App` for its buttons to call back into.
+        let shell = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        shell.append(&split);
+        toasts.set_child(Some(&shell));
 
         let window = adw::ApplicationWindow::builder()
             .application(application)
@@ -297,6 +318,11 @@ impl App {
         let list = gtk4::ListBox::builder()
             .selection_mode(gtk4::SelectionMode::Single)
             .css_classes(["sidebar-list"])
+            .build();
+        let rail_glyphs = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(6)
+            .css_classes(["rail-glyphs"])
             .build();
         let title_widget = adw::WindowTitle::new(title, "");
         let sidebar_toggle = gtk4::ToggleButton::builder()
@@ -332,6 +358,7 @@ impl App {
             stack: stack.clone(),
             list: list.clone(),
             split: split.clone(),
+            rail_glyphs,
             toasts,
             updates: updates.clone(),
             title: title_widget.clone(),
@@ -367,6 +394,7 @@ impl App {
         *this.0.socket.borrow_mut() = socket;
 
         split.set_sidebar(Some(&this.build_sidebar()));
+        shell.prepend(&this.build_rail());
         let search = crate::search::Search::new(&this);
         let content = this.build_content(&title_widget, &sidebar_toggle);
         content.add_top_bar(search.widget());

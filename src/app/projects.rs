@@ -361,5 +361,6 @@ impl App {
     pub fn move_active_project(&self, delta: i32) {
         self.0.store.borrow_mut().move_active(delta);
         self.0.list.invalidate_sort();
+        self.refresh_rail();
     }
 }
