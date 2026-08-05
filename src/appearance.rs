@@ -33,6 +33,21 @@ use crate::session;
 const OPACITY_MIN: f64 = 0.5;
 const OPACITY_MAX: f64 = 1.0;
 
+/// The rack's fill while the split view holds it *over* the panes - the
+/// collapsed mode below `COLLAPSE_WIDTH_PX` - rather than beside them.
+///
+/// Side by side, the rack's glass has nothing behind it but the desktop, which
+/// is the whole arrangement `content_css` documents. Collapsed, the same glass
+/// would sit on the floor and the panes, and glass over glass only ever
+/// composites denser - 0.92 over 0.92 is within a percent of opaque, wearing a
+/// translucency slider that claims otherwise. So the overlaid rack does not
+/// pretend: it is pinned near-opaque like the dialogs (0.94) and popovers
+/// (0.92), because a surface floating over content is elevation, and on this
+/// ramp elevation is opacity. Deliberately not a function of `window_opacity`:
+/// a sheet whose density tracked a slider about *floors* would just be the
+/// compositing accident with extra steps.
+pub const OVERLAY_ALPHA: f64 = 0.97;
+
 /// The live appearance. Cloned out rather than borrowed across a call, so a
 /// setter firing from inside a redraw can't panic on an outstanding borrow.
 #[derive(Clone, PartialEq, Debug)]
@@ -227,6 +242,7 @@ pub fn content_css(font_scale: f64) -> String {
          .scaled-content .top-bar {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
          .workspace-floor {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
          .sidebar {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
+         .sidebar.overlay {{ background-color: alpha(@rack, {OVERLAY_ALPHA:.3}); }}\n\
          .pane {{ background-color: alpha(@tile, {pane_opacity:.3}); }}\n\
          .pane.focused {{ background-color: alpha(@tile-lit, {pane_opacity:.3}); }}"
     )
@@ -420,5 +436,29 @@ mod tests {
         let css = content_css(1.0);
         assert!(css.contains("alpha(@field, 0.750)"), "{css}");
         assert!(css.contains("alpha(@rack, 0.750)"), "{css}");
+    }
+
+    /// The overlaid rack is pinned, not scaled: whatever the floor slider says,
+    /// the collapsed sheet is emitted at `OVERLAY_ALPHA` and nothing else.
+    /// Emitted at a slider value whose own alpha would be visibly different,
+    /// so the two rules can't be satisfied by one another.
+    #[test]
+    fn the_overlaid_rack_is_pinned_near_opaque() {
+        set(Appearance {
+            window_opacity: 0.6,
+            pane_opacity: 1.0,
+            gap: 6,
+            font: String::new(),
+        });
+        let css = content_css(1.0);
+        assert!(
+            css.contains(".sidebar.overlay { background-color: alpha(@rack, 0.970); }"),
+            "the collapsed rack has no elevated-sheet fill, so it will composite \
+             its slider glass onto the panes beneath it: {css}",
+        );
+        assert!(
+            css.contains(".sidebar { background-color: alpha(@rack, 0.600); }"),
+            "the side-by-side rack should still follow the slider: {css}",
+        );
     }
 }

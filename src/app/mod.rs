@@ -432,6 +432,19 @@ impl App {
         self.select(id);
     }
 
+    /// Summons the rack just before an `ATC_SHOT` render - `ATC_SHOT_SIDEBAR=1`.
+    ///
+    /// Below the breakpoint every project pick gets the overlaid rack out of
+    /// the way (see `projects.rs`), which is right interactively and useless
+    /// for photographing the overlay itself: by the time the shutter fires,
+    /// startup has always picked something. This is the hand that holds the
+    /// door open.
+    #[doc(hidden)]
+    #[cfg(debug_assertions)]
+    pub fn show_sidebar_for_screenshot(&self) {
+        self.0.split.set_show_sidebar(true);
+    }
+
     pub fn present(&self) {
         self.0.window.present();
     }

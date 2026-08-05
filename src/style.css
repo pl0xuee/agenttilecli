@@ -172,15 +172,25 @@ window {
   background-color: transparent;
 }
 
-/* The split view's two region containers, silenced by rule as well as by name.
+/* The split view's region containers, silenced by rule as well as by name.
    `adwaita-colors.css` already defines `sidebar_bg_color` and friends as
    `transparent` above anything a user file can say - but that shield is a
    definition, and definitions only cover the names we know libadwaita reads
    today. These are rules on the painting nodes themselves, which beat the adw
    stylesheet on provider priority no matter what any named colour resolves to.
-   Two locks on the same door, after the door was found open once. */
-overlay-split-view > .sidebar-pane,
-overlay-split-view > .content-pane {
+   Two locks on the same door, after the door was found open once.
+
+   `.background` is not decoration: when the split view collapses, libadwaita
+   stamps that generic class on the floated sidebar sheet, and Adwaita's
+   `.background` rule fills it with `--window-bg-color` - an opaque slab under
+   the rack that no sidebar-named colour controls. Measured, not read: with
+   only the two pane classes here, the collapsed sheet renders alpha 255 flat;
+   with `.background` silenced it renders the sheet's own 0.97 (see
+   `appearance::OVERLAY_ALPHA`). Scoped inside `overlay-split-view` so the
+   window's own `.background` - already handled above - is none of ours. */
+overlay-split-view .sidebar-pane,
+overlay-split-view .content-pane,
+overlay-split-view .background {
   background-color: transparent;
 }
 

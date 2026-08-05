@@ -59,6 +59,20 @@
 @define-color popover_bg_color alpha(@tile, 0.92);
 @define-color popover_fg_color @text;
 
+/* The shades are the scrims and edge shadows Adwaita mixes for itself - the
+   dimming behind a collapsed sidebar sheet among them. Left unnamed here they
+   were the one surface a rice still reached: an opaque `shade_color` turns
+   that dimming into a wall across the whole content half, measured at alpha
+   255 where the stock scrim reads ~160. `@shadow` at Adwaita's own
+   dark-variant density (`RGB(0 0 6 / 25%)` in its stylesheet), because a
+   scrim is a shadow with a job. */
+@define-color shade_color alpha(@shadow, 0.25);
+@define-color sidebar_shade_color alpha(@shadow, 0.25);
+@define-color secondary_sidebar_shade_color alpha(@shadow, 0.25);
+@define-color headerbar_shade_color alpha(@shadow, 0.25);
+@define-color card_shade_color alpha(@shadow, 0.25);
+@define-color popover_shade_color alpha(@shadow, 0.25);
+
 /* The lamp is the accent, which keeps "the thing you're about to act on" and
    "the thing the keyboard is in" the same colour across chrome and panes alike.
    Its foreground is the floor, not white: @filament is a near-white, and white

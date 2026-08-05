@@ -291,6 +291,13 @@ fn capture_and_quit(application: &adw::Application, app: &App, path: std::path::
     // its first frame drawn. Rendering before that yields a texture of the
     // window's idea of itself before the tiler has allocated anything.
     glib::timeout_add_local_once(std::time::Duration::from_millis(1200), move || {
+        // `ATC_SHOT_SIDEBAR=1` re-opens the rack for the shot. At overlay
+        // widths startup's own project pick has always closed it by now, so
+        // without this the collapsed rack cannot be photographed at all.
+        if std::env::var_os("ATC_SHOT_SIDEBAR").is_some() {
+            app.show_sidebar_for_screenshot();
+        }
+
         match std::env::var("ATC_SHOT_WITH").as_deref() {
             Ok("palette") => app.show_command_palette(),
             Ok("shortcuts") => app.show_shortcuts(),
@@ -542,6 +549,8 @@ mod tests {
             "secondary_sidebar_bg_color",
             "dialog_bg_color",
             "popover_bg_color",
+            "shade_color",
+            "sidebar_shade_color",
         ] {
             let define = format!("@define-color {name} ");
             assert!(

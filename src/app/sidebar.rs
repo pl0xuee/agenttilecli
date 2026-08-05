@@ -217,6 +217,24 @@ impl App {
         view.add_top_bar(&header);
         view.add_bottom_bar(&footer);
 
+        // The rack has two footings, and it needs to know which one it is on.
+        // Side by side, its glass has the desktop behind it. Collapsed - below
+        // `COLLAPSE_WIDTH_PX` - the split view floats it *over* the panes, and
+        // the same glass would composite onto theirs, coming out near-opaque
+        // while the slider claims otherwise. `.overlay` swaps the fill for the
+        // pinned elevated-sheet one; see `appearance::OVERLAY_ALPHA` for the
+        // number and the reasoning.
+        let sheet = view.clone();
+        let footing = move |split: &adw::OverlaySplitView| {
+            if split.is_collapsed() {
+                sheet.add_css_class("overlay");
+            } else {
+                sheet.remove_css_class("overlay");
+            }
+        };
+        footing(&self.0.split);
+        self.0.split.connect_collapsed_notify(footing);
+
         // The rack and the grip that widens it, side by side, so the split view
         // gets one widget and the grip lands on the rack's trailing edge.
         let rack = gtk4::Box::builder()
