@@ -134,6 +134,20 @@ fn load_css() {
         &standalone,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+
+    // And the palette aliases for libadwaita's named colours, one notch above
+    // the user's own gtk.css - the only provider of this app's that is. A
+    // theming tool that generates `~/.config/gtk-4.0/gtk.css` redefines these
+    // exact names at priority 800, and a `@define-color` fight is won purely on
+    // priority; the file's header tells the whole story. Definitions only, so
+    // nothing in it can shadow a rule from the providers below.
+    let adwaita = CssProvider::new();
+    adwaita.load_from_string(include_str!("adwaita-colors.css"));
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &adwaita,
+        gtk4::STYLE_PROVIDER_PRIORITY_USER + 1,
+    );
 }
 
 /// The five standalone signal colours, for the libadwaita that stopped reading
@@ -482,5 +496,76 @@ mod tests {
                 errors.join("\n"),
             );
         });
+    }
+
+    /// And the same again for the palette aliases, which are the one stylesheet
+    /// loaded above the user's own CSS - a parse error here reverts a name to
+    /// whatever a theming tool last wrote, which is how the rack went solid.
+    #[test]
+    fn the_adwaita_colours_parse_without_errors() {
+        gtk_test(|| {
+            let errors = Rc::new(RefCell::new(Vec::new()));
+            let provider = CssProvider::new();
+            let sink = errors.clone();
+            provider.connect_parsing_error(move |_, section, error| {
+                sink.borrow_mut()
+                    .push(format!("{}: {error}", section.to_str()));
+            });
+            provider.load_from_string(include_str!("adwaita-colors.css"));
+
+            let errors = errors.borrow();
+            assert!(
+                errors.is_empty(),
+                "adwaita-colors.css has {} parse error(s) GTK would have silently \
+                 ignored:\n{}",
+                errors.len(),
+                errors.join("\n"),
+            );
+        });
+    }
+
+    /// The names a theming tool's generated gtk.css redefines - the ones that
+    /// put an opaque slab behind the rack in 2026-08 - must be (re)defined in
+    /// `adwaita-colors.css`, the file that loads above user CSS, and must not
+    /// drift back into `style.css`, which loads below it and would lose the
+    /// fight silently. String checks, so they hold on a headless CI too.
+    #[test]
+    fn the_riceable_names_are_defined_above_user_css() {
+        let armoured = include_str!("adwaita-colors.css");
+        let below = include_str!("style.css");
+        for name in [
+            "window_bg_color",
+            "headerbar_bg_color",
+            "headerbar_backdrop_color",
+            "sidebar_bg_color",
+            "sidebar_backdrop_color",
+            "secondary_sidebar_bg_color",
+            "dialog_bg_color",
+            "popover_bg_color",
+        ] {
+            let define = format!("@define-color {name} ");
+            assert!(
+                armoured.contains(&define),
+                "{name} is not defined in adwaita-colors.css, so a user gtk.css \
+                 defines it instead and paints whatever it likes with it",
+            );
+            assert!(
+                !below.contains(&define),
+                "{name} is defined in style.css, which loads below user CSS - \
+                 the definition must live in adwaita-colors.css to win",
+            );
+        }
+        for name in ["sidebar_bg_color", "sidebar_backdrop_color"] {
+            assert!(
+                armoured.contains(&format!("@define-color {name} transparent;")),
+                "{name} must be transparent - any fill here sits behind the \
+                 rack's glass and composites it toward solid",
+            );
+        }
+        assert!(
+            below.contains(".sidebar-pane"),
+            "style.css has lost the rule silencing the split view's own region \
+             fill - the second lock on the door adwaita-colors.css guards",
+        );
     }
 }

@@ -1,0 +1,90 @@
+/* ── Adwaita, told which palette it's in ───────────────────────────────────
+   libadwaita ships a complete stylesheet of its own, and its widgets paint
+   themselves from *its* named colours rather than from anything in
+   `style.css`. Left alone, the header bar and the sidebar arrive in stock
+   Adwaita grey with a stock blue accent, sitting a few pixels from panes
+   built on the ramp - which reads as two applications sharing a window.
+
+   So the ramp is aliased onto Adwaita's names. This is the supported way to
+   theme it, and it means one edit to the ramp still moves everything: there
+   is no second set of values here to fall out of step, only pointers into
+   `style.css`, where the ramp itself lives (and where `palette.rs` reads it -
+   this file holds no hex literals for exactly that reason).
+
+   ── Why this is its own file, loaded above user CSS ────────────────────────
+   These names are precisely the ones a desktop theming tool redefines. GTK
+   loads `~/.config/gtk-4.0/gtk.css` at STYLE_PROVIDER_PRIORITY_USER (800),
+   above an application's own providers (600), and for a `@define-color` name
+   the highest-priority definition wins everywhere the name is referenced -
+   including inside libadwaita's own stylesheet.
+
+   That is not theoretical. On 2026-08-05 the rack's intermittent loss of
+   glass was traced to a generated user stylesheet (kderice's gunmetal.css,
+   rewritten on every rice) redefining `sidebar_bg_color` as an opaque hex:
+   libadwaita painted that behind the rack's `alpha(@rack, …)` fill, glass
+   over opaque composited to solid, and because the hex happened to *be*
+   @rack's, nothing looked wrong except the missing desktop behind it. The
+   window itself survived the same file because `window { background-color:
+   transparent; }` is a rule, and rules are not named colours.
+
+   So this block loads at USER + 1: the one thing this app cannot delegate is
+   which colours it is made of. It holds only `@define-color` lines - never a
+   rule - so it cannot outrank the runtime glass rules from
+   `appearance::content_css`, which sit at APPLICATION + 1 and win by being
+   rules rather than definitions.
+
+   The two sidebar names are `transparent` rather than glass, and that is the
+   compositing trap written down: the split view paints the sidebar region and
+   the toolbar view inside it paints again, so a pair of 0.78 fills would
+   composite to 0.95 and the glass would come out looking like a slightly
+   different grey. Exactly one surface may paint it, and the one that does is
+   `.sidebar` in `style.css`. */
+@define-color window_bg_color @field;
+@define-color window_fg_color @text;
+@define-color view_bg_color @tile;
+@define-color view_fg_color @text;
+@define-color headerbar_bg_color transparent;
+@define-color headerbar_fg_color @text;
+@define-color headerbar_border_color transparent;
+@define-color headerbar_backdrop_color transparent;
+@define-color sidebar_bg_color transparent;
+@define-color sidebar_fg_color @text;
+@define-color sidebar_backdrop_color transparent;
+@define-color sidebar_border_color @hairline;
+@define-color secondary_sidebar_bg_color transparent;
+@define-color card_bg_color @chip;
+@define-color card_fg_color @text;
+@define-color dialog_bg_color alpha(@tile, 0.94);
+@define-color dialog_fg_color @text;
+@define-color popover_bg_color alpha(@tile, 0.92);
+@define-color popover_fg_color @text;
+
+/* The lamp is the accent, which keeps "the thing you're about to act on" and
+   "the thing the keyboard is in" the same colour across chrome and panes alike.
+   Its foreground is the floor, not white: @filament is a near-white, and white
+   text on it would be unreadable.
+
+   The five `*_color` names below - the *standalone* accent, destructive, success,
+   warning and error, the ones libadwaita paints text and check marks with rather
+   than fills - only reach libadwaita 1.5, which is this crate's floor. From 1.6
+   it derives them from the matching `*_bg_color` instead and reads these lines
+   not at all, so they are inert on a modern install and have to stay anyway for
+   the floor. What covers 1.6+ is `main::standalone_colour_css`, which emits them
+   as CSS custom properties at runtime - not here, because a custom property needs
+   GTK 4.16 and stating one in this file would be a parse error for everyone on
+   4.12, including in `the_adwaita_colours_parse_without_errors`. */
+@define-color accent_bg_color @filament;
+@define-color accent_fg_color @field;
+@define-color accent_color @filament;
+@define-color destructive_bg_color @hangup;
+@define-color destructive_fg_color @field;
+@define-color destructive_color @hangup;
+@define-color success_bg_color @fresh;
+@define-color success_fg_color @field;
+@define-color success_color @fresh;
+@define-color warning_bg_color @tally;
+@define-color warning_fg_color @field;
+@define-color warning_color @tally;
+@define-color error_bg_color @hangup;
+@define-color error_fg_color @field;
+@define-color error_color @hangup;
