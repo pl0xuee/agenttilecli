@@ -268,14 +268,93 @@ pub fn set(next: Appearance) {
 /// denser than the gutters it is supposed to match. The revealer is the one that
 /// covers the whole region, so the revealer is the one that paints; the header bar
 /// itself stays `transparent` (see `headerbar_bg_color` in `style.css`).
+/// How dark a halo the chrome's text carries at a given surface opacity.
+///
+/// Nothing at 1.0, rising as the fill thins. The whole type palette in this app
+/// assumes it is being read against a dark surface - @faint and @muted are
+/// chosen to sit *quietly* on @rack, which only works while @rack is actually
+/// there. At `window_opacity` 0.5 it half isn't, and what shows through instead
+/// is whatever the desktop happens to be. Measured over a bright wallpaper at
+/// 0.5, with the window's own render composited onto it:
+///
+///     PROJECTS heading      2.69:1
+///     project row name      2.46:1
+///     "Open a project..."   1.12:1
+///     version footer        1.00:1   <- glyph and surface the same colour
+///
+/// 1.00:1 is not "hard to read", it is not drawn. And the fix cannot be to
+/// brighten the type, because the direction of the problem depends on the
+/// wallpaper: brighter text helps over a dark one and makes it worse over a
+/// bright one. What is missing is not lightness, it is *ground*.
+///
+/// So the text carries its own. A dark halo under every glyph is the ground the
+/// fill stopped providing, it costs nothing when the fill is doing its job
+/// (0.0 at full opacity), and it is what desktop icon labels have always done
+/// for exactly this reason - text over a picture nobody chose.
+///
+/// The curve is linear in the missing fill and capped below 1.0: a halo dark
+/// enough to guarantee contrast over pure white would be a black outline around
+/// every label, which reads as embossed rather than legible. 0.85 at the 0.5
+/// floor is where the type stays clean and the worst case still resolves.
+fn text_halo(opacity: f64) -> f64 {
+    ((1.0 - opacity) * 1.7).clamp(0.0, 0.85)
+}
+
+/// How far the quiet type is dragged toward @text as the surface thins.
+///
+/// The halo above is half the answer and measurably the smaller half - it took
+/// the version footer over a white wallpaper from 1.00:1 to 1.55:1, which is
+/// the difference between invisible and nearly invisible. The arithmetic is why:
+/// at alpha `a` over white, the surface lands at `255 - a*(255 - fill)`, so at
+/// 0.5 it is at least 127 *whatever colour the fill is*. No shadow rescues light
+/// grey on light grey; the ground cannot be made dark from underneath.
+///
+/// What is left is the figure. @faint and @muted are quiet because they are only
+/// a little lighter than @rack, and that relationship is the thing translucency
+/// destroys - against a mid-tone composite they are not quiet, they are gone. So
+/// as the fill thins they climb toward @text, which is the one ink in the
+/// palette with enough range to survive a surface the app does not control.
+///
+/// This does flatten the type hierarchy at the bottom of the range, and that is
+/// the right trade: a footnote that is dimmer than a heading is worth having,
+/// and a footnote that is not drawn at all is not. At the shipped default
+/// (0.92) the lift is 0.13 - a nudge nobody will see - and it only becomes a
+/// real change below about 0.8, which is where the surface stops being one.
+fn text_lift(opacity: f64) -> f64 {
+    ((1.0 - opacity) * 1.6).clamp(0.0, 1.0)
+}
+
 pub fn content_css(font_scale: f64) -> String {
     let Appearance {
         window_opacity,
         pane_opacity,
         ..
     } = get();
+    // Two haloes, because the two halves of the window thin out independently:
+    // the drawer and the rail follow `window_opacity`, while the pane chrome
+    // sits on a surface that follows `pane_opacity`.
+    let chrome_halo = text_halo(window_opacity);
+    let pane_halo = text_halo(pane_opacity);
+    // The lift follows whichever surface the text is actually sitting on. The
+    // drawer, the rail and the header strip all thin with `window_opacity`; only
+    // the labels inside a tile ride `pane_opacity`.
+    let chrome_lift = text_lift(window_opacity);
+    let pane_lift = text_lift(pane_opacity);
     format!(
         ".scaled-content {{ font-size: {font_scale}em; }}\n\
+         .sidebar, .rail {{ text-shadow: 0 0 3px alpha(@shadow, {chrome_halo:.3}), \
+           0 1px 2px alpha(@shadow, {chrome_halo:.3}); }}\n\
+         .scaled-content {{ text-shadow: 0 0 3px alpha(@shadow, {pane_halo:.3}), \
+           0 1px 2px alpha(@shadow, {pane_halo:.3}); }}\n\
+         .sidebar-version, .sidebar-add, .sidebar-header-count, .sidebar-tree-note, \
+         .empty-hint {{ color: mix(@faint, @text, {chrome_lift:.3}); }}\n\
+         .sidebar-header-label, .header-title-sub, .header-action, .rack-overflow, \
+         .sidebar-row-icon, button.sidebar-agent, button.sidebar-tree-file \
+         {{ color: mix(@muted, @text, {chrome_lift:.3}); }}\n\
+         .sidebar-agent-label, button.sidebar-tree-dir, .empty-description \
+         {{ color: mix(@dim, @text, {chrome_lift:.3}); }}\n\
+         .pane-head-label {{ color: mix(@muted, @text, {pane_lift:.3}); }}\n\
+         .pane-close, .pane-editor-action {{ color: mix(@faint, @text, {pane_lift:.3}); }}\n\
          .scaled-content .top-bar {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
          .workspace-floor {{ background-color: alpha(@tile, {window_opacity:.3}); }}\n\
          .sidebar {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
@@ -321,6 +400,37 @@ mod tests {
         let css = content_css(1.25);
         assert!(css.contains("font-size: 1.25em"), "{css}");
         assert!(css.contains("alpha(@field, 0.900)"), "{css}");
+    }
+
+    /// Both legibility curves have to be *nothing* at full opacity and real at
+    /// the floor, and they have to be nothing at exactly 1.0 rather than nearly
+    /// nothing - an opaque window has a perfectly good ground of its own, and a
+    /// halo on it is an outline round every label for no reason.
+    #[test]
+    fn the_legibility_compensation_costs_nothing_on_an_opaque_window() {
+        assert_eq!(text_halo(1.0), 0.0, "an opaque surface needs no halo");
+        assert_eq!(text_lift(1.0), 0.0, "nor any lift");
+
+        // The shipped default is a nudge nobody should be able to see.
+        assert!(text_halo(0.92) < 0.15, "halo at the default: {}", text_halo(0.92));
+        assert!(text_lift(0.92) < 0.15, "lift at the default: {}", text_lift(0.92));
+
+        // And at the floor, where the fill has stopped being a surface, both
+        // are doing real work - but the halo stays short of a black outline.
+        assert!(text_halo(OPACITY_MIN) > 0.6);
+        assert!(text_halo(OPACITY_MIN) <= 0.85, "a halo that dark reads as embossed");
+        assert!(text_lift(OPACITY_MIN) > 0.6);
+        assert!(text_lift(OPACITY_MIN) <= 1.0, "never past @text itself");
+
+        // Monotonic, so dragging the slider never brightens the type twice for
+        // one step or reverses on some interval.
+        let mut previous = (0.0, 0.0);
+        for step in 0..=50 {
+            let opacity = 1.0 - f64::from(step) * 0.01;
+            let (halo, lift) = (text_halo(opacity), text_lift(opacity));
+            assert!(halo >= previous.0 && lift >= previous.1, "not monotonic at {opacity}");
+            previous = (halo, lift);
+        }
     }
 
     /// An empty workspace and a workspace with one agent in it have to be the
