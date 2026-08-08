@@ -235,11 +235,23 @@ pub fn set(next: Appearance) {
 ///
 /// So the empty state now stands where a pane would, on the surface a pane
 /// would have, and starting the first agent changes the tone by the five points
-/// between @tile and @tile-lit rather than by twenty-one. It also takes
-/// `pane_opacity` rather than `window_opacity` for the same reason: it is
-/// standing in for a pane, and at the shipped default that makes it opaque -
-/// which is the rule that panes are the only opaque thing in this window,
-/// applied to the thing currently being one.
+/// between @tile and @tile-lit rather than by twenty-one.
+///
+/// The *colour* is the pane's and the *alpha* is the chrome's, which looks like
+/// having it both ways and is the point. Almost all of that twenty-one points
+/// was the colour: @field sits sixteen rungs below @tile before any alpha is
+/// applied, so no opacity setting could have closed it. The alpha was worth
+/// three of them. Taking @tile at `window_opacity` therefore fixes the jump
+/// while leaving this the one screen in the app you can still see your desktop
+/// through - which is what it was for, and what it would have lost by taking
+/// `pane_opacity` and going opaque at the shipped default.
+///
+/// It does mean a bright wallpaper still lightens this surface a little where
+/// it would not lighten a pane, since the pane above it is opaque and this is
+/// not. That difference is the glass doing exactly what the slider says it
+/// does, it is a few points rather than twenty-one, and anyone who wants it
+/// gone can close it from the other end by lowering `pane_opacity` until the
+/// panes are glass too.
 ///
 /// `.top-bar` is libadwaita's own class on the revealer `AdwToolbarView` puts its
 /// top bars in, and it is deliberately not `headerbar` - which is what this rule
@@ -265,7 +277,7 @@ pub fn content_css(font_scale: f64) -> String {
     format!(
         ".scaled-content {{ font-size: {font_scale}em; }}\n\
          .scaled-content .top-bar {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
-         .workspace-floor {{ background-color: alpha(@tile, {pane_opacity:.3}); }}\n\
+         .workspace-floor {{ background-color: alpha(@tile, {window_opacity:.3}); }}\n\
          .sidebar {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
          .sidebar.overlay {{ background-color: alpha(@rack, {OVERLAY_ALPHA:.3}); }}\n\
          .rail {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
@@ -334,10 +346,12 @@ mod tests {
         });
         let css = content_css(1.0);
 
-        // The empty state is a pane's surface at a pane's opacity...
+        // The empty state takes the pane's *colour* - which is where twenty of
+        // the twenty-one points lived - at the chrome's *alpha*, so it stays
+        // the one screen you can see the desktop through.
         assert!(
-            css.contains(".workspace-floor { background-color: alpha(@tile, 0.950); }"),
-            "the empty state must stand on the pane surface, not the floor:\n{css}",
+            css.contains(".workspace-floor { background-color: alpha(@tile, 0.800); }"),
+            "the empty state must stand on the pane surface, and stay glass:\n{css}",
         );
         // ...and emphatically not the floor's, which is what the gutters
         // between real tiles are for.
