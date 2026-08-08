@@ -182,48 +182,59 @@ fn master_stack(n: usize, master_count: usize, master_ratio: f64, width: i32, he
     rects
 }
 
-/// How far right to shift a row holding `used` of the available cells, so the
-/// ones it does hold sit centred across the width rather than pushed against
-/// the left.
+/// The column spans for one row of the grid: `panes_in_row` cells dividing the
+/// full `width` between them, in proportion to their own weights.
 ///
-/// Only a partial last row is ever off-centre, and only because the cells it
-/// isn't using are all at one end. Every cell keeps the size it would have had:
-/// stretching the survivors to fill the gap is the thing this layout
-/// deliberately doesn't do, since it would make a lone third pane twice the
-/// size of the two above it, so the leftover width is real either way. Putting
-/// half of it on each side turns it from a hole in the corner into a margin,
-/// which is what stops three panes reading as "four panes, one missing".
-fn centering_offset(spans: &[(i32, i32)], used: usize, width: i32) -> i32 {
-    if used == 0 || used >= spans.len() {
-        return 0;
+/// This is where a partial last row is decided, and the decision changed.
+///
+/// It used to be that every row divided the width by the *shape's* column
+/// count, so a partial row's cells kept the size a full row's had and the
+/// leftover was pushed out as a margin - half of it on each side, to centre
+/// what was there. The argument was that uniform cell size is worth more than
+/// filled space, and that centring turns a hole in the corner into a margin.
+///
+/// Half of that is true. It does turn one hole into two, and two holes flanking
+/// a pane do not read as a margin - they read as the two panes that failed to
+/// open. Three agents in a 2x2 left a quarter of the workspace empty and drew
+/// the eye straight to it, which is a great deal of a tiling window manager's
+/// window to spend on a principle about cell size. Every tiling WM this app
+/// sits beside on the same desktop - i3, sway, bspwm, Hyprland - fills the
+/// screen, and fills it for the same reason: a workspace that leaves a quarter
+/// of itself blank looks broken, not deliberate.
+///
+/// So the survivors stretch. A lone third pane is now twice the width of the
+/// two above it, which is the cost the old comment named and declined to pay,
+/// and it is worth paying: an unequal grid that fills its window looks
+/// arranged, and an equal one that doesn't looks unfinished.
+///
+/// Taking a prefix of the weights rather than renormalising them by hand is
+/// what keeps a dragged seam dragged: `weighted_spans` normalises whatever it
+/// is handed, so a row whose two panes were pulled to 3:1 stays 3:1 when the
+/// third pane closes and the row goes from three cells to two.
+pub fn row_col_spans(width: i32, ratios: &[f64], panes_in_row: usize) -> Vec<(i32, i32)> {
+    let used = panes_in_row.min(ratios.len());
+    if used == 0 {
+        return Vec::new();
     }
-    let first = spans[0].0;
-    let last = spans[used - 1];
-    let extent = last.0 + last.1 - first;
-    (width - extent) / 2
+    weighted_spans(width, &ratios[..used])
 }
 
-/// Even grid: every pane gets an equal-size cell, sized from the full
-/// `cols`x`rows` shape rather than from how many panes happen to land in
-/// each row - so cell size stays identical for every pane no matter how
-/// many panes there are. A partial last row keeps that size instead of
-/// stretching its panes wider to fill the leftover (which would make them a
-/// different size than every other pane), and is centred in it rather than
-/// left-aligned - see `centering_offset`.
+/// Even grid: every row divides the width between the panes actually in it, and
+/// every column the height between its rows. A full grid gives every pane an
+/// identical cell; a partial last row shares the width between the panes it has
+/// rather than leaving the missing cells as empty space - see `row_col_spans`.
 fn grid(n: usize, width: i32, height: i32) -> Vec<Rect> {
     let (cols, rows) = grid_shape(n, width, height, None);
-    let row_spans = spans(height, rows);
-    let col_spans = spans(width, cols);
+    let equal = vec![1.0; cols];
 
     let mut rects = Vec::with_capacity(n);
     let mut remaining = n;
-    for (y, h) in row_spans {
+    for (y, h) in spans(height, rows) {
         let items_in_row = remaining.min(cols);
         remaining -= items_in_row;
-        let offset = centering_offset(&col_spans, items_in_row, width);
-        for &(x, w) in col_spans.iter().take(items_in_row) {
+        for (x, w) in row_col_spans(width, &equal, items_in_row) {
             rects.push(shrink(Rect {
-                x: x + offset,
+                x,
                 y,
                 width: w,
                 height: h,
@@ -365,17 +376,16 @@ pub fn grid_weighted(
     // How many real panes are still to be placed. This function is handed one
     // weight per column for *every* row, including a last row that holds fewer
     // panes than that, so it has to count them itself to know which row is the
-    // partial one and centre it - see `centering_offset`.
+    // partial one and divide the width between only the panes it has - see
+    // `row_col_spans`.
     let mut remaining = n;
     for (row_i, (y, h)) in weighted_spans(height, row_ratios).into_iter().enumerate() {
         let ratios = col_ratios.get(row_i).map(Vec::as_slice).unwrap_or(&[]);
-        let col_spans = weighted_spans(width, ratios);
-        let items_in_row = remaining.min(col_spans.len());
+        let items_in_row = remaining.min(ratios.len());
         remaining -= items_in_row;
-        let offset = centering_offset(&col_spans, items_in_row, width);
-        for &(x, w) in col_spans.iter() {
+        for (x, w) in row_col_spans(width, ratios, items_in_row) {
             rects.push(shrink(Rect {
-                x: x + offset,
+                x,
                 y,
                 width: w,
                 height: h,
@@ -487,18 +497,61 @@ mod tests {
         assert_eq!(&weighted[..3], &plain[..]);
     }
 
+    /// Every row of the grid spans the full width, including a partial one.
+    ///
+    /// This replaces `grid_cells_are_uniform_size_regardless_of_pane_count`,
+    /// which pinned the opposite: a lone third pane kept the width of the two
+    /// above it and the leftover was centred out as margin. That left a quarter
+    /// of the workspace blank, which is the thing this changed for - see
+    /// `row_col_spans`. Cells are still uniform *within* a full row; what is no
+    /// longer promised is uniformity across a partial one.
     #[test]
-    fn grid_cells_are_uniform_size_regardless_of_pane_count() {
-        // 3 panes in a squarish area picks a 2x2 shape with a partial last
-        // row (2 panes, then 1) - all three panes must still end up exactly
-        // the same size as each other, not the lone third pane stretched to
-        // fill the row's full width.
+    fn every_grid_row_fills_the_width() {
         let rects = compute(3, 0, Mode::Grid, 1, 0.55, 800, 600);
         assert_eq!(rects.len(), 3);
-        for r in &rects[1..] {
-            assert_eq!(r.width, rects[0].width);
-            assert_eq!(r.height, rects[0].height);
-        }
+
+        // The full row: two equal cells, spanning the width between them.
+        assert_eq!(rects[0].width, rects[1].width, "a full row divides evenly");
+        assert_eq!(rects[0].x, gap(), "and starts at the left margin");
+        assert_eq!(
+            rects[1].x + rects[1].width,
+            800 - gap(),
+            "and ends at the right one",
+        );
+
+        // The partial row: one pane, taking all of it.
+        let lone = rects[2];
+        assert_eq!(lone.x, gap(), "the lone pane starts at the left margin too");
+        assert_eq!(
+            lone.x + lone.width,
+            800 - gap(),
+            "and reaches the right edge instead of stopping short",
+        );
+        assert!(
+            lone.width > rects[0].width,
+            "which makes it wider than the two above it - the trade this makes",
+        );
+        assert_eq!(lone.height, rects[0].height, "rows still divide evenly");
+    }
+
+    /// A dragged seam survives its row losing a pane.
+    ///
+    /// `row_col_spans` takes a *prefix* of the weights rather than rebuilding
+    /// them, and `weighted_spans` normalises whatever it is handed - so two
+    /// panes left at 3:1 in a three-cell row stay at 3:1 when they are the only
+    /// two left, instead of snapping back to even.
+    #[test]
+    fn a_shortened_row_keeps_the_proportions_it_was_dragged_to() {
+        let spans = row_col_spans(800, &[3.0, 1.0, 1.0], 2);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].0, 0, "the row still starts at the left");
+        assert_eq!(
+            spans[1].0 + spans[1].1,
+            800,
+            "and the two of them still cover the width",
+        );
+        assert_eq!(spans[0].1, 600, "3:1 of 800 is 600");
+        assert_eq!(spans[1].1, 200);
     }
 
     /// No arrangement is allowed to be much worse-proportioned than the best one
@@ -547,31 +600,38 @@ mod tests {
         }
     }
 
-    /// Three panes in a 2x2 shape leave one cell empty, and an empty cell in
-    /// the bottom-right corner reads as a pane that failed to open. Centring the
-    /// partial row turns the same leftover width into a margin.
+    /// No pane count leaves a hole in the workspace.
+    ///
+    /// The property `every_grid_row_fills_the_width` checks for three panes,
+    /// swept across the counts and window shapes a person actually opens. This
+    /// is the guarantee the centred layout could not make, and the reason it
+    /// went: every row reaches both margins, so the only empty space in a grid
+    /// is the gutters between tiles.
     #[test]
-    fn a_partial_last_row_is_centred_rather_than_left_aligned() {
-        let rects = compute(3, 0, Mode::Grid, 1, 0.55, 800, 600);
-        assert_eq!(rects.len(), 3);
+    fn no_grid_leaves_empty_space_at_the_end_of_a_row() {
+        const WINDOWS: &[(i32, i32)] = &[(1235, 860), (900, 860), (600, 1200), (1600, 700)];
+        for &(w, h) in WINDOWS {
+            for n in 1..=9usize {
+                let rects = compute(n, 0, Mode::Grid, 1, 0.55, w, h);
+                let (cols, _) = grid_shape(n, w, h, None);
 
-        // The two full-row panes are untouched: one against the left margin,
-        // one against the right.
-        let left_margin = rects[0].x;
-        let right_margin = 800 - (rects[1].x + rects[1].width);
-        assert_eq!(left_margin, right_margin, "the full row still spans the width");
-
-        // The lone pane on the last row sits with equal space either side of it
-        // - and is still exactly the size of the two above it.
-        let lone = rects[2];
-        let left = lone.x;
-        let right = 800 - (lone.x + lone.width);
-        assert!(
-            (left - right).abs() <= 1,
-            "partial row off-centre: {left} left vs {right} right",
-        );
-        assert_eq!(lone.width, rects[0].width, "and it is not stretched");
-        assert!(lone.x > rects[0].x, "it moved right of the left column");
+                // Group the rects back into rows and check each one's extent.
+                for (row_i, row) in rects.chunks(cols).enumerate() {
+                    let first = row.first().expect("a row with no panes in it");
+                    let last = row.last().expect("a row with no panes in it");
+                    assert_eq!(
+                        first.x,
+                        gap(),
+                        "{n} panes in {w}x{h}: row {row_i} starts short of the margin",
+                    );
+                    assert_eq!(
+                        last.x + last.width,
+                        w - gap(),
+                        "{n} panes in {w}x{h}: row {row_i} stops short of the right edge",
+                    );
+                }
+            }
+        }
     }
 
     /// A row that is full has nothing to centre, and must not be nudged.

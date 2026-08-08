@@ -32,13 +32,32 @@ pub struct Search {
 
 impl Search {
     pub fn new(app: &App) -> Self {
-        // A width request rather than `hexpand`, because the row it sits in is
-        // centred and a child that expands would push it back out to the full
+        // Sized in characters rather than pixels, and the distinction is the
+        // whole of this comment.
+        //
+        // Not `hexpand`, for the reason it never was: the row this sits in is
+        // centred, and a child that expands would push it back out to the full
         // width of the window - which is the shape the find bar had when it had
         // no style of its own at all.
+        //
+        // But not `width_request(320)` either, which is what it was, because a
+        // width request is a *floor* and a floor here is a floor under the whole
+        // window. GtkSearchBar hides its child behind a revealer that slides
+        // vertically, so the child goes on requesting its full width whether or
+        // not the bar is on screen - which meant a find bar nobody had opened
+        // was silently holding the window to 516px, overflowing its own chrome
+        // at a quarter-snap and printing `AdwToastOverlay ... exceeds
+        // AdwApplicationWindow width` for every frame of it.
+        //
+        // `max_width_chars` sets the natural width and `width_chars` the
+        // minimum, so the pill still opens at the ~320px it was drawn for and
+        // shrinks rather than overflowing when the window has less to give.
+        // Twelve characters is about the shortest box still worth typing a
+        // search into.
         let entry = gtk4::SearchEntry::builder()
             .placeholder_text("Find in this pane")
-            .width_request(320)
+            .width_chars(12)
+            .max_width_chars(34)
             .build();
 
         let previous = gtk4::Button::builder()

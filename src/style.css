@@ -111,6 +111,59 @@
 @define-color hue-4 #ae8fe6; /* violet */
 @define-color hue-5 #e58fb8; /* pink   */
 
+/* ── Interaction washes ────────────────────────────────────────────────────
+   The four fills every control in this app reaches for, named once.
+
+   They were not named before, and the cost of that was not that any single
+   value was wrong - it was that there were eleven of them. A control at rest
+   was `alpha(@text, 0.032)` in the rack, `0.06` in the header bar and nothing
+   at all in the tree; hover was `0.045`, `0.06`, `0.075`, `0.08` and `0.12`
+   depending on which rule you landed in; selection was `alpha(@filament, 0.11)`
+   on a strip, `0.13` in the palette and `0.16` on a toggle. No two of those
+   differences were decisions - they are what happens when the same idea is
+   retyped from memory a dozen times over a dozen sittings - and together they
+   are most of why the chrome read as assembled rather than drawn. A hover that
+   is a different brightness in the sidebar than in the header is the interface
+   contradicting itself about how loud "the pointer is here" is.
+
+   So: two ladders of two rungs each. @wash is the neutral one, for a control
+   that is merely present; @lit-wash is the warm one, for a control reporting
+   that it is *on* - the same @filament that edges the focused pane, so "this is
+   active" is one colour across the whole window. Rest and hover are one step
+   apart on each, and the step is the same size on both.
+
+   The values are the middle of the range they replace rather than any one of
+   the old numbers, and they are far enough apart to survive the dim laptop
+   panel the whole ramp above is spaced for: 0.05 to 0.10 is a doubling, which
+   is what makes hover legible without making it an event. */
+@define-color wash      alpha(@text, 0.05);
+@define-color wash-hi   alpha(@text, 0.10);
+@define-color lit-wash  alpha(@filament, 0.13);
+@define-color lit-hi    alpha(@filament, 0.20);
+
+/* ── Type scale ────────────────────────────────────────────────────────────
+   Six steps, and the reason to write them down is that there used to be nine
+   in a range half this wide: 0.6, 0.72, 0.78, 0.8, 0.82, 0.98, 1.02, 1.15 and
+   1.18em, several of them a fiftieth of an em apart. Two sizes that close are
+   not two levels of hierarchy, they are one level drawn twice - the eye cannot
+   resolve the difference, so all it gets is the impression that nothing was
+   measured.
+
+   The steps below are a fourth apart at the small end and a fifth at the top,
+   which is wide enough that every jump is a jump you can see:
+
+     0.72em  engraved      the version plate, tree asides, the empty-state hint
+     0.78em  micro         pane head labels, the overflow count, palette context
+     0.92em  secondary     file names in a tree, the ghost row's caption
+     1.00em  body          the default; anything with no reason to differ
+     1.12em  emphasis      project names, the palette's own query field
+     1.55em  display       the empty state's heading, the only display type here
+
+   Written as a comment rather than as tokens because GTK's CSS has no `var()`
+   and `@define-color` holds colours only - so, like the radius scale below it,
+   this is a convention the rules are expected to quote rather than a mechanism
+   that enforces itself. */
+
 /* ── Adwaita, told which palette it's in ───────────────────────────────────
    The aliases that point libadwaita's named colours at the ramp live in
    `adwaita-colors.css`, not here: they have to load *above* user CSS
@@ -460,14 +513,29 @@ overlay-split-view .background {
    *is* `button`, which is why this is one exception rather than a systematic
    mistake - and why the bare class has to stay alongside the `> button` form.
    The wrapper is told to paint nothing, below. */
+/* ── And why they rest empty ───────────────────────────────────────────────
+   The shape is the platform's; the *fill* was the mistake. Every one of these
+   carried `alpha(@text, 0.06)` at rest, which put five filled discs in a row
+   across the top right of the window - and a filled button is how this app
+   says a toggle is on. Five of them meant the one control that genuinely was
+   on (the sidebar toggle, the broadcast arm, the checked mode) had no way to
+   say so except by being slightly brighter than four buttons already wearing
+   its costume. The strip read as a control panel with everything switched on,
+   which is the opposite of what it was reporting.
+
+   So rest is nothing at all, hover is the neutral wash, and a fill means the
+   thing is on. That is one claim per state instead of two states sharing one,
+   and it costs no discoverability: these sit in a header bar beside the window
+   controls, which is the one strip on a desktop where a row of bare glyphs is
+   already understood to be buttons. */
 .header-action,
 menubutton.header-action > button {
   min-width: 1.95em;
   min-height: 1.95em;
   padding: 0;
   border-radius: 50%;
-  color: @dim;
-  background-color: alpha(@text, 0.06);
+  color: @muted;
+  background-color: transparent;
   transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
     background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
@@ -486,7 +554,7 @@ menubutton.header-action {
 .header-action:hover,
 menubutton.header-action > button:hover {
   color: @text;
-  background-color: alpha(@text, 0.12);
+  background-color: @wash-hi;
 }
 
 /* A toggle that is on takes the lamp, at the low alpha the sidebar's selected
@@ -497,12 +565,34 @@ menubutton.header-action > button:hover {
 .header-action:checked,
 menubutton.header-action > button:checked {
   color: @filament;
-  background-color: alpha(@filament, 0.16);
+  background-color: @lit-wash;
 }
 
 .header-action:checked:hover,
 menubutton.header-action > button:checked:hover {
-  background-color: alpha(@filament, 0.22);
+  background-color: @lit-hi;
+}
+
+/* The one action in the strip with a claim on being found rather than merely
+   available: spawning an agent is what this window is for, and it was drawn
+   as the third of five identical discs.
+
+   It takes the lamp's outline rather than the lamp's fill. A solid @filament
+   pill here would be the brightest object in the window - the treatment the
+   empty state's primary button was talked out of for exactly that reason, and
+   the focused pane is the one thing allowed to look lit. A ring says "this one"
+   without lighting anything: the glyph comes up to @text while its four
+   neighbours sit at @muted, and the hairline of filament around it is enough
+   to pick out of a row of bare icons without becoming a second lamp. */
+.header-primary,
+.header-primary:hover {
+  color: @text;
+  box-shadow: inset 0 0 0 1px alpha(@filament, 0.30);
+}
+
+.header-primary:hover {
+  background-color: @lit-wash;
+  box-shadow: inset 0 0 0 1px alpha(@filament, 0.55);
 }
 
 /* ── The mode switcher ─────────────────────────────────────────────────────
@@ -517,10 +607,16 @@ menubutton.header-action > button:checked:hover {
    *is*. These rules restate the app's own trough (Adwaita's is a currentColor
    mix that shifts with the theme) and quiet the segment shadows Adwaita adds,
    which are a raised-chip language this flat header has never spoken. */
+/* The trough keeps its fill where the buttons beside it gave theirs up, and
+   that is the distinction being drawn: the round buttons are five separate
+   actions that happen to sit next to each other, while this is one control with
+   three positions. The trough is what says so - it is the housing, not a state -
+   and without it the three toggles would read as three more header buttons of
+   which one is inexplicably lit. */
 .mode-switcher {
   padding: 0.14em;
   border-radius: 0.62em;
-  background-color: alpha(@text, 0.06);
+  background-color: @wash;
   box-shadow: none;
 }
 
@@ -539,17 +635,17 @@ menubutton.header-action > button:checked:hover {
 
 .mode-switcher > toggle:hover {
   color: @text;
-  background-color: alpha(@text, 0.08);
+  background-color: @wash-hi;
 }
 
 .mode-switcher > toggle:checked {
   color: @filament;
-  background-color: alpha(@filament, 0.16);
+  background-color: @lit-wash;
   box-shadow: none;
 }
 
 .mode-switcher > toggle:checked:hover {
-  background-color: alpha(@filament, 0.22);
+  background-color: @lit-hi;
 }
 
 /* An engraved equipment label rather than a caption: monospace, small, in caps
@@ -578,10 +674,17 @@ menubutton.header-action > button:checked:hover {
    It was `.pane-dir` when a directory was all it ever held. It now says what
    the agent is doing and names the folder only when the agent has moved out of
    the project's own, so the name would have been a lie. */
+/* Raised a step in both size and tone, and both were too quiet to do the job
+   the paragraphs above describe. At 0.72em of @faint on a lit tile the strip
+   was legible only if you already knew what it said - which defeats a label
+   whose whole purpose is naming the one thing about a pane that its own output
+   never shows. 0.78em is the micro step of the scale at the top of this file,
+   and @muted is one rung up from @faint: still the quietest type in the app,
+   and now actually readable at arm's length. */
 .pane-head-label {
-  color: @faint;
+  color: @muted;
   font-family: monospace;
-  font-size: 0.72em;
+  font-size: 0.78em;
   text-transform: uppercase;
 }
 
@@ -589,7 +692,7 @@ menubutton.header-action > button:checked:hover {
    but because on a screen of four identical strips the one you're typing into
    is the one whose folder you actually want to be able to read. */
 .pane.focused .pane-head-label {
-  color: @muted;
+  color: @dim;
 }
 
 /* ── The empty state ───────────────────────────────────────────────────────
@@ -604,7 +707,7 @@ menubutton.header-action > button:checked:hover {
    outline. The hierarchy is still obvious and neither of them is a lamp. */
 .empty-primary {
   color: @filament;
-  background-color: alpha(@filament, 0.16);
+  background-color: @lit-wash;
   background-image: none;
   border: 1px solid alpha(@filament, 0.22);
   box-shadow: none;
@@ -630,15 +733,63 @@ menubutton.header-action > button:checked:hover {
 
 .empty-secondary:hover {
   color: @text;
-  background-color: alpha(@text, 0.06);
+  background-color: @wash;
   border-color: alpha(@text, 0.22);
 }
 
+/* ── The diagram ───────────────────────────────────────────────────────────
+   Four tiles with one lit - the app's own subject, standing where a stock
+   `tab-new-symbolic` used to. See `build_empty_diagram` for why it is built
+   from boxes rather than shipped as an icon.
+
+   Every value here is quoted from `.pane` and then stepped down, which is the
+   whole point of drawing it this way: the radius is the panes' 0.5em taken to
+   0.35em because these are a third the size, the fill and the lit fill are
+   @tile and @tile-lit outright, and the lamp is the same @filament bloom at a
+   smaller radius. It is a scale model, not an illustration of one.
+
+   The fill carries alpha because the workspace behind it may be glass, and a
+   diagram of translucent panes painted opaque would be the one place in the
+   window where the app misrepresents itself. */
+.empty-diagram {
+  margin-bottom: 1.5em;
+}
+
+.empty-tile {
+  min-width: 4.2em;
+  min-height: 2.6em;
+  border-radius: 0.35em;
+  background-color: alpha(@tile, 0.75);
+  border: 1px solid alpha(@edge, 0.55);
+}
+
+/* The one lit tile, and the reason the diagram is worth its space: it says
+   before the first agent starts that this workspace always has exactly one
+   pane the keyboard is in, and that the app will tell you which. */
+.empty-tile.lit {
+  background-color: @tile-lit;
+  border-color: alpha(@filament, 0.8);
+  box-shadow: 0 0 0 1px alpha(@filament, 0.18), 0 0 1.6em alpha(@filament, 0.13);
+}
+
+/* The page's own heading, in place of the StatusPage's - which arrives at a
+   size libadwaita picked for a full-window error and lands here as the loudest
+   type in the app, over a workspace that is merely idle. 1.55em is the display
+   step of the scale at the top of this file, and it is the only thing in the
+   window that uses it. */
+.empty-heading {
+  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-size: 1.55em;
+  font-weight: 600;
+  color: @text;
+}
+
 /* The page's own description label, in the StatusPage voice it replaces - see
-   `build_empty_state` for why it is ours rather than the widget's. The margin
-   restates the gap the StatusPage put between description and child. */
+   `build_empty_state` for why it is ours rather than the widget's. The margins
+   restate the gaps the StatusPage put around it. */
 .empty-description {
-  margin-bottom: 1.4em;
+  margin-top: 0.5em;
+  margin-bottom: 1.5em;
   color: @dim;
 }
 
@@ -646,9 +797,9 @@ menubutton.header-action > button:checked:hover {
    rest of the app's footnotes use, so it reads as a note rather than a third
    button. */
 .empty-hint {
-  margin-top: 0.6em;
+  margin-top: 0.9em;
   font-family: monospace;
-  font-size: 0.8em;
+  font-size: 0.78em;
   color: @faint;
 }
 
@@ -705,7 +856,7 @@ searchbar > revealer > box {
 
 .search-row button:hover {
   color: @text;
-  background-color: alpha(@text, 0.08);
+  background-color: @wash-hi;
 }
 
 /* ── The editor pane ───────────────────────────────────────────────────────
@@ -737,7 +888,7 @@ searchbar > revealer > box {
 
 .pane-editor-action:hover {
   color: @text;
-  background-color: alpha(@text, 0.08);
+  background-color: @wash-hi;
 }
 
 /* Save carries the lamp while there is anything to save - the one control in
@@ -748,7 +899,7 @@ searchbar > revealer > box {
 }
 
 .pane-editor-save:hover {
-  background-color: alpha(@filament, 0.16);
+  background-color: @lit-wash;
 }
 
 /* Where a failed save says why, since an editor pane has no terminal to say
@@ -759,7 +910,7 @@ searchbar > revealer > box {
   color: @tally;
   background-color: alpha(@tally, 0.08);
   font-family: monospace;
-  font-size: 0.8em;
+  font-size: 0.78em;
 }
 
 /* ── Toasts ────────────────────────────────────────────────────────────────
@@ -807,7 +958,7 @@ toast {
   box-shadow: none;
   outline: none;
   padding: 0.4em 0.5em;
-  font-size: 1.15em;
+  font-size: 1.12em;
 }
 
 .palette-list {
@@ -824,11 +975,11 @@ toast {
 }
 
 .palette-list row:hover {
-  background-color: alpha(@text, 0.06);
+  background-color: @wash;
 }
 
 .palette-list row:selected {
-  background-color: alpha(@filament, 0.13);
+  background-color: @lit-wash;
   color: @text;
 }
 
@@ -851,12 +1002,120 @@ toast {
    when two rows would otherwise look alike. */
 .palette-context {
   color: @faint;
-  font-size: 0.82em;
+  font-size: 0.78em;
 }
 
 .palette-empty {
   padding: 2.2em 1em;
   color: @muted;
+}
+
+/* ── The two settings dialogs ──────────────────────────────────────────────
+   Preferences and the keyboard cheatsheet, which are the same widgetry twice:
+   an `AdwPreferencesPage` of `AdwPreferencesGroup`s of rows. Both arrived
+   entirely in stock libadwaita, and it showed. The dialog's own fill comes
+   from the `dialog_bg_color` alias - @tile at 0.94, correct - but the rows
+   inside it come from `card_bg_color`, which this app aliases to @chip. @chip
+   is the rung for a small control sitting *on* a pane; sixteen points above
+   @tile it reads as a bright slab dropped into a dark dialog, and it was the
+   one place left in the app where two stylesheets were visibly arguing.
+
+   The fix is a wash rather than another rung of the ramp. A list of settings
+   inside a dialog is not a surface floating above it - it is a region of it -
+   so it takes the same `alpha(@text, 0.05)` every other grouped-but-not-raised
+   thing in this app takes, with a hairline to fence it and a rule between rows
+   instead of a gap. The alias itself is left alone: `card_bg_color` is a name
+   libadwaita hands to real cards elsewhere, and redefining it to suit these two
+   dialogs would be fixing the wrong end.
+
+   Scoped by a class the two dialogs set on their page (`atc-dialog`) rather
+   than by the widget names, so nothing here can reach into a popover or a
+   toast that happens to be built from the same nodes. */
+.atc-dialog .boxed-list {
+  background-color: @wash;
+  background-image: none;
+  border: 1px solid alpha(@text, 0.08);
+  border-radius: 0.6em;
+  box-shadow: none;
+}
+
+.atc-dialog .boxed-list > row {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+/* A rule between rows rather than the theme's own gap-and-shadow. The list is
+   one object with settings in it, and a hairline is the least ink that says
+   where one row stops. */
+.atc-dialog .boxed-list > row:not(:last-child) {
+  border-bottom: 1px solid alpha(@text, 0.07);
+}
+
+.atc-dialog .boxed-list > row:hover {
+  background-color: @wash;
+}
+
+/* A group's own heading and its paragraph of explanation. The description is
+   real prose - both dialogs use it to say what the settings below are for - so
+   it gets @dim rather than the @muted a caption would take. */
+.atc-dialog .title {
+  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
+}
+
+.atc-dialog .description,
+.atc-dialog row .subtitle {
+  color: @muted;
+}
+
+/* The spin controls on the opacity and gap rows. Stock, these are two filled
+   light circles per row - six bright objects in a dialog with three settings
+   in it - so they take the header bar's treatment instead: nothing at rest,
+   the neutral wash under the pointer. */
+.atc-dialog spinbutton button {
+  color: @dim;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+.atc-dialog spinbutton button:hover {
+  color: @text;
+  background-color: @wash-hi;
+}
+
+/* The number itself, in the monospace every other number in this app is set
+   in - the version plate, the overflow count, the pane heads. An opacity is
+   read digit by digit and compared against the one above it, which is the one
+   job a typewriter face is unambiguously better at. */
+.atc-dialog spinbutton text {
+  font-family: monospace;
+  color: @text;
+}
+
+/* ── Drawn keys ────────────────────────────────────────────────────────────
+   `GtkShortcutLabel` draws each key as a `.keycap`, and the theme's version is
+   a near-white filled chip. In the cheatsheet that is forty of them, and in the
+   command palette it put the brightest objects in the dialog down the right
+   edge of a list whose actual content is on the left - the accelerator shouting
+   over the command it belongs to.
+
+   So a key is drawn the way this app draws every other engraved fact: dark
+   chip, hairline, monospace, quiet ink. It still reads as a key - the border
+   and the even width are what do that - and it no longer outranks the sentence
+   it is annotating. */
+.keycap {
+  min-width: 1.1em;
+  padding: 0.1em 0.4em;
+  border: 1px solid alpha(@text, 0.14);
+  border-radius: 0.3em;
+  background-color: @wash;
+  background-image: none;
+  box-shadow: none;
+  color: @dim;
+  font-family: monospace;
+  font-size: 0.78em;
+  font-weight: 600;
 }
 
 /* ── The rail ──────────────────────────────────────────────────────────────
@@ -870,19 +1129,42 @@ toast {
    The fill is written by `appearance.rs`, at the same alpha as the rack and
    the floor: one glass, three surfaces, one law. */
 .rail {
-  min-width: 3.4em;
-  padding: 0.55em 0.45em;
+  min-width: 3.6em;
+  padding: 0.5em 0.5em 0.4em;
 }
 
+/* ── Why the glyph is a coloured chip now ──────────────────────────────────
+   The rail's whole job is recognition without reading, and it was doing it
+   with a 0.18em sliver down one edge of a grey square - about three pixels of
+   colour on a forty-pixel object, roughly two per cent of it. At that size a
+   hue is not an identity, it is a rounding error: a column of eight projects
+   came out as a column of eight identical grey squares with different letters
+   in them, which is reading, which is the one thing the rail exists to avoid.
+
+   The drawer's strips can afford the sliver because they are eleven times as
+   wide and carry the project's *name* two centimetres to its right - there,
+   the bar is a garnish on a label. The rail has no label. So the rail stops
+   borrowing the drawer's device and takes the one that works at its own size:
+   the hue fills the chip, and the initial is drawn in it.
+
+   This is the Discord/Slack/Arc idiom and it is theirs for a reason - it is
+   the only thing that survives being 40px wide. The tint is kept low (0.16)
+   so eight chips read as a muted spectrum rather than a paint chart, and the
+   letter carries the hue at full strength, where a single glyph of saturated
+   colour on a dark ground is legible at a glance and never shouts.
+
+   The identity is *still* the same five hues the drawer uses, so a project is
+   the same colour in both places. What changed is only how much of the chip
+   gets to be that colour. */
 .rail-glyph {
-  min-width: 2.5em;
-  min-height: 2.5em;
+  min-width: 2.6em;
+  min-height: 2.6em;
   padding: 0;
   border: none;
-  border-radius: 0.6em;
-  background-color: alpha(@text, 0.032);
+  border-radius: 0.72em;
+  background-color: @wash;
   background-image: none;
-  box-shadow: inset 0.18em 0 0 0 alpha(@muted, 0.4);
+  box-shadow: none;
   color: @dim;
   transition:
     background-color 140ms cubic-bezier(0.2, 0, 0, 1),
@@ -890,58 +1172,104 @@ toast {
     color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 .rail-glyph:hover {
-  background-color: alpha(@text, 0.075);
+  background-color: @wash-hi;
   color: @text;
 }
 
 /* The face is an initial, set in the mono the panes are set in: the rail is
-   an index into a terminal workspace, and it can say so in one letter. */
+   an index into a terminal workspace, and it can say so in one letter. Bumped
+   to 1.05em because the chip is now a field of colour and the letter has to
+   hold its own inside it rather than sit on grey. */
 .rail-glyph .rail-glyph-face {
   font-family: monospace;
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 1.05em;
 }
 
-/* The identity bar, exactly the rows': same edge, dimmed until lit. */
-.rail-glyph.hue-1 { box-shadow: inset 0.18em 0 0 0 alpha(@hue-1, 0.6); }
-.rail-glyph.hue-2 { box-shadow: inset 0.18em 0 0 0 alpha(@hue-2, 0.6); }
-.rail-glyph.hue-3 { box-shadow: inset 0.18em 0 0 0 alpha(@hue-3, 0.6); }
-.rail-glyph.hue-4 { box-shadow: inset 0.18em 0 0 0 alpha(@hue-4, 0.6); }
-.rail-glyph.hue-5 { box-shadow: inset 0.18em 0 0 0 alpha(@hue-5, 0.6); }
-.rail-glyph.hue-neutral { box-shadow: inset 0.18em 0 0 0 alpha(@muted, 0.4); }
+/* Identity: the chip takes the project's hue as a wash and the initial takes
+   it outright. */
+.rail-glyph.hue-1 { background-color: alpha(@hue-1, 0.16); color: @hue-1; }
+.rail-glyph.hue-2 { background-color: alpha(@hue-2, 0.16); color: @hue-2; }
+.rail-glyph.hue-3 { background-color: alpha(@hue-3, 0.16); color: @hue-3; }
+.rail-glyph.hue-4 { background-color: alpha(@hue-4, 0.16); color: @hue-4; }
+.rail-glyph.hue-5 { background-color: alpha(@hue-5, 0.16); color: @hue-5; }
+/* The welcome entry: a home screen occupying a slot, not a project with an
+   identity, so it stays on the app's own grey rather than taking a colour off
+   the wheel. */
+.rail-glyph.hue-neutral { background-color: @wash; color: @muted; }
 
-/* Lit: the project on screen. The row-selection wash and the bar at full
-   strength - recognition, not celebration; the one bold thing in this window
-   is the focused pane, and the rail does not compete with it. */
+.rail-glyph.hue-1:hover { background-color: alpha(@hue-1, 0.26); }
+.rail-glyph.hue-2:hover { background-color: alpha(@hue-2, 0.26); }
+.rail-glyph.hue-3:hover { background-color: alpha(@hue-3, 0.26); }
+.rail-glyph.hue-4:hover { background-color: alpha(@hue-4, 0.26); }
+.rail-glyph.hue-5:hover { background-color: alpha(@hue-5, 0.26); }
+.rail-glyph.hue-neutral:hover { background-color: @wash-hi; color: @dim; }
+
+/* Lit: the project on screen.
+
+   With the hue now filling the chip, brightness is no longer free to carry the
+   selection - a lit blue chip and a hovered blue chip would be the same blue at
+   two strengths, which is the ambiguity the drawer's rules spend three
+   paragraphs avoiding. So lit is a *ring*, in filament, which is the colour
+   this app lights everything focused with and the one colour no project can be
+   assigned. One glance: which chip has the lamp around it.
+
+   The ring is drawn as an inset shadow rather than a border for the reason the
+   drawer's rails are: a border would change the chip's size the moment it
+   became the active one, and the whole column below it would step sideways. */
 .rail-glyph.lit {
-  background-color: alpha(@filament, 0.11);
   color: @text;
+  box-shadow: inset 0 0 0 2px alpha(@filament, 0.85);
 }
-.rail-glyph.lit.hue-1 { box-shadow: inset 0.18em 0 0 0 @hue-1; }
-.rail-glyph.lit.hue-2 { box-shadow: inset 0.18em 0 0 0 @hue-2; }
-.rail-glyph.lit.hue-3 { box-shadow: inset 0.18em 0 0 0 @hue-3; }
-.rail-glyph.lit.hue-4 { box-shadow: inset 0.18em 0 0 0 @hue-4; }
-.rail-glyph.lit.hue-5 { box-shadow: inset 0.18em 0 0 0 @hue-5; }
-.rail-glyph.lit.hue-neutral { box-shadow: inset 0.18em 0 0 0 @muted; }
+.rail-glyph.lit.hue-1 { background-color: alpha(@hue-1, 0.30); }
+.rail-glyph.lit.hue-2 { background-color: alpha(@hue-2, 0.30); }
+.rail-glyph.lit.hue-3 { background-color: alpha(@hue-3, 0.30); }
+.rail-glyph.lit.hue-4 { background-color: alpha(@hue-4, 0.30); }
+.rail-glyph.lit.hue-5 { background-color: alpha(@hue-5, 0.30); }
+.rail-glyph.lit.hue-neutral { background-color: @lit-wash; }
 
 /* Attention on the rail, mirroring the rows: below the hue rules because it
    ties the two-class ones on specificity and has to win on source order, and
    carrying `!important`-free victory over `.lit.hue-N` is not needed - a
    glyph is never lit and asking at once, since showing a project answers it. */
+/* Attention on the rail. It takes the same amber ring the lit chip takes in
+   filament - one device, two colours, and they cannot be confused because a
+   project is never lit and asking at once (showing a project answers it).
+
+   Below the hue rules because it ties them on specificity and has to win on
+   source order, and it drops the hue's own fill for an amber one: a chip
+   asking for you stops saying which colour it is and says only that it wants
+   you. */
 .rail-glyph.needs-attention {
-  color: mix(@tally, @text, 0.55);
-  box-shadow: inset 0.18em 0 0 0 @tally;
+  color: mix(@tally, @text, 0.4);
+  background-color: alpha(@tally, 0.18);
+  box-shadow: inset 0 0 0 2px @tally;
   animation-name: sidebar-attention;
   animation-duration: 900ms;
   animation-iteration-count: 3;
   animation-timing-function: ease-in-out;
 }
 
-/* The drawer's "Open a project..." said in the rail's vocabulary. */
+/* Fences the two controls at the foot of the rail off from the column of
+   projects above them, which is the same job the drawer's footer rule does and
+   the same reason: "open a new project" and "which build is this" are not two
+   more projects, and in a column of identical chips that is exactly what they
+   read as without a line. */
+.rail-foot {
+  margin: 0.4em 0.1em 0;
+  padding-top: 0.45em;
+  border-top: 1px solid alpha(@text, 0.09);
+}
+
+/* The drawer's "Open a project..." said in the rail's vocabulary: the chip's
+   own footprint, so it lines up with the column above it, and dashed so it
+   reads as the outline of a chip you could have rather than as one you do. */
 .rail-add {
-  min-height: 2.2em;
-  padding: 0.2em;
-  border: 1px dashed alpha(@text, 0.13);
-  border-radius: 0.6em;
+  min-width: 2.6em;
+  min-height: 2.6em;
+  padding: 0;
+  border: 1px dashed alpha(@text, 0.15);
+  border-radius: 0.72em;
   background-color: transparent;
   background-image: none;
   box-shadow: none;
@@ -954,7 +1282,7 @@ toast {
 .rail-add:hover {
   color: @dim;
   border-color: alpha(@filament, 0.3);
-  background-color: alpha(@text, 0.045);
+  background-color: @wash;
 }
 
 /* The version, compressed to a presence. The words are in the tooltip and the
@@ -995,7 +1323,7 @@ toast {
    to do - fencing a clickable control off from the list of strips above it,
    which no amount of typography does on its own. */
 .sidebar-header {
-  padding: 1em 0.55em 0.7em 1.05em;
+  padding: 0.9em 0.75em 0.55em 1em;
 }
 
 /* Aligned with the strips below rather than centred over them: a heading that
@@ -1003,11 +1331,26 @@ toast {
    narrow rack is a caption for the whole sidebar, which is not what it is. */
 .sidebar-header-label {
   font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
-  font-size: 0.8em;
-  font-weight: 600;
-  color: @muted;
-  letter-spacing: 0.18em;
+  font-size: 0.78em;
+  font-weight: 700;
+  color: @dim;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
+}
+
+/* How many projects are open, set beside the heading.
+
+   A heading that says "PROJECTS" over a list of projects is a label doing no
+   work - it names what is already obvious from the four folder rows beneath
+   it. The count is the part that isn't obvious once the list is long enough to
+   scroll, and it costs the same row. Engraved rather than badged: this is a
+   fact to glance at, not a notification, and a filled pill up here would be
+   the loudest thing in a panel whose whole argument is that only the lit strip
+   gets to shine. */
+.sidebar-header-count {
+  color: @faint;
+  font-family: monospace;
+  font-size: 0.78em;
 }
 
 /* No "+" up here any more at all - the rail's foot carries it (`.rail-add`),
@@ -1037,16 +1380,23 @@ toast {
    be scanned - rows tall enough to be buttons put fewer of them on screen and
    made the empty space below them the loudest thing in the panel. Still roomy
    enough to carry a rail and a tally without crowding either. */
+/* Tighter again, and this is the second time these numbers have come down for
+   the same reason. 0.8em of vertical padding put a 44px row under a 17px name -
+   more than half of every strip was air - so eight projects filled a column
+   with room for eighteen and the rack's own emptiness stayed the loudest thing
+   in it. 0.55em lands the strip at a scannable 34px, which is where a list you
+   read down rather than click along wants to be, and still leaves the tally
+   dots and the hue rail room they were never short of. */
 row.sidebar-row {
-  padding: 0.8em 0.7em 0.8em 1em;
-  margin: 0.13em 0;
+  padding: 0.55em 0.6em 0.55em 0.95em;
+  margin: 0.1em 0;
   border-radius: 0.6em;
   /* A whisper of surface, and it is the rail that needs it. The rail is an
      inset shadow, so it takes the strip's rounded corners with it - and with
      nothing behind it, a 3px bar with curved ends floating on the rack reads as
      a detached sliver rather than as the edge of anything. Sat on even this
      much fill it becomes what it is: a coloured edge on a strip. */
-  background-color: alpha(@text, 0.032);
+  background-color: @wash;
   color: @dim;
   transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1),
     color 140ms cubic-bezier(0.2, 0, 0, 1),
@@ -1054,7 +1404,7 @@ row.sidebar-row {
 }
 
 row.sidebar-row:hover {
-  background-color: alpha(@text, 0.075);
+  background-color: @wash-hi;
   color: @text;
 }
 
@@ -1072,12 +1422,12 @@ row.sidebar-row:hover {
    flash also does, leaving three states separated only by how bright the same
    rectangle is. */
 row.sidebar-row:selected {
-  background-color: alpha(@filament, 0.11);
+  background-color: @lit-wash;
   color: @text;
 }
 
 row.sidebar-row:selected:hover {
-  background-color: alpha(@filament, 0.15);
+  background-color: @lit-hi;
 }
 
 .sidebar-row-icon {
@@ -1111,7 +1461,7 @@ row.sidebar-row:selected:hover {
    column shouting. */
 .sidebar-row-label {
   font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
-  font-size: 1.18em;
+  font-size: 1.12em;
   font-weight: 600;
 }
 
@@ -1127,9 +1477,9 @@ row.sidebar-row:selected:hover {
    projects would be the loudest thing in a panel whose whole job is to let the
    lit strip do the talking. */
 .sidebar-add {
-  margin: 0.3em 0.4em 0.15em;
-  padding: 0.55em 0.7em 0.55em 0.92em;
-  border: 1px dashed alpha(@text, 0.13);
+  margin: 0.35em 0.4em 0.15em;
+  padding: 0.5em 0.6em 0.5em 0.88em;
+  border: 1px dashed alpha(@text, 0.15);
   border-radius: 0.6em;
   background-color: transparent;
   background-image: none;
@@ -1143,12 +1493,12 @@ row.sidebar-row:selected:hover {
 .sidebar-add:hover {
   color: @dim;
   border-color: alpha(@filament, 0.3);
-  background-color: alpha(@text, 0.045);
+  background-color: @wash;
 }
 
 .sidebar-add label {
   font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
-  font-size: 1.02em;
+  font-size: 1em;
 }
 
 /* ── Tally rails ───────────────────────────────────────────────────────────
@@ -1267,7 +1617,7 @@ row.sidebar-row:hover .sidebar-row-close {
 
 .sidebar-row-expand:hover {
   color: @text;
-  background-color: alpha(@text, 0.08);
+  background-color: @wash-hi;
 }
 
 /* Checked is not a state worth a fill here: the unfolded tree below the strip
@@ -1280,7 +1630,7 @@ row.sidebar-row:hover .sidebar-row-close {
 }
 
 .sidebar-row-expand:checked:hover {
-  background-color: alpha(@text, 0.08);
+  background-color: @wash-hi;
 }
 
 .sidebar-tree {
@@ -1306,7 +1656,7 @@ button.sidebar-tree-dir {
 
 button.sidebar-tree-dir:hover {
   color: @text;
-  background-color: alpha(@text, 0.06);
+  background-color: @wash;
 }
 
 /* A file row opens the file in a pager pane of its own project (see
@@ -1328,7 +1678,7 @@ button.sidebar-tree-file {
 
 button.sidebar-tree-file:hover {
   color: @text;
-  background-color: alpha(@text, 0.06);
+  background-color: @wash;
 }
 
 /* The same humanist sans the project names wear, a step down in size: a file
@@ -1337,7 +1687,7 @@ button.sidebar-tree-file:hover {
    so a hovered folder brightens whole. */
 .sidebar-tree-label {
   font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
-  font-size: 0.98em;
+  font-size: 0.92em;
 }
 
 /* The tree's asides - "empty", "unreadable", "+30 more". Engraved like every
@@ -1505,7 +1855,7 @@ row.sidebar-row.needs-attention .sidebar-row-label {
   margin-left: 0.15em;
   color: @muted;
   font-family: monospace;
-  font-size: 0.8em;
+  font-size: 0.78em;
 }
 
 /* Waiting is the one state that is *about* you: the agent has stopped and will

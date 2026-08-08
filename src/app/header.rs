@@ -140,11 +140,15 @@ impl App {
             }
         });
 
+        // The strip's one primary. Every control in this bar was drawn
+        // identically, which left the action the window exists for - start
+        // another agent - indistinguishable from "check for updates". It takes
+        // a filament outline rather than a fill; see `.header-primary`.
         let new_agent = gtk4::Button::builder()
             .icon_name("tab-new-symbolic")
             .can_focus(false)
             .valign(gtk4::Align::Center)
-            .css_classes(["header-action"])
+            .css_classes(["header-action", "header-primary"])
             .tooltip_text("Spawn a new agent in this project")
             .build();
         let this = self.clone();
@@ -287,6 +291,55 @@ impl App {
         }
     }
 
+    /// A picture of the thing this window does, drawn out of the window's own
+    /// parts: four tiles in a grid with one of them lit.
+    ///
+    /// This replaces a stock `tab-new-symbolic` at status-page size - a sheet
+    /// of paper with a plus on it, which is the icon every application in the
+    /// world shows on an empty screen and says nothing about what *this* one
+    /// would do with the space. The first screen of a tiling window manager can
+    /// afford to show the tiling.
+    ///
+    /// It is built from boxes wearing the panes' own rules rather than drawn as
+    /// an asset, which is what keeps it honest: `.empty-tile` takes its fill,
+    /// its radius and its lit treatment from the same palette names `.pane`
+    /// does, so a change to the ramp or to @filament moves the diagram with the
+    /// real thing instead of leaving a picture of the app as it used to look.
+    ///
+    /// Four rather than three, and lit top-left rather than centre: this is the
+    /// grid the app opens in, and the lamp is the one fact about it worth
+    /// teaching before the first agent starts.
+    fn build_empty_diagram(&self) -> gtk4::Box {
+        let tile = |lit: bool| {
+            let classes: &[&str] = if lit {
+                &["empty-tile", "lit"]
+            } else {
+                &["empty-tile"]
+            };
+            gtk4::Box::builder().css_classes(classes).build()
+        };
+
+        let row = |a: gtk4::Box, b: gtk4::Box| {
+            let row = gtk4::Box::builder()
+                .orientation(gtk4::Orientation::Horizontal)
+                .spacing(5)
+                .build();
+            row.append(&a);
+            row.append(&b);
+            row
+        };
+
+        let grid = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(5)
+            .halign(gtk4::Align::Center)
+            .css_classes(["empty-diagram"])
+            .build();
+        grid.append(&row(tile(true), tile(false)));
+        grid.append(&row(tile(false), tile(false)));
+        grid
+    }
+
     /// What a project with nothing running shows.
     ///
     /// This is the first screen of the app, so it has exactly one job: say what
@@ -294,25 +347,33 @@ impl App {
     /// bindings at once, which is a reference card handed to someone who has not
     /// yet done the one thing that makes any of them matter. The full list is
     /// still a keystroke away, in the menu and on `Super+Alt+/`.
+    ///
+    /// The page builds its own heading and description rather than taking the
+    /// `StatusPage`'s. Both were already half ours - the description had to be,
+    /// to wrap at the window's width rather than the clamp's - and the heading
+    /// arrives from libadwaita at a size chosen for a full-window error page,
+    /// which is louder than a workspace waiting for its first agent needs to be.
+    /// What the widget is still worth having for is the part that has nothing to
+    /// do with looks: it centres a clamp in whatever space it is given, at every
+    /// window size, which is the one piece of geometry here worth not writing.
     pub(super) fn build_empty_state(&self) -> adw::StatusPage {
+        // The action that answers the sentence above it. This page exists to
+        // report "no agents running", and starting one is what stops that being
+        // true - so it leads, and opening another project follows. That is the
+        // other way round from how this read for its first year, when the
+        // primary was "Open a project..." on a page that was already standing
+        // inside a project.
+        //
         // Not `suggested-action`. That class paints from `accent_bg_color`,
         // which this app aliases to @filament - so the stock treatment made
         // this button a solid warm pill and the brightest thing in the window,
         // in the one colour the stylesheet reserves for "the keyboard is here".
         // A primary action on an empty screen has no competition and needs
         // none: it is one of two things on an otherwise blank page.
-        let start = gtk4::Button::builder()
-            .label("Open a project\u{2026}")
-            .halign(gtk4::Align::Center)
-            .css_classes(["pill", "empty-primary"])
-            .build();
-        let this = self.clone();
-        start.connect_clicked(move |_| this.new_project());
-
         let agent = gtk4::Button::builder()
             .label("Start an agent here")
             .halign(gtk4::Align::Center)
-            .css_classes(["pill", "empty-secondary"])
+            .css_classes(["pill", "empty-primary"])
             .tooltip_text("Run claude in this project's own folder")
             .build();
         let this = self.clone();
@@ -322,14 +383,28 @@ impl App {
             }
         });
 
+        let start = gtk4::Button::builder()
+            .label("Open another project\u{2026}")
+            .halign(gtk4::Align::Center)
+            .css_classes(["pill", "empty-secondary"])
+            .build();
+        let this = self.clone();
+        start.connect_clicked(move |_| this.new_project());
+
         // The one line worth adding to an empty screen: where everything else
         // is. This is the only page in the app with nothing on it to read, so
         // it is the only place a pointer to the command palette costs nothing
         // and is certain to be seen.
         let hint = gtk4::Label::builder()
-            .label("Press Super+Alt+P for everything else")
+            .label("Super+Alt+P for everything else")
             .halign(gtk4::Align::Center)
             .css_classes(["empty-hint"])
+            .build();
+
+        let heading = gtk4::Label::builder()
+            .label("No agents running")
+            .halign(gtk4::Align::Center)
+            .css_classes(["empty-heading"])
             .build();
 
         // Our own label rather than the StatusPage's `description`: the stock
@@ -337,26 +412,48 @@ impl App {
         // narrower than the clamp (a quarter-snap on a tiled desktop) clipped
         // the sentence mid-word at the frame. A label told to wrap with a
         // bounded natural width shrinks instead.
+        //
+        // It describes the diagram above it rather than repeating the buttons
+        // below it. The old copy spent its first clause explaining the folder
+        // picker, which is what the button says; what nothing on the page said
+        // was what happens *after* - that the panes arrange themselves, and
+        // that one of them is always the lit one.
         let description = gtk4::Label::builder()
             .label(
-                "Open a project folder and choose how many agents to start it with. \
-                 They tile themselves \u{2014} spawn, close or promote a pane and the rest re-arrange.",
+                "Start one and it takes the whole workspace. Start another and they \
+                 tile themselves \u{2014} every agent keeps an equal share, and the one \
+                 you're typing in stays lit.",
             )
             .wrap(true)
             .justify(gtk4::Justification::Center)
-            .max_width_chars(58)
+            .max_width_chars(52)
             .halign(gtk4::Align::Center)
             .css_classes(["empty-description"])
             .build();
 
+        // The description is clamped rather than merely told a width, and this
+        // is a bug being fixed rather than a preference. `max-width-chars` sets
+        // a label's *natural* width, which GTK is free to exceed when the
+        // parent has room - and a StatusPage centred in a 1500px workspace has
+        // room, so the sentence came out as one 130-character line spanning the
+        // whole window. A clamp is a hard ceiling: the label wraps at 34em and
+        // shrinks below it, which is what the `max_width_chars` on it was
+        // always meant to be saying and never was.
+        let clamped = adw::Clamp::builder()
+            .maximum_size(430)
+            .child(&description)
+            .build();
+
         let buttons = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .spacing(10)
+            .spacing(8)
             .halign(gtk4::Align::Center)
             .build();
-        buttons.append(&description);
-        buttons.append(&start);
+        buttons.append(&self.build_empty_diagram());
+        buttons.append(&heading);
+        buttons.append(&clamped);
         buttons.append(&agent);
+        buttons.append(&start);
         buttons.append(&hint);
 
         // The floor, which this page has to paint for itself: it is the tiler's
@@ -365,9 +462,7 @@ impl App {
         // `appearance::content_css`). Without this the empty state is a window
         // with a desktop showing through it.
         adw::StatusPage::builder()
-            .css_classes(["workspace-floor"])
-            .icon_name("tab-new-symbolic")
-            .title("No agents running")
+            .css_classes(["workspace-floor", "empty-state"])
             .child(&buttons)
             .build()
     }

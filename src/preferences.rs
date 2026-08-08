@@ -30,9 +30,15 @@ use crate::appearance::{self, Appearance};
 
 /// Opens the preferences dialog over `app`'s window.
 pub fn present(app: &App) {
+    // `.atc-dialog` is what scopes this app's own rules onto libadwaita's
+    // preference widgetry - see the block of that name in `style.css`. Without
+    // it the rows arrive on `card_bg_color`, which this app aliases to @chip:
+    // the rung meant for a small control sitting on a pane, and sixteen points
+    // lighter than the dialog it would be sitting in.
     let page = adw::PreferencesPage::builder()
         .title("Preferences")
         .icon_name("preferences-system-symbolic")
+        .css_classes(["atc-dialog"])
         .build();
 
     let group = adw::PreferencesGroup::builder()
@@ -90,9 +96,16 @@ pub fn present(app: &App) {
 
     page.add(&group);
 
+    // A height as well as a width, because without one the dialog opened at
+    // roughly the height of two of its three rows and cut the third off at the
+    // frame - "Space around tiles" arrived permanently half-drawn. An
+    // `AdwPreferencesDialog` sizes itself to its content only up to the height
+    // it is given, and the default is not enough for a group carrying a
+    // four-line description above three subtitled rows.
     let dialog = adw::PreferencesDialog::builder()
         .title("Preferences")
         .content_width(560)
+        .content_height(520)
         .build();
     dialog.add(&page);
     dialog.present(Some(app.window()));

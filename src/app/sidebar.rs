@@ -124,6 +124,11 @@ impl App {
             .css_classes(["sidebar-header"])
             .build();
         header.pack_start(&header_label);
+        // The count sits at the far end of the heading's own row rather than
+        // under it: it is the second half of one line ("PROJECTS ... 4"), not a
+        // second line, and a rack this narrow has no room to spend a row on a
+        // number. Written by `refresh_rail`; see `Inner::sidebar_count`.
+        header.pack_end(&self.0.sidebar_count);
 
         // A ghost of the row you'd get, sitting where that row would go.
         //

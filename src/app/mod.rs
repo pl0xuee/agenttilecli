@@ -118,6 +118,18 @@ const SAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(1500
 /// much under this and the rack is winning an argument it shouldn't be in.
 const COLLAPSE_WIDTH_PX: i32 = 700;
 
+/// Below this width the header bar sheds the two controls it can spare - see
+/// `install_breakpoint`.
+///
+/// Set above the bar's own overflow point (a little over 500px) rather than at
+/// it, because a control that vanishes at the exact pixel where it would
+/// otherwise be clipped is a control that flickers as the window is dragged
+/// across that pixel. 620 also puts the change comfortably inside the range
+/// where the sidebar has already collapsed to an overlay, so a narrowing window
+/// makes one visible adjustment at 700 and one at 620 rather than a continuous
+/// series of small ones.
+const HEADER_CROWDS_WIDTH_PX: i32 = 620;
+
 /// What the staged panes run for a screenshot, one command each.
 ///
 /// This used to be `sleep 600` in all three, which tiles three black
@@ -191,6 +203,11 @@ struct Inner {
     /// The rail's column of project glyph buttons, rebuilt whole by
     /// `refresh_rail` - see `rail`'s module comment for why whole.
     rail_glyphs: gtk4::Box,
+    /// How many projects are open, engraved beside the drawer's heading.
+    /// Written by `refresh_rail`, which is already the one call every change to
+    /// the project list ends with - so the count cannot drift from the list the
+    /// way a second refresh path would let it.
+    sidebar_count: gtk4::Label,
     toasts: adw::ToastOverlay,
     updates: Updates,
     title: adw::WindowTitle,
@@ -324,6 +341,10 @@ impl App {
             .spacing(6)
             .css_classes(["rail-glyphs"])
             .build();
+        let sidebar_count = gtk4::Label::builder()
+            .css_classes(["sidebar-header-count"])
+            .valign(gtk4::Align::Center)
+            .build();
         let title_widget = adw::WindowTitle::new(title, "");
         let sidebar_toggle = gtk4::ToggleButton::builder()
             .icon_name("sidebar-show-symbolic")
@@ -359,6 +380,7 @@ impl App {
             list: list.clone(),
             split: split.clone(),
             rail_glyphs,
+            sidebar_count: sidebar_count.clone(),
             toasts,
             updates: updates.clone(),
             title: title_widget.clone(),
@@ -502,6 +524,54 @@ impl App {
         );
         let breakpoint = adw::Breakpoint::new(condition);
         breakpoint.add_setter(&self.0.split, "collapsed", Some(&true.to_value()));
+        self.0.window.add_breakpoint(breakpoint);
+
+        // And a second one, for a window narrow enough that the header bar
+        // stops fitting in it.
+        //
+        // This is a real defect rather than a refinement. The header packs a
+        // sidebar toggle, a three-way mode switcher, a title, three round
+        // buttons and libadwaita's own window controls, and every one of them
+        // is there at every width - so the bar has a hard minimum of a little
+        // over 500px. Below that, GTK does not fold anything away; it hands the
+        // window's content more width than the window has and lets it overflow,
+        // which is the `AdwToastOverlay ... exceeds AdwApplicationWindow width`
+        // warning on stderr and, on screen, a drawer whose rows run off the
+        // right edge and a title clipped to "Getti...". A tiled desktop's
+        // quarter-snap lands squarely in that range, which is where it was
+        // found.
+        //
+        // The mode switcher and the broadcast toggle are what go, and they are
+        // the right two. They are the widest and the least urgent: a layout
+        // mode is a thing you set once and look at, and broadcast is a thing
+        // you arm deliberately. Neither becomes unreachable - the modes keep
+        // `Super+Alt+Tab` and both keep their rows in the command palette,
+        // which is the one control this app can be certain fits, being a dialog
+        // that sizes itself to the window. What stays is what a narrow window
+        // still has to answer: which project you are in, whether the drawer is
+        // open, and how to start another agent.
+        let narrow = adw::BreakpointCondition::new_length(
+            adw::BreakpointConditionLengthType::MaxWidth,
+            f64::from(HEADER_CROWDS_WIDTH_PX),
+            adw::LengthUnit::Px,
+        );
+        let breakpoint = adw::Breakpoint::new(narrow);
+        // Including the collapse the wider breakpoint above sets, because
+        // libadwaita applies exactly *one* breakpoint at a time - the last
+        // whose condition holds - rather than layering every match on top of
+        // each other. Two conditions that overlap are therefore two complete
+        // descriptions of the window, not a base and an override: without this
+        // line, a window narrow enough to satisfy both got the header shed and
+        // the sidebar *un*-collapsed, which put the rack back beside the panes
+        // in a 430px window and drove the minimum width up rather than down.
+        // Measured, not read: the overflow warning went from 516px to 686px.
+        breakpoint.add_setter(&self.0.split, "collapsed", Some(&true.to_value()));
+        if let Some(switcher) = self.0.mode_switcher.borrow().as_ref() {
+            breakpoint.add_setter(switcher, "visible", Some(&false.to_value()));
+        }
+        if let Some(broadcast) = self.0.broadcast_button.borrow().as_ref() {
+            breakpoint.add_setter(broadcast, "visible", Some(&false.to_value()));
+        }
         self.0.window.add_breakpoint(breakpoint);
     }
 

@@ -55,14 +55,27 @@ impl App {
             .tooltip_text(format!("AgentTileCLI {}", crate::update::version()))
             .build();
 
+        // The two controls that are not projects, fenced off from the column
+        // that is. In a strip whose entire vocabulary is "one chip per project",
+        // an add button and a version dot sitting flush under the last chip
+        // read as two more projects - one of them blank and one of them a full
+        // stop. The rule across the top of this box is what says they are the
+        // rail's own furniture; see `.rail-foot` in style.css.
+        let foot = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(2)
+            .css_classes(["rail-foot"])
+            .build();
+        foot.append(&add);
+        foot.append(&version);
+
         let column = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .spacing(6)
             .css_classes(["rail"])
             .build();
         column.append(&scroll);
-        column.append(&add);
-        column.append(&version);
+        column.append(&foot);
 
         gtk4::WindowHandle::builder().child(&column).build()
     }
@@ -80,6 +93,10 @@ impl App {
 
         let store = self.0.store.borrow();
         let active = store.active();
+        // The drawer's heading count, written here because this is the one call
+        // every change to the project list already ends with - see
+        // `Inner::sidebar_count`.
+        self.0.sidebar_count.set_label(&store.iter().count().to_string());
         for project in store.iter() {
             let id = project.id;
 

@@ -61,6 +61,26 @@ impl Tiler {
         }
     }
 
+    /// How many real panes row `row_i` of the grid actually holds.
+    ///
+    /// A full row holds `cols` of them; the last one may hold fewer, and since
+    /// a partial row's panes divide the whole width between themselves (see
+    /// `layout::row_col_spans`) this is what every measurement of that row's
+    /// seams has to be taken against. Editor panes are excluded for the same
+    /// reason the layout excludes them: the editor is docked beside the grid
+    /// rather than tiled in it.
+    fn grid_panes_in_row(&self, row_i: usize) -> usize {
+        let n = self
+            .imp()
+            .panes
+            .borrow()
+            .iter()
+            .filter(|p| p.editor().is_none())
+            .count();
+        let cols = self.layout_mgr().imp().grid_shape_dims.get().0;
+        n.saturating_sub(row_i * cols).min(cols)
+    }
+
     fn grid_handle_at(&self, x: f64, y: f64) -> Option<Handle> {
         let lm = self.layout_mgr();
         let row_ratios = lm.imp().row_ratios.borrow();
@@ -82,13 +102,15 @@ impl Tiler {
             return None;
         }
 
-        // Every row carries a full `cols` worth of ratios (so all cells stay
-        // the same size - see `TilerLayout::col_ratios`), but a partial last
-        // row has real panes in only the first few of them. Only seams
-        // *between two real panes* are draggable: without this, the trailing
-        // empty cells of a partial row would offer phantom seams over blank
-        // space, and dragging one would resize the row's real panes away from
-        // the uniform cell size every other row keeps.
+        // Every row carries a full `cols` worth of ratios (see
+        // `TilerLayout::col_ratios`), but a partial last row has real panes in
+        // only the first few of them - and those panes now divide the whole
+        // width between themselves rather than leaving the unused cells as
+        // space (see `layout::row_col_spans`). So the seams have to be measured
+        // from the same prefix the panes were laid out from, or every seam in a
+        // partial row would sit where it would have been under the old
+        // centred layout: to the left of the boundary actually drawn, by
+        // however much the row was stretched.
         let n = self
             .imp()
             .panes
@@ -109,7 +131,7 @@ impl Tiler {
                 continue;
             };
             let panes_in_row = n.saturating_sub(row_i * cols).min(cols);
-            let col_spans = layout::weighted_spans(agents_width, ratios);
+            let col_spans = layout::row_col_spans(agents_width, ratios, panes_in_row);
             for j in 0..panes_in_row.saturating_sub(1) {
                 let boundary = col_spans[j + 1].0;
                 if (x - boundary as f64).abs() <= RESIZE_HANDLE_PX {
@@ -156,7 +178,16 @@ impl Tiler {
                 // The agents' width, not the widget's: these spans are what
                 // the drag's pixel delta is measured against, and the ratios
                 // divide the area the grid actually occupies.
-                let spans = layout::weighted_spans(self.agents_area().1, ratios);
+                //
+                // Measured over the row's own panes rather than the shape's
+                // full column count, exactly as `grid_handle_at` finds the seam
+                // and `layout::grid_weighted` draws it. All three have to agree:
+                // the drag's pixel delta is converted into a weight change
+                // against the extents recorded here, so a partial row measured
+                // at un-stretched width would move the seam by the wrong
+                // fraction of the gesture.
+                let spans =
+                    layout::row_col_spans(self.agents_area().1, ratios, self.grid_panes_in_row(row_i));
                 seam_state(handle, ratios, &spans, j, generation)
             }
             Handle::Master => None,

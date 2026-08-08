@@ -33,9 +33,13 @@ use crate::keybindings::{COMMANDS, SECTIONS};
 /// action beside an empty space is a row that looks like a binding failed to
 /// draw.
 pub fn present(parent: &impl IsA<gtk4::Widget>) {
+    // See `preferences::present` and `.atc-dialog` in `style.css`: the same
+    // scoping class, because this is the same widgetry wearing the same stock
+    // treatment.
     let page = adw::PreferencesPage::builder()
         .title("Keyboard Shortcuts")
         .icon_name("preferences-desktop-keyboard-symbolic")
+        .css_classes(["atc-dialog"])
         .build();
 
     for section in SECTIONS {
