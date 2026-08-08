@@ -212,9 +212,34 @@ pub fn set(next: Appearance) {
 /// stands in for a project with nothing running.
 ///
 /// `.workspace-floor` is that empty state (see `App::build_empty_state`). It is a
-/// sibling of the tiler rather than a child, so it cannot inherit the floor from
-/// it and has to be given one, or a project with no agents would open onto a
-/// window with nothing in it but a desktop.
+/// sibling of the tiler rather than a child, so it cannot inherit anything from
+/// it and has to be given a fill of its own, or a project with no agents would
+/// open onto a window with nothing in it but a desktop.
+///
+/// It is painted in @tile at `pane_opacity` - the *pane* surface, not the floor,
+/// despite the class name it has carried since it was written. That was a bug
+/// you could see: an empty project showed @field through 0.92 of glass, at
+/// (12,16,19) against a desktop, and starting a single agent replaced the whole
+/// workspace with one opaque tile at (31,40,47). Twenty-one points of lightness,
+/// across the entire right-hand side of the window, on starting an agent - which
+/// reads exactly like the application changing its background colour, and was
+/// reported as such.
+///
+/// The floor is not wrong about what it is; it was wrong about where it goes.
+/// Its job is the gutter *between* tiles - a recess the plate sits above - and a
+/// workspace with no tiles in it has no gutters to draw. What it had instead was
+/// a full-window recess with nothing raised out of it, which is a hole. No
+/// editor does this: VS Code and Zed both paint an empty editor in the same
+/// colour as a full one, because the surface a workspace is made of should not
+/// depend on whether anything is on it yet.
+///
+/// So the empty state now stands where a pane would, on the surface a pane
+/// would have, and starting the first agent changes the tone by the five points
+/// between @tile and @tile-lit rather than by twenty-one. It also takes
+/// `pane_opacity` rather than `window_opacity` for the same reason: it is
+/// standing in for a pane, and at the shipped default that makes it opaque -
+/// which is the rule that panes are the only opaque thing in this window,
+/// applied to the thing currently being one.
 ///
 /// `.top-bar` is libadwaita's own class on the revealer `AdwToolbarView` puts its
 /// top bars in, and it is deliberately not `headerbar` - which is what this rule
@@ -240,7 +265,7 @@ pub fn content_css(font_scale: f64) -> String {
     format!(
         ".scaled-content {{ font-size: {font_scale}em; }}\n\
          .scaled-content .top-bar {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
-         .workspace-floor {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
+         .workspace-floor {{ background-color: alpha(@tile, {pane_opacity:.3}); }}\n\
          .sidebar {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
          .sidebar.overlay {{ background-color: alpha(@rack, {OVERLAY_ALPHA:.3}); }}\n\
          .rail {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
@@ -284,6 +309,44 @@ mod tests {
         let css = content_css(1.25);
         assert!(css.contains("font-size: 1.25em"), "{css}");
         assert!(css.contains("alpha(@field, 0.900)"), "{css}");
+    }
+
+    /// An empty workspace and a workspace with one agent in it have to be the
+    /// same colour.
+    ///
+    /// This is a bug that shipped and was reported from a screenshot: the empty
+    /// state took `@field` at `window_opacity` while a pane took `@tile-lit` at
+    /// `pane_opacity`, so starting a single agent swapped the entire right-hand
+    /// side of the window from (12,16,19) to (31,40,47). Twenty-one points, over
+    /// the whole workspace, with nothing in the interface to explain it - which
+    /// reads as the application changing its own background.
+    ///
+    /// Asserted on the emitted rule rather than on rendered pixels because that
+    /// is where the mistake was: both surfaces were correct about their own
+    /// colour and wrong about being different ones.
+    #[test]
+    fn an_empty_workspace_is_the_same_surface_as_a_full_one() {
+        set(Appearance {
+            window_opacity: 0.8,
+            pane_opacity: 0.95,
+            gap: 6,
+            font: String::new(),
+        });
+        let css = content_css(1.0);
+
+        // The empty state is a pane's surface at a pane's opacity...
+        assert!(
+            css.contains(".workspace-floor { background-color: alpha(@tile, 0.950); }"),
+            "the empty state must stand on the pane surface, not the floor:\n{css}",
+        );
+        // ...and emphatically not the floor's, which is what the gutters
+        // between real tiles are for.
+        assert!(
+            !css.contains(".workspace-floor { background-color: alpha(@field"),
+            "the empty state is back on the floor - see this test's doc:\n{css}",
+        );
+        // The floor itself still exists, for the region that genuinely is one.
+        assert!(css.contains(".top-bar { background-color: alpha(@field, 0.800); }"), "{css}");
     }
 
     /// A session that has never seen the dialog must leave the config file
