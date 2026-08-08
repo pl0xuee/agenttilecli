@@ -297,17 +297,45 @@ fn apply_theme(terminal: &Terminal, focused: bool) {
     let opaque_background = theme.background.to_rgba();
     let foreground = theme.foreground.to_rgba();
 
-    // ANSI 0 takes the surface's alpha, and only ANSI 0. `ansi_palette` defines
-    // it as the surface rather than as black precisely so that a program painting
-    // a "black" background lands on the pane's own colour instead of a foreign
-    // grey - and the moment the pane is glass, opaque is a foreign colour too. A
-    // `git log` drawing its own background would otherwise stamp solid rectangles
-    // through the translucency, which is the same bug that comment exists to
-    // prevent, one layer up.
+    // ANSI 0 asks for the surface's alpha, and does not get it. VTE discards the
+    // alpha on palette entries exactly as it discards it on the background above,
+    // and unlike the background there is no `set_clear_background` to opt out of:
+    // a cell a program paints is a cell VTE fills, opaquely, whatever alpha the
+    // palette entry carries.
     //
-    // The other fifteen stay opaque. They are deliberate colours a program asked
-    // for by name, not the surface, and text you can see the desktop through is
-    // not what "red" means.
+    // Measured, because the comment that used to sit here asserted the opposite
+    // and had been believed for two releases. Three probe panes painting a full
+    // screen of background cells at pane_opacity 0.93, sampled out of the
+    // window's own render with its alpha channel intact:
+    //
+    //     ANSI 0 background      (31,40,47) alpha 255   opaque
+    //     256-colour background  (48,48,48) alpha 255   opaque
+    //     truecolor background   (30,30,30) alpha 255   opaque
+    //
+    // The request is kept rather than deleted for the reason the one on
+    // `background` is: it costs nothing, and it is what VTE would use the day it
+    // starts honouring it.
+    //
+    // What that measurement does *not* mean is that a TUI's pane goes opaque,
+    // which is what this comment claimed for about an hour before the claim was
+    // checked against the thing it was about. `pane_opacity` reaches every cell a
+    // program leaves at the default background, and a full-screen TUI leaves
+    // almost all of them there - painting a *layout* is not painting a
+    // *background*. claude draws its whole interface and its pane is glass down
+    // to the wallpaper; the probes above only went opaque because they were
+    // written to paint explicit background cells, which is the uncommon case they
+    // were built to isolate. The limitation is real and narrow: it costs
+    // translucency exactly where a program asks for a background colour by name -
+    // a selected row, a status bar, a diff hunk - and nowhere else.
+    //
+    // Setting it to the *surface* colour is therefore doing more work than the
+    // alpha ever did: a program painting a "black" background lands on the pane's
+    // own tone instead of a foreign grey, which is what keeps a painted pane
+    // looking like this app rather than like a hole in it.
+    //
+    // The other fifteen stay opaque and unremapped. They are deliberate colours a
+    // program asked for by name, not the surface, and text you can see the
+    // desktop through is not what "red" means.
     let ansi = {
         let mut ansi = theme.ansi.map(|c| c.to_rgba());
         ansi[0] = theme.ansi[0].to_rgba_alpha(pane_opacity as f32);
