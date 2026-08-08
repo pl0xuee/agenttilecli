@@ -416,7 +416,29 @@ impl App {
         *this.0.socket.borrow_mut() = socket;
 
         split.set_sidebar(Some(&this.build_sidebar()));
-        shell.prepend(&this.build_rail());
+
+        // The rail, and the one rule that governs it: it is on screen exactly
+        // when the drawer is not.
+        //
+        // They were visible together, and side by side they listed the same
+        // projects twice - a column of initials against a column of the names
+        // those initials are the first letter of. Two widgets, 350px of chrome,
+        // one set of seven items. An activity bar earns its width by switching
+        // between *different* panels (VS Code's holds files, search, git); this
+        // one was a narrower photocopy of the panel beside it.
+        //
+        // Binding rather than toggling by hand, because "show the drawer" has
+        // four entrances - the header toggle, the keybinding, a click on the
+        // lit rail chip, and a breakpoint collapsing the window - and a rail
+        // hidden by three of them and left behind by the fourth is worse than
+        // one that never hides at all.
+        let rail = this.build_rail();
+        split
+            .bind_property("show-sidebar", &rail, "visible")
+            .invert_boolean()
+            .sync_create()
+            .build();
+        shell.prepend(&rail);
         let search = crate::search::Search::new(&this);
         let content = this.build_content(&title_widget, &sidebar_toggle);
         content.add_top_bar(search.widget());

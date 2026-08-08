@@ -4,11 +4,12 @@
 //! project", while the rest answers "what is it doing" - and because between
 //! them they had grown past the point where either could be read on its own.
 //!
-//! A strip is built the way a pane is: a surface a rung above the thing it sits
-//! on, inside a hairline, with the project's own hue as its inner left edge. The
-//! rack is meant to read as a legend for the workspace rather than as a list
-//! beside it, and the construction is where that comes from - see the rules in
-//! `style.css`, which carry the rest of the argument.
+//! A strip is a name, what its agents are doing, and nothing else drawn at all
+//! until it is the one you are in. It used to carry the project's own identity
+//! hue down its left edge; that is gone, along with the hues themselves - see
+//! `rail`'s module comment. What tells strips apart is the name, and what
+//! colour is left for is state: amber that an agent wants you, green that one
+//! is working.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -327,7 +328,7 @@ impl App {
     /// handed to `ProjectStore::add`, which is one value with two owners and the
     /// shape of every drift bug this module was split up to prevent - a rename
     /// would have had to remember to touch both. The store is the only place a
-    /// project's name, hue and icon are written, so it is the only place they
+    /// project's name and icon are written, so it is the only place they
     /// are read.
     pub(super) fn build_row(&self, id: ProjectId) -> (gtk4::ListBoxRow, gtk4::Box) {
         let store = self.0.store.borrow();
@@ -340,7 +341,6 @@ impl App {
             );
         };
         let name = project.name.clone();
-        let hue = project.hue.clone();
         let path = project.path.clone();
         let row_icon = gtk4::Image::builder()
             .icon_name(&project.icon)
@@ -464,7 +464,6 @@ impl App {
         let row = gtk4::ListBoxRow::builder().child(&column).build();
         row.set_widget_name(&id.as_name());
         row.add_css_class("sidebar-row");
-        row.add_css_class(&hue);
         row.set_tooltip_text(Some(&format!(
             "{name}\nDrag to reorder (or Super+Alt+Shift+[ / ])"
         )));

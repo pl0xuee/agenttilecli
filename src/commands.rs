@@ -232,6 +232,33 @@ pub fn present(app: &App) {
         search.connect_search_changed(move |entry| rebuild(&entry.text()));
     }
 
+    // Escape, which until now did nothing at all and left the palette on screen
+    // with no way off it but the mouse.
+    //
+    // `AdwDialog` closes itself on Escape, and that is exactly what this looked
+    // like it was relying on. But the key never reaches the dialog: a
+    // `GtkSearchEntry` binds Escape to its own `stop-search` signal and
+    // *consumes* the press, and this entry has the focus from the moment the
+    // palette opens (`search.grab_focus()` at the end of this function). So the
+    // dialog's own handler sat there waiting for a key that had already been
+    // eaten one widget below it.
+    //
+    // The find bar does not have this bug, and the difference is instructive:
+    // its entry is owned by a `GtkSearchBar`, and `SearchBar::connect_entry`
+    // wires `stop-search` up to hide the bar. Nothing owned this one, so
+    // nothing was listening. Handling the signal is therefore the fix that
+    // matches the widget's own design rather than a workaround for it - in a
+    // palette, "stop searching" *is* "dismiss".
+    {
+        let dialog = dialog.clone();
+        // `close()` reports whether the dialog actually went (it can refuse, if
+        // `can-close` is unset); nothing here can refuse, and the signal wants
+        // no value back.
+        search.connect_stop_search(move |_| {
+            dialog.close();
+        });
+    }
+
     // Activating a row: close first, then run. Several commands open a dialog
     // of their own, and presenting one from inside a dialog that is still up
     // stacks them.

@@ -85,31 +85,21 @@
 @define-color fresh    #86c97e; /* an update is available */
 @define-color hangup   #e06c60; /* close, hang up, destroy */
 
-/* Per-project identity colours, assigned to sidebar rows by hashing the project
-   name (see `hue_class`). Identity, not status: which project this is, said in
-   a way you can pick out of a rack without reading it.
+/* There were five more colours here: @hue-1 through @hue-5, one handed to each
+   project by hashing its name, so a rack could be read without being read.
 
-   Deliberately disjoint from the three signals above. Those mean something, and
-   a project that merely happened to hash to amber would be saying it - so these
-   skip the amber/red band entirely, and skip @fresh's green for a lime that
-   won't be mistaken for it at rail size.
+   They are gone, and the reason is the second rule at the top of this file
+   rather than a change of taste. "Colour means a message" cannot survive a
+   palette in which most of the colour on screen means only "this is the
+   Dashboard project" - a fact the name beside it already states, in words, for
+   free. Seven open projects put seven saturated chips down the rail and seven
+   coloured edges down the drawer, and the three colours that genuinely carry a
+   message - @tally, @fresh, @hangup - had to compete with all of them.
 
-   Five, spaced around the wheel at a chroma and lightness that match each
-   other, so no project reads as louder than its neighbours. Five means a sixth
-   project repeats a colour - a collision costs a little distinctness and
-   nothing else, which is why it isn't worth a bigger palette of muddier hues.
-   Blue is available again now that focus doesn't use it.
-
-   The teal carries more chroma than the other four, which looks like an
-   inconsistency and isn't: it is the one hue the gunmetal ramp shares a cast
-   with, so at rail width it has a fainter version of itself to be told apart
-   from. The extra saturation is what puts it back on equal footing with the
-   four hues the surface says nothing about. */
-@define-color hue-1 #6bb2e8; /* blue   */
-@define-color hue-2 #3ad0c0; /* teal   */
-@define-color hue-3 #a9cf5b; /* lime   */
-@define-color hue-4 #ae8fe6; /* violet */
-@define-color hue-5 #e58fb8; /* pink   */
+   What replaced them costs nothing: a project is told apart by its name, the
+   one you are in wears @filament like everything else focused in this window,
+   and colour is left free to mean that something is happening. `model` lost
+   `hue_class` in the same change; the full argument is at `.rail-glyph`. */
 
 /* ── Interaction washes ────────────────────────────────────────────────────
    The four fills every control in this app reaches for, named once.
@@ -1121,9 +1111,8 @@ toast {
 /* ── The rail ──────────────────────────────────────────────────────────────
    Every project, one glyph, always on screen - the part of the rack that must
    never be off it. It says three things and no more: which projects exist
-   (the initial), which is which (the hue bar the rows also wear), and which
-   one wants you (amber, the same pulse). The lit glyph is the project on
-   screen. Everything else a strip used to say - the name, the tally dots, the
+   (the initial), which one is on screen (the filament ring), and which one
+   wants you (amber, the same pulse). Everything else a strip used to say - the name, the tally dots, the
    tree, the close button - lives in the drawer the rail summons.
 
    The fill is written by `appearance.rs`, at the same alpha as the rack and
@@ -1133,29 +1122,29 @@ toast {
   padding: 0.5em 0.5em 0.4em;
 }
 
-/* ── Why the glyph is a coloured chip now ──────────────────────────────────
-   The rail's whole job is recognition without reading, and it was doing it
-   with a 0.18em sliver down one edge of a grey square - about three pixels of
-   colour on a forty-pixel object, roughly two per cent of it. At that size a
-   hue is not an identity, it is a rounding error: a column of eight projects
-   came out as a column of eight identical grey squares with different letters
-   in them, which is reading, which is the one thing the rail exists to avoid.
+/* ── The glyph, and why it has no colour ───────────────────────────────────
+   This chip has now been tried three ways, and the third is the point.
 
-   The drawer's strips can afford the sliver because they are eleven times as
-   wide and carry the project's *name* two centimetres to its right - there,
-   the bar is a garnish on a label. The rail has no label. So the rail stops
-   borrowing the drawer's device and takes the one that works at its own size:
-   the hue fills the chip, and the initial is drawn in it.
+   It began as a grey square with a 0.18em sliver of the project's identity hue
+   down one edge - three pixels of colour on a forty-pixel object. At that size
+   a hue is not an identity, it is a rounding error, so a column of seven
+   projects read as seven identical grey squares with different letters in them.
 
-   This is the Discord/Slack/Arc idiom and it is theirs for a reason - it is
-   the only thing that survives being 40px wide. The tint is kept low (0.16)
-   so eight chips read as a muted spectrum rather than a paint chart, and the
-   letter carries the hue at full strength, where a single glyph of saturated
-   colour on a dark ground is legible at a glance and never shouts.
+   The obvious correction was to let the hue fill the chip, which is what
+   Discord and Slack do and what this file argued for at some length. It is
+   legible, and it is wrong: seven saturated chips stacked in a 58px strip read
+   as a paint chart, not as software. Worse, it spent the loudest signal in the
+   window on the least urgent fact. Colour here already means something - amber
+   that an agent wants you, green that one is working, red that one died - and
+   five more hues meaning "this is the Dashboard project" compete directly with
+   the three that mean something is happening.
 
-   The identity is *still* the same five hues the drawer uses, so a project is
-   the same colour in both places. What changed is only how much of the chip
-   gets to be that colour. */
+   So the identity hues are gone, from this file and from `model` with it. The
+   chip is grey; the initial says which project; a filament ring says which one
+   is on screen; amber says which one wants you. That is the same vocabulary the
+   rest of the window speaks, and it is the reason a professional tool's
+   navigation chrome is almost always monochrome: it leaves colour free to be
+   information. */
 .rail-glyph {
   min-width: 2.6em;
   min-height: 2.6em;
@@ -1186,60 +1175,31 @@ toast {
   font-size: 1.05em;
 }
 
-/* Identity: the chip takes the project's hue as a wash and the initial takes
-   it outright. */
-.rail-glyph.hue-1 { background-color: alpha(@hue-1, 0.16); color: @hue-1; }
-.rail-glyph.hue-2 { background-color: alpha(@hue-2, 0.16); color: @hue-2; }
-.rail-glyph.hue-3 { background-color: alpha(@hue-3, 0.16); color: @hue-3; }
-.rail-glyph.hue-4 { background-color: alpha(@hue-4, 0.16); color: @hue-4; }
-.rail-glyph.hue-5 { background-color: alpha(@hue-5, 0.16); color: @hue-5; }
-/* The welcome entry: a home screen occupying a slot, not a project with an
-   identity, so it stays on the app's own grey rather than taking a colour off
-   the wheel. */
-.rail-glyph.hue-neutral { background-color: @wash; color: @muted; }
-
-.rail-glyph.hue-1:hover { background-color: alpha(@hue-1, 0.26); }
-.rail-glyph.hue-2:hover { background-color: alpha(@hue-2, 0.26); }
-.rail-glyph.hue-3:hover { background-color: alpha(@hue-3, 0.26); }
-.rail-glyph.hue-4:hover { background-color: alpha(@hue-4, 0.26); }
-.rail-glyph.hue-5:hover { background-color: alpha(@hue-5, 0.26); }
-.rail-glyph.hue-neutral:hover { background-color: @wash-hi; color: @dim; }
-
-/* Lit: the project on screen.
-
-   With the hue now filling the chip, brightness is no longer free to carry the
-   selection - a lit blue chip and a hovered blue chip would be the same blue at
-   two strengths, which is the ambiguity the drawer's rules spend three
-   paragraphs avoiding. So lit is a *ring*, in filament, which is the colour
-   this app lights everything focused with and the one colour no project can be
-   assigned. One glance: which chip has the lamp around it.
+/* Lit: the project on screen. The wash the whole app uses for "this one", and
+   a filament ring around it.
 
    The ring is drawn as an inset shadow rather than a border for the reason the
-   drawer's rails are: a border would change the chip's size the moment it
-   became the active one, and the whole column below it would step sideways. */
+   drop-target rules use one: a border would change the chip's size the moment
+   it became the active one, and the whole column below it would step sideways. */
 .rail-glyph.lit {
   color: @text;
-  box-shadow: inset 0 0 0 2px alpha(@filament, 0.85);
+  background-color: @lit-wash;
+  box-shadow: inset 0 0 0 2px alpha(@filament, 0.8);
 }
-.rail-glyph.lit.hue-1 { background-color: alpha(@hue-1, 0.30); }
-.rail-glyph.lit.hue-2 { background-color: alpha(@hue-2, 0.30); }
-.rail-glyph.lit.hue-3 { background-color: alpha(@hue-3, 0.30); }
-.rail-glyph.lit.hue-4 { background-color: alpha(@hue-4, 0.30); }
-.rail-glyph.lit.hue-5 { background-color: alpha(@hue-5, 0.30); }
-.rail-glyph.lit.hue-neutral { background-color: @lit-wash; }
 
-/* Attention on the rail, mirroring the rows: below the hue rules because it
-   ties the two-class ones on specificity and has to win on source order, and
-   carrying `!important`-free victory over `.lit.hue-N` is not needed - a
-   glyph is never lit and asking at once, since showing a project answers it. */
+.rail-glyph.lit:hover {
+  background-color: @lit-hi;
+}
+
+/* Attention on the rail. It takes the same ring the lit chip takes, in amber
+   instead of filament - one device, two colours, and they cannot be confused
+   because a glyph is never lit and asking at once: showing a project answers
+   it. Below `.lit` so it wins on source order when both somehow apply. */
 /* Attention on the rail. It takes the same amber ring the lit chip takes in
    filament - one device, two colours, and they cannot be confused because a
    project is never lit and asking at once (showing a project answers it).
 
-   Below the hue rules because it ties them on specificity and has to win on
-   source order, and it drops the hue's own fill for an amber one: a chip
-   asking for you stops saying which colour it is and says only that it wants
-   you. */
+   Below `.lit` so it wins on source order. */
 .rail-glyph.needs-attention {
   color: mix(@tally, @text, 0.4);
   background-color: alpha(@tally, 0.18);
@@ -1386,7 +1346,7 @@ toast {
    with room for eighteen and the rack's own emptiness stayed the loudest thing
    in it. 0.55em lands the strip at a scannable 34px, which is where a list you
    read down rather than click along wants to be, and still leaves the tally
-   dots and the hue rail room they were never short of. */
+   dots room they were never short of. */
 row.sidebar-row {
   padding: 0.55em 0.6em 0.55em 0.95em;
   margin: 0.1em 0;
@@ -1501,64 +1461,22 @@ row.sidebar-row:selected:hover {
   font-size: 1em;
 }
 
-/* ── Tally rails ───────────────────────────────────────────────────────────
-   The signature of the rack, and the reason a project's colour is worth having
-   at all: a rail down the left edge of every strip, in that project's own hue.
-   Idle strips carry theirs at a third strength - present, so the rack reads as
-   a set of channels rather than a list of words, but never bright enough to
-   compete with the one that's live.
+/* ── What a strip is made of, now that it has no rail ──────────────────────
+   Every strip used to carry a bar of the project's identity hue down its left
+   edge - the "tally rail", and for a long time the signature of this panel.
+   It has gone with the hues themselves; the argument is at `.rail-glyph`, and
+   it applies here twice over. Seven names, each with its own coloured edge and
+   its own coloured folder icon, is a list where every row is shouting a
+   different thing and none of them is shouting anything you needed to know.
+   The name is what tells one project from another. It always was.
 
-   `inset` rather than a border, for the same reason the drop-target rules use
-   it: a border would change the strip's height the moment its state changed,
-   shoving every strip below it down a line.
-
-   The colour reaches the name too, mixed halfway to @text rather than set to
-   the hue outright. At full strength five different hues of body text read as
-   five different *kinds* of item - a status list - and the quieter ones lose
-   contrast against the rack. Half-mixed, the strip still says which project it
-   is while every name stays the same brightness as every other. */
-/* The welcome entry's rail. Neutral on purpose - it is a home screen occupying
-   a row, not a project, and it carries the app's own quiet grey rather than a
-   colour off the identity wheel. Dimmer than any hue, so it recedes behind the
-   projects that are actually yours. */
-row.sidebar-row.hue-neutral { box-shadow: inset 0.2em 0 0 0 alpha(@muted, 0.4); }
-row.sidebar-row.hue-neutral:selected { box-shadow: inset 0.2em 0 0 0 @muted; }
-row.sidebar-row.hue-neutral .sidebar-row-icon { color: @muted; }
-
-row.sidebar-row.hue-1 { box-shadow: inset 0.2em 0 0 0 alpha(@hue-1, 0.6); }
-row.sidebar-row.hue-2 { box-shadow: inset 0.2em 0 0 0 alpha(@hue-2, 0.6); }
-row.sidebar-row.hue-3 { box-shadow: inset 0.2em 0 0 0 alpha(@hue-3, 0.6); }
-row.sidebar-row.hue-4 { box-shadow: inset 0.2em 0 0 0 alpha(@hue-4, 0.6); }
-row.sidebar-row.hue-5 { box-shadow: inset 0.2em 0 0 0 alpha(@hue-5, 0.6); }
-
-row.sidebar-row.hue-1 .sidebar-row-icon  { color: @hue-1; }
-row.sidebar-row.hue-2 .sidebar-row-icon  { color: @hue-2; }
-row.sidebar-row.hue-3 .sidebar-row-icon  { color: @hue-3; }
-row.sidebar-row.hue-4 .sidebar-row-icon  { color: @hue-4; }
-row.sidebar-row.hue-5 .sidebar-row-icon  { color: @hue-5; }
-
-/* The name is a name. It used to be mixed halfway to the project's own hue, on
-   the reasoning that a strip should say which project it is in every element it
-   has - but half-mixed hues on a gunmetal ground come out pastel, and a column
-   of bold pastel names reads as washed-out rather than colour-coded. Worse, two
-   projects whose names happen to hash near each other produce two near-identical
-   tints, so the one thing the colour was supposed to buy - telling them apart at
-   a glance - is exactly what it stops doing.
-
-   The rail and the icon are dedicated identity carriers and are better at it: a
-   solid bar of pure hue against a neutral surface separates far harder than a
-   letterform tinted 50% toward the same colour. So the hue goes there at full
-   strength, and the type stays legible. */
-
-/* Lit. The open project's rail goes to full strength - the one channel with its
-   lamp on - while its name and icon drop the identity colour for plain white:
-   there is only ever one open project, and it needs to look like the answer to
-   "where am I" rather than like one more colour in the rack. */
-row.sidebar-row.hue-1:selected { box-shadow: inset 0.2em 0 0 0 @hue-1; }
-row.sidebar-row.hue-2:selected { box-shadow: inset 0.2em 0 0 0 @hue-2; }
-row.sidebar-row.hue-3:selected { box-shadow: inset 0.2em 0 0 0 @hue-3; }
-row.sidebar-row.hue-4:selected { box-shadow: inset 0.2em 0 0 0 @hue-4; }
-row.sidebar-row.hue-5:selected { box-shadow: inset 0.2em 0 0 0 @hue-5; }
+   What is left is one signal per state, and they cannot be confused with each
+   other: a name at rest, a wash under the pointer, the filament wash for the
+   project you are in, and amber for one whose agent is waiting. Colour in this
+   panel now means only the last of those. */
+.sidebar-row-icon {
+  color: @muted;
+}
 
 row.sidebar-row:selected .sidebar-row-icon {
   color: @text;
@@ -1718,10 +1636,8 @@ button.sidebar-tree-file:hover {
   to   { background-color: alpha(@tally, 0); }
 }
 
-/* The rail goes amber too, and this rule has to sit below the hue rails to do
-   it: it ties with them on specificity (one element and two classes either
-   way), so source order is the whole of the argument. A strip asking for you
-   stops saying which colour it is and says only that it wants you. */
+/* A strip asking for you. The left edge goes amber - the one bar left on these
+   rows now that identity hues are gone, so it can only ever mean this. */
 row.sidebar-row.needs-attention {
   color: mix(@tally, @text, 0.55);
   box-shadow: inset 0.16em 0 0 0 @tally;
@@ -1739,9 +1655,8 @@ row.sidebar-row.needs-attention .sidebar-row-icon {
 /* The rule above sets `color` and lets the label inherit it, which worked right
    up until the label got a colour of its own: a rule that targets the label
    directly beats any colour it would have inherited, however specific the
-   inherited one is. Without this the name would sit there in its project hue
-   through the whole flash - the one moment it is not supposed to be saying
-   "which project" but "this one needs you". */
+   inherited one is. Without this the name would sit at its resting colour
+   through the whole flash - the one moment it has something to say. */
 row.sidebar-row.needs-attention .sidebar-row-label {
   color: mix(@tally, @text, 0.55);
 }
@@ -1904,12 +1819,13 @@ row.sidebar-row.needs-attention .sidebar-row-label {
    in your hand is going. That means out-ranking every other rule that writes
    `box-shadow` on a strip - and this is last in the file precisely so it does.
 
-   The `:selected` half of each pair is not decoration. A lit strip's rail is
-   set by `row.sidebar-row.hue-N:selected`, which carries one more class than a
-   bare `.drop-above` does and would therefore win on specificity alone - so
-   without it the insertion line would be invisible on exactly one strip in the
-   rack: the project you currently have open, which is also the one you are most
-   likely to be dragging past. */
+   The `:selected` half of each pair is kept, though nothing outranks these any
+   more. It was load-bearing when a lit strip's identity rail was drawn by
+   `row.sidebar-row.hue-N:selected` - one class more than a bare `.drop-above`,
+   so without the pair the insertion line went invisible on exactly the strip
+   you are most likely to drag past. Those rules are gone with the hues, and the
+   pair now costs one selector to keep the guarantee independent of whatever
+   writes `box-shadow` on a selected row next. */
 row.sidebar-row.drop-above,
 row.sidebar-row.drop-above:selected {
   box-shadow: inset 0 2px 0 0 @filament;

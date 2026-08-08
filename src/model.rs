@@ -79,41 +79,10 @@ pub enum PaneState {
     Exited,
 }
 
-/// How many `hue-N` classes `style.css` defines for sidebar rows.
-const HUE_COUNT: u64 = 5;
-
 /// The icon the welcome entry wears, and the marker that it is not a project
-/// with an identity of its own. A folder someone opened is `folder-symbolic`;
-/// this one is the info glyph, and it gets the neutral rail `hue_class` hands
-/// out for it rather than a colour off the wheel - see `NEUTRAL_HUE`.
+/// someone opened. A folder someone opened is `folder-symbolic`; this one is
+/// the info glyph.
 pub const WELCOME_ICON: &str = "help-about-symbolic";
-
-/// The rail class for a row that carries no project identity. The welcome entry
-/// is the only thing that uses it: it is a home screen occupying a row, not one
-/// of your projects, and a project colour would say it was.
-pub const NEUTRAL_HUE: &str = "hue-neutral";
-
-/// The identity colour class for a project called `name` - `hue-1` through
-/// `hue-{HUE_COUNT}`, matching the rules in `style.css`.
-///
-/// Hashed from the name rather than handed out by row position, so a project's
-/// colour is a property *of that project*: it survives reordering the sidebar,
-/// closing the group above it, and quitting the app, all of which would shuffle
-/// an index-assigned palette and retrain the eye for nothing. The point of the
-/// colour is that you learn it once.
-///
-/// FNV-1a, spelled out here rather than reached for from `std`: `DefaultHasher`
-/// is explicitly not promised to be stable across Rust releases, and a toolchain
-/// upgrade silently repainting every project in the sidebar is the exact failure
-/// this function exists to avoid.
-pub fn hue_class(name: &str) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in name.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    format!("hue-{}", hash % HUE_COUNT + 1)
-}
 
 /// One project: where it is, what it's called, and how its panes are arranged.
 ///
@@ -135,8 +104,6 @@ pub struct Project {
     /// What the sidebar calls it - the folder name, except for the startup
     /// project, which is named for what it holds rather than where it is.
     pub name: String,
-    /// The `hue-N` class for this project's tally rail, hashed from `name`.
-    pub hue: String,
     /// The sidebar icon name.
     pub icon: String,
     pub mode: Mode,
@@ -148,18 +115,9 @@ pub struct Project {
 
 impl Project {
     fn new(id: ProjectId, path: &str, name: String, icon: &str) -> Self {
-        // The welcome entry gets a neutral rail rather than an identity colour:
-        // it is not a project, and two purple rails where one is the home screen
-        // and one is a real project reads as two projects that happen to match.
-        let hue = if icon == WELCOME_ICON {
-            NEUTRAL_HUE.to_string()
-        } else {
-            hue_class(&name)
-        };
         Project {
             id,
             path: path.to_string(),
-            hue,
             name,
             icon: icon.to_string(),
             mode: Mode::default(),
@@ -383,29 +341,15 @@ mod tests {
         store.iter().map(|p| p.name.clone()).collect()
     }
 
-    /// `hue_class` promises two things its callers can't check for themselves:
-    /// that the class it names is one `style.css` actually defines, and that a
-    /// given project keeps the same one forever. A hue outside the range is an
-    /// uncoloured row; a hue that drifts is every project in the sidebar
-    /// quietly changing colour on some unrelated release.
-    #[test]
-    fn a_projects_colour_is_in_range_and_never_moves() {
-        for name in ["agenttilecli", "Offline_map", "castle-of-the-dreadfort", ""] {
-            let class = hue_class(name);
-            assert!(
-                (1..=HUE_COUNT).any(|n| class == format!("hue-{n}")),
-                "{name} got {class}, which style.css does not define"
-            );
-            assert_eq!(class, hue_class(name), "{name} did not hash the same twice");
-        }
-
-        // Pinned literals, not a recomputation: the point is to fail if the
-        // hash function is ever swapped or "improved", which is precisely the
-        // change that would repaint everyone's sidebar without meaning to.
-        assert_eq!(hue_class("agenttilecli"), "hue-2");
-        assert_eq!(hue_class("Offline_map"), "hue-4");
-        assert_eq!(hue_class("castle-of-the-dreadfort"), "hue-3");
-    }
+    // `a_projects_colour_is_in_range_and_never_moves` used to sit here, pinning
+    // the FNV-1a hash that handed every project one of five identity hues. Both
+    // the hash and the test are gone with the colours themselves: the chrome is
+    // greyscale now, and colour in this window means an agent's *state* rather
+    // than an agent's *project* - amber that one wants you, green that one is
+    // working, red that one died. Five more colours competing with those three
+    // was the reason a rack of seven projects read as a paint chart, and a hue
+    // that means "this is the Dashboard project" is a colour spent saying
+    // something the name beside it already says.
 
     /// A row is two drop targets, not one - its top half and its bottom half -
     /// and that's what gives a list of n rows the n+1 places a project can go.

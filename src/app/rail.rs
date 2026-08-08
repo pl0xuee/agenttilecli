@@ -1,12 +1,19 @@
-//! The rail: every project, one glyph, always on screen.
+//! The rail: every project, one glyph, for when the drawer is shut.
 //!
 //! The rack used to be the only place a project existed visually, and the rack
 //! is summonable - which meant a narrow window, or a closed sidebar, was a
-//! window where your other projects didn't exist at all. The rail is the
-//! always-present index: one glyph per project, wearing its identity hue and
-//! its attention state, and nothing else. The rack - the drawer, now - keeps
-//! the names, the tallies, the folder trees and the close buttons: detail on
-//! demand, where the rail is recognition at a glance.
+//! window where your other projects didn't exist at all. The rail answers that
+//! and only that: with the drawer shut it is the index, one initial per project
+//! plus whether that project wants you.
+//!
+//! With the drawer *open* it is not on screen at all, because there it had
+//! nothing left to say - the drawer lists the same projects, in the same order,
+//! with their names spelled out. See `App::new`, which binds the two together.
+//!
+//! No colour. A glyph carries an initial, a lit ring if it is the project on
+//! screen, and amber if an agent in it is waiting - and that is the whole
+//! vocabulary. Identity hues were tried here and made a column of seven
+//! projects read as a paint chart; colour in this window belongs to state.
 //!
 //! Rebuilt whole from the store on every change rather than kept in step
 //! incrementally - the same trade `tree::rebuild` makes, for the same reason:
@@ -80,7 +87,7 @@ impl App {
         gtk4::WindowHandle::builder().child(&column).build()
     }
 
-    /// Redraws the rail from the store: order, hue, who is lit, who wants you.
+    /// Redraws the rail from the store: order, who is lit, and who wants you.
     ///
     /// Attention is read back off the drawer rows rather than tracked twice -
     /// `flash_row` owns that state, the row wears it, and the rail mirrors the
@@ -131,7 +138,7 @@ impl App {
 
             let button = gtk4::Button::builder()
                 .child(&face)
-                .css_classes(["rail-glyph", &project.hue])
+                .css_classes(["rail-glyph"])
                 .can_focus(false)
                 .tooltip_text(&tooltip)
                 .build();
