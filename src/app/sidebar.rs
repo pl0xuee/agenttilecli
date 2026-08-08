@@ -361,24 +361,27 @@ impl App {
         // rather than "0": a project with nothing running is what the empty
         // state already says at length the moment you open it, and a column of
         // zeroes is noise on every other row to say it again.
-        // One dot per agent, in the colours the pane heads already use. This
-        // replaced a bare count, which could say how many agents a project was
-        // running and nothing about what any of them was doing - so a project
-        // with three agents all waiting on you and a project with three all
-        // working looked identical, which is the one distinction a rack you are
-        // not looking at exists to draw.
+        // This project's agents, one row each, nested under the strip.
+        //
+        // It was a row of coloured dots on the strip itself - a compact summary
+        // that could say "three agents, one of them waiting" and nothing about
+        // *which* one or what any of them was doing. That was the right amount
+        // of information for a panel with nothing else in it, and the wrong
+        // amount for the only panel this window has: a drawer showing seven
+        // project names in a column with room for twenty is a list with no
+        // depth, and the depth was right there, unlisted.
+        //
+        // So the dots become rows. Each one names the agent the way its own
+        // tile's head strip names it, wears the same state dot the strip does,
+        // and clicking it goes there. The strip above them keeps no summary,
+        // because the rows are the summary and two of them would drift.
+        //
+        // Vertical, and outside `content` rather than inside it: these sit
+        // *below* the name they belong to, not beside it.
         let agents = gtk4::Box::builder()
-            .orientation(gtk4::Orientation::Horizontal)
-            .spacing(3)
-            .halign(gtk4::Align::End)
-            .valign(gtk4::Align::Center)
-            // No CSS class. It carried `.sidebar-row-agents` for a rule that was
-            // never written, and there is nothing for that rule to say: the only
-            // thing this box decides is its spacing, and GTK4 dropped
-            // `-GtkBox-spacing`, so spacing cannot come from the stylesheet at
-            // all. A class with no rule is the same invisible-in-both-directions
-            // problem `.sidebar-header` was fixed for, so it goes rather than
-            // acquiring a rule that pretends to own something it can't.
+            .orientation(gtk4::Orientation::Vertical)
+            .spacing(1)
+            .css_classes(["sidebar-agents"])
             .build();
 
         let close = gtk4::Button::builder()
@@ -447,18 +450,22 @@ impl App {
         content.append(&expand);
         content.append(&row_icon);
         content.append(&label);
-        content.append(&agents);
         content.append(&close);
 
-        // The strip is a column now: the row everything always was, and the
-        // tree it can unfold into beneath it. Inside the `ListBoxRow` rather
-        // than a sibling of it, so the tree keeps the strip's fill, rail and
-        // selection - it is part of the strip, not a second widget the sort
-        // function would have to be taught to skip.
+        // The strip is a column: the row everything always was, the agents
+        // running inside it, and the file tree it can unfold into. Inside the
+        // `ListBoxRow` rather than a sibling of it, so all three keep the
+        // strip's fill and selection - they are part of the strip, not extra
+        // widgets the sort function would have to be taught to skip.
+        //
+        // The agents sit above the tree because they are the volatile half:
+        // what is running changes minute to minute and is why you opened the
+        // drawer, whereas the files are a reference you went looking for.
         let column = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .build();
         column.append(&content);
+        column.append(&agents);
         column.append(&revealer);
 
         let row = gtk4::ListBoxRow::builder().child(&column).build();
@@ -625,57 +632,93 @@ impl App {
         self.refresh_rail();
     }
 
-    /// Writes a project's agent tally onto its sidebar row.
+    /// Redraws the list of agents nested under a project's strip.
     ///
-    /// The number is how many agents; the colour is what they are doing, and it
-    /// takes the most urgent answer in the group. Amber if any of them is asking
-    /// you something, green if any is working, quiet otherwise - the same three
-    /// meanings those colours carry everywhere else in this window.
+    /// One row per agent: the state dot its own tile wears, and the words that
+    /// tile's head strip is showing. This was a row of dots on the strip
+    /// itself - see `build_row` for why it stopped being one.
     ///
-    /// Blank at zero rather than "0" - see `build_row`. The row is looked up by
-    /// id rather than captured, because the pane-count callback is registered
-    /// before the row it writes to exists; the very first call finds nothing and
-    /// does nothing, which is correct, since a project with no panes yet has
-    /// nothing to report.
+    /// Rebuilt whole on every change, like the rail and the file tree, and for
+    /// the same reason: a handful of small widgets are cheap to remake and
+    /// impossible to desynchronise from the panes they describe.
+    ///
+    /// The row is looked up by id rather than captured, because the pane-count
+    /// callback is registered before the row it writes to exists; the very
+    /// first call finds nothing and does nothing, which is correct, since a
+    /// project with no panes yet has nothing to report.
     pub(super) fn refresh_row_tally(&self, id: ProjectId) {
         let views = self.0.views.borrow();
         let Some(view) = views.iter().find(|v| v.id == id) else {
             return;
         };
-        let states = view.tiler.agent_states();
+        let rows = view.tiler.agent_rows();
 
         while let Some(child) = view.agents.first_child() {
             view.agents.remove(&child);
         }
 
-        // Past a handful, dots stop being countable and start being a texture -
-        // and a rack 170px wide has no room for a texture. The overflow is said
-        // in a number instead, which is the one thing a number was always good
-        // at.
-        const MAX_DOTS: usize = 5;
-        let shown = states.len().min(MAX_DOTS);
-        for state in &states[..shown] {
+        // Past a handful the list stops being a list and starts being the whole
+        // drawer - eight agents in three projects would push the projects
+        // themselves off the bottom of a panel whose first job is naming them.
+        // The rest are said in a number, which is the one thing a number was
+        // always better at than a picture.
+        const MAX_ROWS: usize = 6;
+        let shown = rows.len().min(MAX_ROWS);
+        for (index, label, state) in &rows[..shown] {
             let dot = gtk4::Box::builder()
                 .css_classes(["rack-dot", crate::pane::status_class(state)])
                 .valign(gtk4::Align::Center)
                 .build();
-            view.agents.append(&dot);
+            let text = gtk4::Label::builder()
+                .label(label)
+                .halign(gtk4::Align::Start)
+                .hexpand(true)
+                .ellipsize(gtk4::pango::EllipsizeMode::End)
+                .css_classes(["sidebar-agent-label"])
+                .build();
+
+            let content = gtk4::Box::builder()
+                .orientation(gtk4::Orientation::Horizontal)
+                .spacing(8)
+                .build();
+            content.append(&dot);
+            content.append(&text);
+
+            // A button, for the same reason the tree's folder rows are: it
+            // swallows its own click, so going to an agent in a project you are
+            // not in does not also count as a click on that project's strip -
+            // which would select the project and then fight this handler over
+            // which pane ends up focused.
+            let button = gtk4::Button::builder()
+                .css_classes(["sidebar-agent"])
+                .can_focus(false)
+                .child(&content)
+                .tooltip_text(format!("Go to this agent \u{2014} {label}"))
+                .build();
+
+            let this = self.clone();
+            let index = *index;
+            button.connect_clicked(move |_| {
+                // Switch first, then focus. `select` is what makes the project
+                // visible, and focusing a pane in a hidden tiler puts the
+                // keyboard somewhere nobody can see.
+                this.select(id);
+                if let Some(tiler) = this.tiler_for(id) {
+                    tiler.focus_pane(index);
+                }
+            });
+
+            view.agents.append(&button);
         }
-        if states.len() > shown {
+        if rows.len() > shown {
             view.agents.append(
                 &gtk4::Label::builder()
-                    .label(format!("+{}", states.len() - shown))
-                    .css_classes(["rack-overflow"])
-                    .valign(gtk4::Align::Center)
+                    .label(format!("+{} more", rows.len() - shown))
+                    .halign(gtk4::Align::Start)
+                    .css_classes(["sidebar-tree-note"])
                     .build(),
             );
         }
-
-        // The dots say it at a glance and the tooltip says it in words, which is
-        // the same pairing the pane's own dot uses.
-        let words = self.agent_words(&view.tiler.agent_tally());
-        view.agents
-            .set_tooltip_text((!states.is_empty()).then_some(words.as_str()));
 
         // The header's subtitle falls back to this same tally when no agent has
         // a title to show, so a change here can be a change up there. Only for
@@ -686,7 +729,7 @@ impl App {
             self.refresh_subtitle();
         }
         // The rail glyph's tooltip carries this same tally in words, so it
-        // goes stale at the same moments the dots would.
+        // goes stale at the same moments these rows would.
         self.refresh_rail();
     }
 }

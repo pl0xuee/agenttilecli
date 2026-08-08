@@ -210,7 +210,7 @@ struct Inner {
     sidebar_count: gtk4::Label,
     toasts: adw::ToastOverlay,
     updates: Updates,
-    title: adw::WindowTitle,
+    title: header::HeaderTitle,
     /// The focused agent's own terminal title, kept because the subtitle it
     /// competes for is rewritten by two different events - a title change and
     /// a change in how many agents are running - and whichever fires second
@@ -345,7 +345,7 @@ impl App {
             .css_classes(["sidebar-header-count"])
             .valign(gtk4::Align::Center)
             .build();
-        let title_widget = adw::WindowTitle::new(title, "");
+        let title_widget = header::HeaderTitle::new(title);
         let sidebar_toggle = gtk4::ToggleButton::builder()
             .icon_name("sidebar-show-symbolic")
             .css_classes(["sidebar-toggle", "header-action"])
@@ -594,6 +594,13 @@ impl App {
         if let Some(broadcast) = self.0.broadcast_button.borrow().as_ref() {
             breakpoint.add_setter(broadcast, "visible", Some(&false.to_value()));
         }
+        // The title's subtitle goes too, and through signals rather than a
+        // setter because it is a decision the widget re-makes on every state
+        // change rather than a property - see `HeaderTitle::set_compact`.
+        let title = self.0.title.clone();
+        breakpoint.connect_apply(move |_| title.set_compact(true));
+        let title = self.0.title.clone();
+        breakpoint.connect_unapply(move |_| title.set_compact(false));
         self.0.window.add_breakpoint(breakpoint);
     }
 
@@ -858,6 +865,12 @@ impl App {
     /// you would want to know it.
     pub(super) fn refresh_subtitle(&self) {
         let pane_title = self.0.pane_title.borrow().clone();
+        // The dot first, and from the tally rather than from whatever sentence
+        // wins below: it reports the project's most urgent agent, which is true
+        // whether or not the focused pane happens to have set a title.
+        let tally = self.active_tiler().map(|t| t.agent_tally()).unwrap_or_default();
+        self.0.title.set_tally(&tally);
+
         if !pane_title.is_empty() {
             self.0.title.set_subtitle(&pane_title);
             return;

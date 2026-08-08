@@ -668,6 +668,18 @@ impl Pane {
         }
     }
 
+    /// What this pane's head strip is currently calling it.
+    ///
+    /// Read off the label rather than recomputed, so the drawer's agent row and
+    /// the strip on the tile it points at cannot disagree - `Head::refresh` is
+    /// the one place that decides between "the folder it has moved to", "what
+    /// the agent is doing" and "the folder it started in", and that decision is
+    /// subtle enough that a second implementation of it would be a second
+    /// answer.
+    pub fn head_label(&self) -> String {
+        self.head.label.label().to_string()
+    }
+
     /// This pane's agent state, or `None` for a pane no agent will ever speak
     /// for. The rack's dots and the "3 agents" tally read this rather than
     /// `state`, so an open editor is never counted as an agent - it is a file,

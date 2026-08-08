@@ -11,6 +11,9 @@
 //! the shape of the panes, which is readable with four of them open and a guess
 //! with one.
 
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+
 use adw::prelude::*;
 use gtk4::gio;
 
@@ -37,6 +40,159 @@ const MODE_BUTTONS: [(Mode, &str, &str); 3] = [
 /// Set on the app-menu button once a check has found a newer version, so the
 /// news survives dismissing the dialog even though the menu itself is shut.
 const UPDATE_CLASS: &str = "update-available";
+
+/// What the header bar says about where you are, and what is happening there.
+///
+/// This replaces an `AdwWindowTitle` centred in the bar, and the two changes
+/// are separate arguments.
+///
+/// It is *left-aligned* because it is a location, not a caption. A centred
+/// title is what a document window has - the name of the thing you are looking
+/// at, floating over the middle of it - whereas this names which of seven
+/// projects the workspace below is currently showing. Everything else that
+/// answers that question in this app is down the left edge: the rail's lit
+/// chip, the drawer's lit strip. The title being 700px away from all of them,
+/// in the middle of the bar, was the header not participating in the sentence
+/// the rest of the window was saying.
+///
+/// And it carries a *state dot*, which is the part that makes the bar do some
+/// work rather than label things. The bar's own subtitle already knew how many
+/// agents were running; what it could not say at a glance was whether any of
+/// them had stopped and was waiting for you - the one fact in this application
+/// worth interrupting someone for. The dot is the same one the pane heads and
+/// the drawer rows wear, in the same three colours, so it needs no legend.
+#[derive(Clone)]
+pub(super) struct HeaderTitle {
+    /// The whole block, for packing into the bar.
+    widget: gtk4::Box,
+    dot: gtk4::Box,
+    name: gtk4::Label,
+    subtitle: gtk4::Label,
+    /// The subtitle as last set, kept because whether it is *shown* depends on
+    /// something else that changes independently - see `set_compact`. Without
+    /// this the two writers would have to be ordered, and the loser would blank
+    /// a subtitle the winner had just set.
+    text: Rc<RefCell<String>>,
+    /// True on a window too narrow to carry both halves of the block.
+    compact: Rc<Cell<bool>>,
+}
+
+impl HeaderTitle {
+    pub(super) fn new(app_name: &str) -> Self {
+        // Hidden until there is a state to report - a project with no agents
+        // running has nothing to say here, and a permanently grey dot beside
+        // every title is a light that means "the bulb works".
+        let dot = gtk4::Box::builder()
+            .css_classes(["pane-status"])
+            .valign(gtk4::Align::Center)
+            .visible(false)
+            .build();
+
+        let name = gtk4::Label::builder()
+            .label(app_name)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .css_classes(["header-title-name"])
+            .build();
+
+        // Ellipsized, and it is the half that gives way: on a narrow window the
+        // project's name is what you cannot afford to lose, and "3 agents · 1
+        // waiting for you" is a sentence the dot beside it already summarises.
+        let subtitle = gtk4::Label::builder()
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .css_classes(["header-title-sub"])
+            .build();
+
+        let widget = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(0)
+            .valign(gtk4::Align::Center)
+            .css_classes(["header-title"])
+            .build();
+        widget.append(&dot);
+        widget.append(&name);
+        widget.append(&subtitle);
+
+        HeaderTitle {
+            widget,
+            dot,
+            name,
+            subtitle,
+            text: Rc::new(RefCell::new(String::new())),
+            compact: Rc::new(Cell::new(false)),
+        }
+    }
+
+    pub(super) fn widget(&self) -> &gtk4::Box {
+        &self.widget
+    }
+
+    pub(super) fn set_title(&self, title: &str) {
+        self.name.set_label(title);
+    }
+
+    /// The line after the name. Prefixed with a separator here rather than by
+    /// each caller, so the two labels can be packed flush and the gap belongs
+    /// to whichever of them is actually present.
+    pub(super) fn set_subtitle(&self, subtitle: &str) {
+        *self.text.borrow_mut() = subtitle.to_string();
+        self.render_subtitle();
+    }
+
+    /// Drops the subtitle on a window too narrow for both halves.
+    ///
+    /// Two ellipsized labels sharing a strip do not degrade gracefully - they
+    /// degrade *equally*, so at 380px the bar read "a… · …": the project's name
+    /// cut to its first letter so that a tally already summarised by the dot
+    /// beside it could keep three dots of its own. One of the two has to yield
+    /// outright, and it is not the name.
+    ///
+    /// Driven from the same breakpoint that sheds the mode switcher (see
+    /// `install_breakpoint`), through its `apply`/`unapply` signals rather than
+    /// a property setter, because what has to change here is a *decision* the
+    /// widget re-makes whenever its text changes, not a property that can be
+    /// set once and left.
+    pub(super) fn set_compact(&self, compact: bool) {
+        self.compact.set(compact);
+        self.render_subtitle();
+    }
+
+    fn render_subtitle(&self) {
+        let text = self.text.borrow();
+        if self.compact.get() || text.is_empty() {
+            self.subtitle.set_visible(false);
+            return;
+        }
+        self.subtitle
+            .set_label(&format!("\u{2002}\u{b7}\u{2002}{text}"));
+        self.subtitle.set_visible(true);
+    }
+
+    /// Points the dot at the most urgent thing any agent in this project is
+    /// doing, or hides it when nothing is running.
+    ///
+    /// Most urgent rather than most common, and the order is the app's existing
+    /// one: an agent waiting on you outranks an agent working, which outranks
+    /// an agent sitting idle. A summary that averaged would report "idle" for a
+    /// project with three idle agents and one that has been waiting ten minutes
+    /// for an answer, which is the single case this dot exists for.
+    pub(super) fn set_tally(&self, tally: &crate::tiler::Tally) {
+        for class in ["waiting", "working", "idle"] {
+            self.dot.remove_css_class(class);
+        }
+        let class = if tally.waiting > 0 {
+            "waiting"
+        } else if tally.working > 0 {
+            "working"
+        } else if tally.total() > 0 {
+            "idle"
+        } else {
+            self.dot.set_visible(false);
+            return;
+        };
+        self.dot.add_css_class(class);
+        self.dot.set_visible(true);
+    }
+}
 
 /// The app menu's resting caption for the update item.
 const UPDATE_LABEL: &str = "Check for Updates";
@@ -68,7 +224,7 @@ impl App {
     /// panes are arranged, above the stack of projects.
     pub(super) fn build_content(
         &self,
-        title: &adw::WindowTitle,
+        title: &HeaderTitle,
         sidebar_toggle: &gtk4::ToggleButton,
     ) -> adw::ToolbarView {
         // Bound both ways, so the button follows the sidebar however it was
@@ -80,12 +236,16 @@ impl App {
             .sync_create()
             .build();
 
+        // An empty centre, with the real title packed at the start below. An
+        // `AdwHeaderBar` centres whatever it is handed as a title widget, and
+        // this one is a location rather than a caption - the same argument the
+        // drawer's own header settled (see `build_sidebar`).
         let header = adw::HeaderBar::builder()
-            .title_widget(title)
+            .title_widget(&gtk4::Box::new(gtk4::Orientation::Horizontal, 0))
             .show_start_title_buttons(false)
             .build();
         header.pack_start(sidebar_toggle);
-        header.pack_start(&self.build_mode_switcher());
+        header.pack_start(title.widget());
 
         let menu = gio::Menu::new();
         menu.append(Some("Commands\u{2026}"), Some("win.commands"));
@@ -186,6 +346,16 @@ impl App {
         header.pack_end(&menu_button);
         header.pack_end(&new_agent);
         header.pack_end(&broadcast);
+        // The layout switcher moves to this end, away from the title.
+        //
+        // It sat at the start, between the drawer toggle and the (then centred)
+        // title, which put a three-position control in the one part of the bar
+        // that answers "where am I". Everything at this end acts on the
+        // workspace - spawn an agent, broadcast to all of them, arrange them -
+        // and everything at the other end says where you are. One question per
+        // side of the bar is most of what stops a toolbar reading as a drawer
+        // of loose parts.
+        header.pack_end(&self.build_mode_switcher());
 
         // The scaled-content class is what the text-size keybinding targets: the
         // dynamic font-size rule lands here rather than on `window`, so scaling

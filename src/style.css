@@ -585,6 +585,43 @@ menubutton.header-action > button:checked:hover {
   box-shadow: inset 0 0 0 1px alpha(@filament, 0.55);
 }
 
+/* ── The header's title block ──────────────────────────────────────────────
+   Where you are, and what is happening there - see `HeaderTitle`.
+
+   The margin is what separates it from the drawer toggle to its left without
+   a rule between them: this is a label sitting next to a button, and a
+   divider would imply they were two groups when they are one answer to one
+   question. */
+.header-title {
+  margin-left: 0.55em;
+}
+
+/* The name of the project the workspace is showing. Set in the humanist sans
+   the drawer's own rows use rather than in the terminal's mono, because it is
+   the same string as the row it corresponds to and the two should not look
+   like two different kinds of fact. */
+.header-title-name {
+  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-weight: 600;
+  color: @text;
+}
+
+/* And what its agents are doing, on the same line a step quieter. One line
+   rather than the two an AdwWindowTitle stacks: a title over a subtitle is a
+   block that needs vertical room and a centred axis to read as one thing,
+   which is exactly what this stopped having when it moved to the left edge. */
+.header-title-sub {
+  color: @muted;
+}
+
+/* The state dot leads the block, so it is the first thing in the bar rather
+   than a decoration hung off the end of the sentence. Slightly wider spacing
+   than the pane heads give theirs, since here it is separating an icon from
+   proportional text instead of from a monospace label. */
+.header-title .pane-status {
+  margin-right: 0.5em;
+}
+
 /* ── The mode switcher ─────────────────────────────────────────────────────
    Three toggles, one per layout mode. This is the app saying out loud something
    it always knew: cycling modes used to change the tiling and leave the only
@@ -1505,6 +1542,51 @@ row.sidebar-row:hover .sidebar-row-close {
   opacity: 1;
   color: @field;
   background-color: @hangup;
+}
+
+/* ── The agents inside a strip ─────────────────────────────────────────────
+   One row per agent running in that project, nested under its name - what
+   used to be a row of coloured dots on the strip itself.
+
+   The dots were a good summary and a summary was the wrong thing. This is the
+   only panel the window has, and it was showing seven names in a column with
+   room for twenty while the fact worth knowing - which agent is waiting, and
+   what the others are doing - was compressed into five 6px circles.
+
+   Indented past the strip's own icon so the nesting is structural rather than
+   decorative: an agent row starts where the project's *name* starts, which is
+   what says it belongs to that name. Quieter than the name in both size and
+   ink, because a project is a place and its agents are what is happening
+   there - and if these read as loud as the names, the drawer stops being a
+   list of projects with detail under them and becomes one flat list of
+   everything. */
+.sidebar-agents {
+  margin: 0.15em 0 0.1em 1.9em;
+}
+
+button.sidebar-agent {
+  padding: 0.2em 0.35em;
+  border: none;
+  border-radius: 0.35em;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  color: @muted;
+  transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+button.sidebar-agent:hover {
+  color: @text;
+  background-color: @wash;
+}
+
+/* The same humanist sans the project names wear, a step down - a file name in
+   the tree below gets the same treatment, and for the same reason: these are
+   subordinate rows in the same column, not a second voice. */
+.sidebar-agent-label {
+  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-size: 0.92em;
 }
 
 /* ── The strip's folder tree ───────────────────────────────────────────────

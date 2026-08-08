@@ -108,6 +108,44 @@ impl Tiler {
             .collect()
     }
 
+    /// Every agent in this group, as the drawer needs to draw it: where it sits
+    /// in the group, what its head strip is calling it, and what it is doing.
+    ///
+    /// The index is the *pane* index, not the agent index, and the two differ
+    /// the moment a file is open: an editor is a pane and is not an agent. It
+    /// has to be the pane index because that is what `focus_pane` takes, and a
+    /// drawer row that focused the wrong tile because someone had a file open
+    /// is worse than no drawer row at all.
+    ///
+    /// The label is the strip's own text rather than a second description of
+    /// the same pane - so a row here and the head of the tile it points at
+    /// always say the same words, and there is only one place that decides what
+    /// an agent is currently called (see `pane::Head::refresh`).
+    pub fn agent_rows(&self) -> Vec<(usize, String, PaneState)> {
+        self.imp()
+            .panes
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, pane)| {
+                let state = pane.agent_state()?;
+                Some((index, pane.head_label(), state))
+            })
+            .collect()
+    }
+
+    /// Gives the keyboard to one pane by index - the drawer's agent rows, which
+    /// are a list of places to go and have to be able to go there.
+    ///
+    /// Out of range is a no-op rather than a panic: the list the caller is
+    /// acting on was built a turn of the main loop ago, and in between an agent
+    /// may have exited and taken its pane with it.
+    pub fn focus_pane(&self, index: usize) {
+        if index < self.imp().panes.borrow().len() {
+            self.set_focus(index);
+        }
+    }
+
     pub fn agent_tally(&self) -> Tally {
         let mut tally = Tally::default();
         for pane in self.imp().panes.borrow().iter() {
