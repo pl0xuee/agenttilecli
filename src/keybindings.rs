@@ -528,6 +528,23 @@ pub fn install(window: &impl IsA<gtk4::Widget>, app: &App) {
 mod tests {
     use super::*;
 
+    /// The palette is the only route to an agent this project's `+` isn't set
+    /// to, for anyone who works from the keyboard. A `Kind` added to `agent`
+    /// without an entry here would be an agent you could configure and never
+    /// reach.
+    #[test]
+    fn every_agent_can_be_started_from_the_palette() {
+        for kind in crate::agent::Kind::ALL {
+            assert!(
+                COMMANDS
+                    .iter()
+                    .any(|c| c.title.contains(kind.label()) && c.run.is_some()),
+                "no palette entry starts a {} agent",
+                kind.label(),
+            );
+        }
+    }
+
     /// The cheatsheet draws its keys with `GtkShortcutLabel`, which renders
     /// nothing at all for a string it can't parse - leaving a row that describes
     /// an action and shows no key for it.

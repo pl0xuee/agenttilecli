@@ -600,13 +600,16 @@ menubutton.header-action > button:checked:hover {
    first: the `+` keeps its filament ring and its @text glyph, the chevron sits
    at @muted like the rest of the row until you approach it. The tightened gap
    is what says they are one control rather than two neighbours. */
-.header-split {
-  /* Closer than the bar's own spacing, so the pair reads as one object. */
-  margin-right: -0.15em;
+.header-split-arrow {
+  /* Pulled in against the `+`. At the bar's natural spacing the two read as
+     two controls that happen to be adjacent, which is the reading the split
+     exists to avoid: the chevron is a modifier on the button beside it, not a
+     sibling of the four other glyphs in the strip. */
+  margin-left: -0.3em;
 }
 
 .header-split-arrow > button {
-  min-width: 1.15em;
+  min-width: 1.05em;
   /* No ring: one filament outline per control, and it belongs to the `+`. */
   box-shadow: none;
 }
