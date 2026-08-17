@@ -68,6 +68,25 @@ impl Event {
     pub fn parse(name: &str) -> Option<Self> {
         Event::ALL.into_iter().find(|e| e.name() == name)
     }
+
+    /// What codex calls this moment in its own hook config.
+    ///
+    /// Identical to `name` everywhere except the one that matters: claude's
+    /// `Notification` is codex's `PermissionRequest`. Both mean the same thing
+    /// to `advance` - the agent has stopped and wants an answer - which is why
+    /// the state machine needed no changes at all to gain a second agent.
+    ///
+    /// Only the *key* differs. The command it registers still passes
+    /// `--hook Notification`, because that argument is written by this app and
+    /// read back by `Event::parse` in this app; neither agent ever looks at it.
+    /// So there is one wire vocabulary and two spellings of the file that
+    /// installs it, rather than two of each.
+    pub fn codex_key(self) -> &'static str {
+        match self {
+            Event::Notification => "PermissionRequest",
+            other => other.name(),
+        }
+    }
 }
 
 /// What `event` does to a pane currently in `state`.
@@ -162,6 +181,45 @@ pub fn settings_json(hook_bin: &str, bell_hook: &str) -> String {
     serde_json::json!({ "hooks": hooks }).to_string()
 }
 
+/// The `hooks.json` written into the private `CODEX_HOME`, registering
+/// `hook_bin` against all six events.
+///
+/// Codex has no `--settings`. Its hooks load from its home directory or from
+/// the repo, and from nowhere else - so this file goes into a home of our own
+/// making (see `codex_home`) and the user's real `~/.codex` is never written
+/// to. Same promise the claude side keeps, by a harder route.
+///
+/// The `"hooks"` wrapper is the one thing here taken from documentation rather
+/// than from a running codex: the documented `config.toml` form nests under a
+/// `hooks` table, so a standalone file is written to match. If codex is ever
+/// seen to find no hooks at all, this wrapper is the first thing to try
+/// removing - and until somebody has run this against a real codex, that is a
+/// guess wearing a comment rather than a fact.
+pub fn codex_hooks_json(hook_bin: &str, bell_hook: &str) -> String {
+    let command = |c: String| serde_json::json!({ "type": "command", "command": c });
+
+    let mut hooks = serde_json::Map::new();
+    for event in Event::ALL {
+        // Single-quoted for the reason spelt out at length in `settings_json`:
+        // this is a shell command line carrying whatever prefix somebody
+        // installed the binary under, and an unquoted `$` in that path costs
+        // every dot in the window with nothing anywhere saying why.
+        let mut commands = vec![command(format!(
+            "{} --hook {}",
+            crate::update::sh_quote(hook_bin),
+            event.name(),
+        ))];
+        if matches!(event, Event::Stop | Event::Notification) {
+            commands.push(command(bell_hook.to_string()));
+        }
+        hooks.insert(
+            event.codex_key().to_string(),
+            serde_json::json!([{ "hooks": commands }]),
+        );
+    }
+    serde_json::json!({ "hooks": hooks }).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +230,93 @@ mod tests {
             assert_eq!(Event::parse(event.name()), Some(event));
         }
         assert_eq!(Event::parse("NoSuchEvent"), None);
+    }
+
+    /// The two agents differ by exactly one word, and it is the word that
+    /// matters most: the moment an agent stops to ask you something. Getting it
+    /// wrong costs the amber dot, and nothing else complains.
+    #[test]
+    fn codex_names_the_blocked_moment_its_own_way() {
+        assert_eq!(Event::Notification.codex_key(), "PermissionRequest");
+        for event in Event::ALL {
+            if event != Event::Notification {
+                assert_eq!(
+                    event.codex_key(),
+                    event.name(),
+                    "{} is spelt the same by both agents",
+                    event.name(),
+                );
+            }
+        }
+    }
+
+    /// Codex's file is a different shape to claude's, so it gets its own test
+    /// rather than sharing one. What the two have in common is only the way
+    /// they fail: silently, into a window full of panes saying "starting…".
+    #[test]
+    fn the_codex_payload_registers_every_event_against_our_binary() {
+        let bell = r#"printf '\a' > "$PTY""#;
+        let json = codex_hooks_json("/opt/agent tile/agenttilecli", bell);
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json).expect("codex hooks payload is not valid JSON");
+        let hooks = &parsed["hooks"];
+
+        for event in Event::ALL {
+            let entry = &hooks[event.codex_key()];
+            assert!(!entry.is_null(), "{} is not registered", event.codex_key());
+            let commands: Vec<String> = entry[0]["hooks"]
+                .as_array()
+                .expect("an array of hooks")
+                .iter()
+                .map(|h| h["command"].as_str().unwrap_or_default().to_string())
+                .collect();
+            assert!(
+                commands.iter().any(|c| c.contains("--hook")),
+                "{} reports nothing: {commands:?}",
+                event.codex_key(),
+            );
+            assert!(
+                commands.iter().all(|c| !c.contains("PermissionRequest")),
+                "the argv keeps claude's vocabulary, which is what main.rs parses",
+            );
+        }
+
+        // Claude's key must not leak into codex's file. It would register an
+        // event codex never fires, and the amber dot would simply never light -
+        // on the one transition the whole status feature exists for.
+        assert!(
+            hooks.get("Notification").is_none(),
+            "Notification is claude's word, not codex's",
+        );
+
+        // The bell is the fallback for the same two moments here as there.
+        let bell_on = |event: Event| {
+            hooks[event.codex_key()][0]["hooks"]
+                .as_array()
+                .expect("an array of hooks")
+                .iter()
+                .any(|h| h["command"].as_str().unwrap_or_default().contains("printf"))
+        };
+        assert!(bell_on(Event::Stop), "the bell rides on Stop");
+        assert!(bell_on(Event::Notification), "and on the blocked moment");
+        assert!(!bell_on(Event::PreToolUse), "and on nothing else");
+    }
+
+    /// Same silent-failure argument as the claude payload: a path the shell
+    /// would mangle produces six hooks that fail to exec, stderr nobody sees,
+    /// and a pane that sits on "starting…" for the whole session.
+    #[test]
+    fn the_codex_payload_survives_a_path_the_shell_would_mangle() {
+        let json = codex_hooks_json("/home/dev/agent$tile/agenttilecli", "true");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let command = parsed["hooks"]["Stop"][0]["hooks"][0]["command"]
+            .as_str()
+            .expect("a command");
+        assert!(
+            command.contains("'/home/dev/agent$tile/agenttilecli'"),
+            "the path lost its quoting: {command}",
+        );
     }
 
     /// A turn, start to finish, is the sequence this state machine exists for.
