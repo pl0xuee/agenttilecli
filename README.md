@@ -59,6 +59,25 @@ you want to nudge it.
   from the terminal output, so it knows *which* pane and *which* tool — and if
   the socket can't be opened, panes fall back to the bell below and nothing
   breaks.
+- **Claude and Codex, side by side** — the chevron beside the header's **+**
+  picks which agent to start, and a project can hold both at once: a claude and
+  a codex tiled in the same folder, each with its own dot. The group remembers
+  what you last chose, so picking codex once is a statement about that project
+  rather than about that click, and the **+** keeps its single click. Each
+  pane's head strip names its agent after whatever it was already saying —
+  `working · Bash · codex`. Codex reports through the same six moments claude
+  does (it spells one of them `PermissionRequest` rather than `Notification`),
+  so the dots, the tally and the amber "wants you" all mean the same thing
+  whichever agent is running. Getting hooks in front of codex takes more work
+  than claude's `--settings`, because codex reads them only from its home
+  directory: rather than write to yours, each pane runs against a `CODEX_HOME`
+  of this app's own making — a cache directory of symlinks to your real one, so
+  your auth, config and sessions are read through, with our `hooks.json` as the
+  single real file beside them. `~/.codex` is never written to, and if you
+  already keep hooks there they're merged in rather than replaced. One note: if
+  your own hooks live inline in `~/.codex/config.toml` rather than in a
+  `hooks.json`, codex will warn that it loaded both representations. It's
+  harmless, and it's codex talking, not this app.
 - **Background agents tell you when they want you** — when an agent finishes a
   turn, or stops to ask permission, its group's sidebar row pulses and then
   stays quietly tinted until you open that group, so a finished agent in a
@@ -182,7 +201,7 @@ you make it:
 ```toml
 # ~/.config/agenttilecli/config.toml
 
-command = "claude"        # what each pane runs
+default_agent = "claude"  # which agent the + starts: claude or codex
 agents = 1                # agents a newly-opened project starts with
 restore_agents = false    # reopen a saved session's agents too?
 gap = 6                   # half the space between tiles, in pixels
@@ -190,10 +209,20 @@ scrollback = 10000        # lines of scrollback per pane
 font = "Fira Mono 10"     # terminal font; "" for your desktop's monospace
 window_opacity = 0.92     # the gutters, the header strip and the rack
 pane_opacity = 1.0        # the terminal surfaces themselves
+
+[agent.claude]
+command = "claude"        # what a claude pane runs
+
+[agent.codex]
+command = "codex"         # what a codex pane runs
 ```
 
 A mistake in it — a typo'd key, broken TOML — is reported when the app starts,
 with the line and column, rather than silently ignored.
+
+The old top-level `command` key still works and still means claude's command,
+so an existing config file needs no editing. It says so on startup and points
+at `[agent.claude]`, which is where it lives now.
 
 `restore_agents` is off on purpose. An agent is a process with a token budget
 attached, so reopening a project restores its *layout* and leaves the panes to

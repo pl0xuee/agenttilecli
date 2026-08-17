@@ -149,6 +149,27 @@ real codex reads our `hooks.json` out of a redirected `CODEX_HOME` is unverified
 by construction. It must be labelled as such until someone runs it against a
 real codex.
 
+**Verification status: NOT VERIFIED** (as of 2026-08-17, at implementation).
+Everything either side of this seam is tested — the payload's shape and
+escaping, the symlink farm, the merge, the event mapping, the config, the head
+strip. What no test covers is codex itself honouring any of it.
+
+Two specific guesses live inside that seam, in rough order of how likely they
+are to be wrong:
+
+1. **The `"hooks"` wrapper in a standalone `hooks.json`.** The documented
+   `config.toml` form nests under a `hooks` table, so the file is written to
+   match. If codex reports finding no hooks at all, drop the wrapper and write
+   the event map at the top level — one line in `hooks::codex_hooks_json`.
+2. **That `CODEX_HOME` is read early enough to pick up hooks**, rather than only
+   for auth and state. If hooks are read relative to something else, the symlink
+   farm still works for everything but the hooks, and the fallback is the bell.
+
+To verify: install codex, run `scripts/dev-run.sh`, spawn a codex pane, and
+watch the dot. Green while it works and amber on a permission prompt means both
+guesses were right. A dot stuck on hollow "starting…" means the hooks never ran,
+and the wrapper is the first thing to try.
+
 ### Running a dev build
 
 The installed AgentTileCLI is the user's live working environment and must never
