@@ -23,6 +23,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent::Kind;
 use crate::layout::Mode;
 
 /// The whole of what a run hands to the next one.
@@ -82,6 +83,12 @@ pub struct Project {
     /// How many agents it had running. Not restored unless
     /// `config::Config::restore_agents` says so - see this module's header.
     pub agents: usize,
+    /// Which agent each of those was, in pane order.
+    ///
+    /// Absent from every file written before there were two agents, which is
+    /// why it is read through `kinds` and never directly: an empty list means
+    /// claude, because claude is the only thing it could have been.
+    pub agent_kinds: Vec<String>,
     /// Whether this was the project on screen.
     pub active: bool,
 }
@@ -109,8 +116,29 @@ impl Default for Project {
             master_ratio: 0.55,
             master_count: 1,
             agents: 0,
+            agent_kinds: Vec::new(),
             active: false,
         }
+    }
+}
+
+impl Project {
+    /// The agents to restore, one per pane.
+    ///
+    /// `agents` decides how many; the kinds only decide which. A list that
+    /// disagrees with the count is a state file that has been hand-edited or
+    /// half-written, and this module tolerates that quietly rather than
+    /// reporting it - it is not the user's mistake, and there is nothing they
+    /// could do about it. See the header.
+    pub fn kinds(&self) -> Vec<Kind> {
+        (0..self.agents)
+            .map(|i| {
+                self.agent_kinds
+                    .get(i)
+                    .and_then(|k| Kind::parse(k))
+                    .unwrap_or_default()
+            })
+            .collect()
     }
 }
 
@@ -309,6 +337,68 @@ pub fn state_path() -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    /// Session files written before this existed must restore exactly as they
+    /// did. There is one on every machine that has ever run this app.
+    #[test]
+    fn a_session_from_before_agents_had_kinds_still_reads() {
+        let old = r#"{"projects":[{"path":"/tmp","name":"tmp","agents":2}]}"#;
+        let session: Session = serde_json::from_str(old).expect("an old session still parses");
+        let project = &session.projects[0];
+        assert_eq!(project.agents, 2);
+        assert!(project.agent_kinds.is_empty(), "and claims no kinds");
+        assert_eq!(
+            project.kinds(),
+            vec![Kind::Claude, Kind::Claude],
+            "which means claude, because there was nothing else it could be",
+        );
+    }
+
+    #[test]
+    fn a_mixed_project_remembers_which_was_which() {
+        let project = Project {
+            agents: 2,
+            agent_kinds: vec!["codex".into(), "claude".into()],
+            ..Project::default()
+        };
+        assert_eq!(project.kinds(), vec![Kind::Codex, Kind::Claude]);
+    }
+
+    /// A half-written or hand-edited state file is not the user's mistake, so
+    /// it is absorbed rather than reported - the rule this module's header
+    /// sets out.
+    #[test]
+    fn kinds_that_disagree_with_the_count_defer_to_the_count() {
+        let short = Project {
+            agents: 3,
+            agent_kinds: vec!["codex".into()],
+            ..Project::default()
+        };
+        assert_eq!(
+            short.kinds(),
+            vec![Kind::Codex, Kind::Claude, Kind::Claude],
+            "the count decides how many; the missing names default",
+        );
+
+        let long = Project {
+            agents: 1,
+            agent_kinds: vec!["codex".into(), "codex".into(), "codex".into()],
+            ..Project::default()
+        };
+        assert_eq!(long.kinds().len(), 1, "and it decides how few");
+    }
+
+    /// An agent this build has never heard of - a state file from a later
+    /// version, or a typo - restores as claude rather than as nothing.
+    #[test]
+    fn an_unknown_agent_restores_as_claude() {
+        let project = Project {
+            agents: 1,
+            agent_kinds: vec!["gemini".into()],
+            ..Project::default()
+        };
+        assert_eq!(project.kinds(), vec![Kind::Claude]);
+    }
+
     fn a_session() -> Session {
         Session {
             window: Window {
@@ -332,6 +422,7 @@ mod tests {
                     master_ratio: 0.6,
                     master_count: 2,
                     agents: 3,
+                    agent_kinds: vec!["claude".into(), "codex".into(), "claude".into()],
                     active: true,
                 },
                 Project {

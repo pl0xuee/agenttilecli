@@ -682,8 +682,12 @@ impl App {
             // Off unless asked for. See this method's doc comment, and
             // `session`'s header, for why the default is not to.
             if crate::config::get().restore_agents {
-                for _ in 0..project.agents {
-                    tiler.spawn_pane_here();
+                // Each one comes back as the agent it was, rather than as this
+                // project's current default: a restore is meant to reproduce
+                // what was there, and a codex that reopened as a claude would
+                // be a quiet substitution of one agent's context for another's.
+                for kind in project.kinds() {
+                    tiler.restore_pane_of(kind);
                 }
             }
             restored.push(self.0.store.borrow().active());
@@ -725,6 +729,19 @@ impl App {
                     .iter()
                     .find(|v| v.id == project.id)
                     .map_or(0, |v| v.tiler.agent_tally().total()),
+                // Filtered by the same test the count above uses, so the two
+                // cannot come apart - see `Tiler::agent_kinds`.
+                agent_kinds: views
+                    .iter()
+                    .find(|v| v.id == project.id)
+                    .map(|v| {
+                        v.tiler
+                            .agent_kinds()
+                            .iter()
+                            .map(|k| k.label().to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 active: active == Some(project.id),
             })
             .collect();

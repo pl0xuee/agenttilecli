@@ -147,6 +147,22 @@ impl Tiler {
         }
     }
 
+    /// Which agent each of this group's agent panes is running, in pane order.
+    ///
+    /// Filtered on the same test `agent_tally` counts by, so the list and the
+    /// count it is saved beside cannot disagree: an editor pane contributes to
+    /// neither, and a restore that spawned an agent for one would be starting a
+    /// process nobody asked for.
+    pub fn agent_kinds(&self) -> Vec<Kind> {
+        self.imp()
+            .panes
+            .borrow()
+            .iter()
+            .filter(|pane| pane.agent_state().is_some())
+            .map(|pane| pane.kind().unwrap_or_default())
+            .collect()
+    }
+
     pub fn agent_tally(&self) -> Tally {
         let mut tally = Tally::default();
         for pane in self.imp().panes.borrow().iter() {
@@ -190,6 +206,16 @@ impl Tiler {
     /// worse answer than the dialog this app already refuses to show.
     pub fn spawn_pane_of(&self, kind: Kind) {
         self.set_default_kind(kind);
+        self.restore_pane_of(kind);
+    }
+
+    /// The same, without the remembering - for reopening a saved session.
+    ///
+    /// Restoring is not choosing. A project saved with a claude and a codex in
+    /// it would otherwise leave the `+` pointing at whichever of them happened
+    /// to be restored last, which is a preference nobody expressed and an
+    /// arbitrary one at that.
+    pub fn restore_pane_of(&self, kind: Kind) {
         let cwd = self.imp().cwd.borrow().clone();
         self.spawn_pane_in(&cwd, kind);
     }
