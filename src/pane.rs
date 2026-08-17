@@ -739,13 +739,13 @@ impl Pane {
     /// any reason, the pane still gets a perfectly good claude - just a silent
     /// one, which is exactly what it was before this existed.
     pub fn new(cwd: &str) -> Self {
-        let configured = &crate::config::get().command;
+        let configured = crate::config::get().command_for(crate::agent::Kind::Claude);
         let command = match claude_settings_file() {
             Some(path) => format!(
                 "{configured} --settings {}",
                 crate::update::sh_quote(&path)
             ),
-            None => configured.clone(),
+            None => configured,
         };
         Self::spawn(cwd, &command, true)
     }

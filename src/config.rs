@@ -19,6 +19,8 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent::Kind;
+
 /// The config this run is using.
 ///
 /// Process-wide because it is a process-wide fact, read from a great many
@@ -57,9 +59,20 @@ pub fn problem() -> Option<&'static str> {
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    /// What each pane runs. The hook settings are layered on top of whatever
-    /// this is, so a wrapper script still reports its status.
-    pub command: String,
+    /// What each pane ran, before there were two kinds of pane.
+    ///
+    /// Superseded by `[agent.claude] command`, and kept because
+    /// `deny_unknown_fields` would otherwise greet everyone who has ever
+    /// written a config file with an error dialog on their next update. It
+    /// means claude's command, which is what it always meant - there was no
+    /// other agent for it to mean.
+    pub command: Option<String>,
+    /// Which agent the `+` starts, and which one a new project begins with.
+    pub default_agent: String,
+    /// Per-agent overrides, each defaulting to the binary its agent is named
+    /// for. The hook settings are layered on top of whatever these are, so a
+    /// wrapper script still reports its status.
+    pub agent: AgentTable,
     /// How many agents a newly-opened project starts with, before the app has
     /// learned your habit from the project you were last working in.
     pub agents: usize,
@@ -108,10 +121,35 @@ pub struct Config {
     pub font: String,
 }
 
+/// The `[agent.claude]` and `[agent.codex]` tables.
+///
+/// Named fields rather than a map keyed by string: the set of agents is closed
+/// (see `agent`), and a map would accept `[agent.gemini]` silently, which is
+/// the one thing this file's `deny_unknown_fields` exists to prevent.
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AgentTable {
+    pub claude: AgentConfig,
+    pub codex: AgentConfig,
+}
+
+/// What one agent's table can say.
+///
+/// One key today, and a struct rather than a bare string so that gaining a
+/// second is an added field rather than a format change in everybody's file.
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AgentConfig {
+    /// Empty means "the binary this agent is named for".
+    pub command: String,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
-            command: "claude".to_string(),
+            command: None,
+            default_agent: Kind::default().label().to_string(),
+            agent: AgentTable::default(),
             agents: 1,
             restore_agents: false,
             // Six rather than the four this was before the tiles cast a shadow.
@@ -171,13 +209,68 @@ impl Config {
         Config::parse(&text, &path.display().to_string())
     }
 
+    /// The command line a pane of `kind` runs, before either agent's hooks are
+    /// layered on top of it.
+    pub fn command_for(&self, kind: Kind) -> String {
+        let configured = match kind {
+            Kind::Claude => &self.agent.claude.command,
+            Kind::Codex => &self.agent.codex.command,
+        };
+        if !configured.trim().is_empty() {
+            return configured.clone();
+        }
+        // The deprecated top-level key, which only ever meant claude's.
+        if kind == Kind::Claude
+            && let Some(legacy) = self.command.as_deref()
+            && !legacy.trim().is_empty()
+        {
+            return legacy.to_string();
+        }
+        kind.default_command().to_string()
+    }
+
+    /// Which agent the `+` starts. An unrecognised name falls back to claude,
+    /// having been complained about at load time.
+    pub fn default_kind(&self) -> Kind {
+        Kind::parse(&self.default_agent).unwrap_or_default()
+    }
+
     /// The parsing half, split out so it can be tested without a filesystem.
     pub fn parse(text: &str, whence: &str) -> Loaded {
         match toml::from_str::<Config>(text) {
-            Ok(config) => Loaded {
-                config,
-                problem: None,
-            },
+            Ok(config) => {
+                // A file that parses can still say something worth answering.
+                // Both notes below describe a setting that *works* but is not
+                // the one the writer probably wanted, which is precisely the
+                // case a silent app turns into an evening of confusion.
+                let mut notes = Vec::new();
+                if config.command.is_some() {
+                    notes.push(
+                        "`command` is deprecated. Write it as:\n\n    \
+                         [agent.claude]\n    command = \"…\"\n\nIt still works, and \
+                         still means claude's command. To run codex instead, set \
+                         `default_agent = \"codex\"` - `command = \"codex\"` never \
+                         worked, because claude's own options were being appended \
+                         to whatever it named."
+                            .to_string(),
+                    );
+                }
+                if Kind::parse(&config.default_agent).is_none() {
+                    notes.push(format!(
+                        "`default_agent = \"{}\"` isn't an agent this app knows \
+                         ({}), so claude is in use.",
+                        config.default_agent,
+                        Kind::ALL
+                            .iter()
+                            .map(|k| k.label())
+                            .collect::<Vec<_>>()
+                            .join(" or "),
+                    ));
+                }
+                let problem =
+                    (!notes.is_empty()).then(|| format!("{whence}:\n\n{}", notes.join("\n\n")));
+                Loaded { config, problem }
+            }
             Err(e) => Loaded {
                 config: Config::default(),
                 // `to_string` on a toml error carries the line and column, which
@@ -215,8 +308,8 @@ mod tests {
         assert!(loaded.problem.is_none());
         assert_eq!(loaded.config.agents, 3);
         assert_eq!(
-            loaded.config.command,
-            Config::default().command,
+            loaded.config.command_for(Kind::Claude),
+            Config::default().command_for(Kind::Claude),
             "a key you didn't write keeps its default",
         );
     }
@@ -244,10 +337,92 @@ mod tests {
         assert!(problem.contains("agent"), "names the key: {problem}");
     }
 
+    /// Every config file in the wild has `command` in it, and
+    /// `deny_unknown_fields` turns a key we stopped honouring into an error
+    /// dialog on somebody's next update. So it keeps working, and says what to
+    /// write instead.
+    #[test]
+    fn the_old_command_key_still_names_claudes_command() {
+        let loaded = Config::parse("command = \"claude --model opus\"\n", "config.toml");
+        assert_eq!(
+            loaded.config.command_for(Kind::Claude),
+            "claude --model opus",
+        );
+        let problem = loaded.problem.expect("a deprecated key is mentioned");
+        assert!(problem.contains("command"), "names the key: {problem}");
+        assert!(
+            problem.contains("agent.claude"),
+            "says what to write instead: {problem}",
+        );
+    }
+
+    /// The lossy case, and the reason the deprecation text has to be specific:
+    /// this person was trying to run codex, it has never once worked, and
+    /// mapping them silently to claude would be the third confusing thing to
+    /// happen to them.
+    #[test]
+    fn an_old_command_naming_codex_is_called_out() {
+        let loaded = Config::parse("command = \"codex\"\n", "config.toml");
+        let problem = loaded.problem.expect("this case is explained");
+        assert!(
+            problem.contains("default_agent"),
+            "points at the key that actually switches agent: {problem}",
+        );
+    }
+
+    #[test]
+    fn each_agent_can_be_given_its_own_command() {
+        let loaded = Config::parse(
+            "default_agent = \"codex\"\n\
+             [agent.claude]\ncommand = \"claude --model opus\"\n\
+             [agent.codex]\ncommand = \"codex --full-auto\"\n",
+            "config.toml",
+        );
+        assert!(loaded.problem.is_none(), "{:?}", loaded.problem);
+        assert_eq!(loaded.config.default_kind(), Kind::Codex);
+        assert_eq!(loaded.config.command_for(Kind::Claude), "claude --model opus");
+        assert_eq!(loaded.config.command_for(Kind::Codex), "codex --full-auto");
+    }
+
+    #[test]
+    fn an_unnamed_agent_falls_back_to_its_own_binary() {
+        let loaded = Config::parse("", "config.toml");
+        assert_eq!(loaded.config.command_for(Kind::Claude), "claude");
+        assert_eq!(loaded.config.command_for(Kind::Codex), "codex");
+        assert_eq!(loaded.config.default_kind(), Kind::Claude);
+    }
+
+    /// The deprecated key names claude's command and only claude's. A codex
+    /// pane inheriting `claude --model opus` would be a pane that cannot start.
+    #[test]
+    fn the_deprecated_key_does_not_leak_into_the_other_agent() {
+        let loaded = Config::parse("command = \"claude --model opus\"\n", "config.toml");
+        assert_eq!(loaded.config.command_for(Kind::Codex), "codex");
+    }
+
+    /// Typing `default_agent = "opus"` and getting claude silently is how a
+    /// config file earns its reputation for doing nothing.
+    #[test]
+    fn an_unknown_default_agent_is_reported() {
+        let loaded = Config::parse("default_agent = \"gemini\"\n", "config.toml");
+        let problem = loaded.problem.expect("an unknown agent is reported");
+        assert!(problem.contains("gemini"), "names it: {problem}");
+        assert_eq!(loaded.config.default_kind(), Kind::Claude, "and falls back");
+    }
+
     #[test]
     fn a_config_round_trips() {
         let config = Config {
-            command: "claude --model opus".into(),
+            command: None,
+            default_agent: "codex".into(),
+            agent: AgentTable {
+                claude: AgentConfig {
+                    command: "claude --model opus".into(),
+                },
+                codex: AgentConfig {
+                    command: "codex".into(),
+                },
+            },
             agents: 2,
             restore_agents: true,
             gap: 8,
