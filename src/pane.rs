@@ -8,6 +8,7 @@ use gtk4::prelude::*;
 use gtk4::{gdk, Frame};
 use vte4::{prelude::*, PtyFlags, Terminal};
 
+use crate::agent::Kind;
 use crate::model::PaneState;
 use crate::palette;
 
@@ -129,6 +130,30 @@ struct Head {
     /// running for ten minutes is worse than saying nothing, so those panes
     /// keep naming their folder, which is at least true.
     reports: bool,
+    /// Which agent is running here, for the strip to name. `None` for a pane
+    /// running a command rather than an agent - the update script's - which has
+    /// no agent to name.
+    kind: Option<Kind>,
+}
+
+/// The strip's text, given what it would otherwise have said and which agent is
+/// running.
+///
+/// Split out of `refresh` because it is the part with a decision in it, and a
+/// `gtk4::Label` is not something a unit test should have to own.
+///
+/// The agent's name rides on the end rather than replacing anything. What the
+/// strip already said - the state, or the folder once the agent has wandered
+/// out of it - is the more urgent fact and stays where the eye already looks
+/// for it. The name is only worth saying at all because a project can now hold
+/// two kinds of tile, and two identical strips over two different agents is the
+/// one thing this feature must not produce.
+fn head_text_for(base: &str, kind: Option<Kind>) -> String {
+    match kind {
+        Some(kind) if !base.is_empty() => format!("{base} \u{b7} {}", kind.label()),
+        Some(kind) => kind.label().to_string(),
+        None => base.to_string(),
+    }
 }
 
 impl Head {
@@ -141,14 +166,14 @@ impl Head {
     /// when the agent has moved somewhere else, and the rest of the time the
     /// strip has something better to say: what the agent is actually doing.
     fn refresh(&self) {
-        let text = match self.cwd.borrow().as_deref() {
+        let base = match self.cwd.borrow().as_deref() {
             // It has moved out of the project's folder, which is the one case
             // where naming a folder tells you something you didn't know.
             Some(cwd) if cwd != self.root.borrow().as_str() => cwd.to_string(),
             _ if self.reports => status_words(&self.state.borrow()),
             _ => self.root.borrow().clone(),
         };
-        self.label.set_label(&text);
+        self.label.set_label(&head_text_for(&base, self.kind));
     }
 }
 
@@ -446,6 +471,10 @@ pub struct Pane {
     /// every pane after any pane operation, and all but one of those panes
     /// were already in the state it's about to set them to.
     focused: Cell<bool>,
+    /// Which agent this pane runs, or `None` for a pane running a command or
+    /// holding a file. Read when a session is saved, so a project reopens with
+    /// the agents it had rather than with claudes.
+    kind: Option<Kind>,
 }
 
 /// What fills the frame under the head strip.
@@ -607,6 +636,9 @@ impl Pane {
             cwd: RefCell::new(None),
             state: RefCell::new(PaneState::Idle),
             reports: false,
+            // An editor is deliberately not an agent, so it names none. It
+            // shows the file's name, which is the thing about it worth reading.
+            kind: None,
         });
         head_state.refresh();
 
@@ -641,7 +673,14 @@ impl Pane {
             head: head_state,
             pid: Rc::new(Cell::new(None)),
             focused: Cell::new(false),
+            kind: None,
         })
+    }
+
+    /// Which agent this pane runs, or `None` for a pane running a command or
+    /// holding a file.
+    pub fn kind(&self) -> Option<Kind> {
+        self.kind
     }
 
     /// The terminal, for the operations that only mean anything to one -
@@ -729,25 +768,49 @@ impl Pane {
         }
     }
 
-    /// The usual pane: `claude`, running in `cwd` - with `BELL_HOOK` installed,
-    /// so a finished or waiting agent lights up its group's sidebar row.
+    /// The usual pane: an agent of `kind`, running in `cwd` - with `BELL_HOOK`
+    /// installed, so a finished or waiting agent lights up its group's sidebar
+    /// row.
     ///
-    /// The hooks arrive via `--settings`, which layers over the user's own
-    /// settings files rather than replacing them, and only for panes this app
-    /// launches: nothing in ~/.claude is written to, and their claude in any
-    /// other terminal is untouched. If the settings file can't be written for
-    /// any reason, the pane still gets a perfectly good claude - just a silent
-    /// one, which is exactly what it was before this existed.
-    pub fn new(cwd: &str) -> Self {
-        let configured = crate::config::get().command_for(crate::agent::Kind::Claude);
-        let command = match claude_settings_file() {
-            Some(path) => format!(
-                "{configured} --settings {}",
-                crate::update::sh_quote(&path)
-            ),
-            None => configured,
+    /// How the hooks get in front of the agent is the whole of what differs
+    /// between the two, and the whole reason `agent` exists. Claude takes a
+    /// `--settings` file, which layers over the user's own settings rather than
+    /// replacing them. Codex takes no such flag, so it is handed a `CODEX_HOME`
+    /// built for the purpose instead. Both routes keep the same promise:
+    /// nothing in `~/.claude` or `~/.codex` is written to, and the user's own
+    /// agents in any other terminal are untouched.
+    ///
+    /// Both are best-effort in the same way, too. If the hooks can't be
+    /// installed for any reason the pane still gets a perfectly good agent -
+    /// just a silent one, which is exactly what every pane was before any of
+    /// this existed.
+    pub fn new(cwd: &str, kind: Kind) -> Self {
+        let configured = crate::config::get().command_for(kind);
+        let (command, env) = match kind {
+            Kind::Claude => match claude_settings_file() {
+                Some(path) => (
+                    format!("{configured} --settings {}", crate::update::sh_quote(&path)),
+                    Vec::new(),
+                ),
+                None => (configured, Vec::new()),
+            },
+            // Codex takes no flag for this. Its hooks come from its home, so
+            // the home is what gets pointed somewhere else - see `codex_home`.
+            //
+            // In the environment rather than prefixed onto the command line:
+            // it is per-pane state, it belongs beside the per-pane state
+            // already going through VTE, and putting it there dodges a quoting
+            // layer that has cost this file real bugs before.
+            Kind::Codex => {
+                let env = crate::update::exe()
+                    .ok()
+                    .and_then(|bin| crate::codex_home::prepare(&bin, BELL_HOOK))
+                    .map(|home| vec![format!("CODEX_HOME={}", home.display())])
+                    .unwrap_or_default();
+                (configured, env)
+            }
         };
-        Self::spawn(cwd, &command, true)
+        Self::spawn(cwd, &command, true, Some(kind), env)
     }
 
     /// A pane running `command` instead of `claude` (via the same login
@@ -755,13 +818,22 @@ impl Pane {
     /// button, which runs the pull-and-rebuild script in a pane so its
     /// output is visible rather than hidden behind a spinner.
     pub fn command(cwd: &str, command: &str) -> Self {
-        Self::spawn(cwd, command, false)
+        Self::spawn(cwd, command, false, None, Vec::new())
     }
 
     /// The shared body of the two above. `reports` says whether an agent's
     /// hooks will ever speak for this pane, which is what its head strip is
-    /// allowed to claim - see `Head::reports`.
-    fn spawn(cwd: &str, command: &str, reports: bool) -> Self {
+    /// allowed to claim - see `Head::reports`. `kind` is the agent the strip
+    /// names, and `extra_env` whatever else that agent needs in its
+    /// environment to be reachable - codex's `CODEX_HOME`, and nothing else so
+    /// far.
+    fn spawn(
+        cwd: &str,
+        command: &str,
+        reports: bool,
+        kind: Option<Kind>,
+        extra_env: Vec<String>,
+    ) -> Self {
         let (frame, terminal, head, status, close_button) = Self::bare();
         let pid = Rc::new(Cell::new(None));
         let id = next_pane_id();
@@ -783,6 +855,7 @@ impl Pane {
             cwd: RefCell::new(None),
             state: RefCell::new(PaneState::Starting),
             reports,
+            kind,
         });
         head_state.refresh();
 
@@ -817,6 +890,10 @@ impl Pane {
             env.push(format!("{}={socket}", crate::ipc::ENV_SOCKET));
             env.push(format!("{}={bin}", crate::ipc::ENV_BIN));
         }
+        // Whatever this particular agent needs beyond that. Added after the
+        // three above rather than before, purely so a bug in one is never a
+        // bug in the others.
+        env.extend(extra_env);
         let envv: Vec<&str> = env.iter().map(String::as_str).collect();
 
         // A folder that isn't there any more, which a saved session makes ordinary:
@@ -907,6 +984,7 @@ impl Pane {
             head: head_state,
             pid,
             focused: Cell::new(false),
+            kind,
         };
 
         // A pane with no folder to run in has already been told so above, in
@@ -1019,6 +1097,53 @@ impl Pane {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod head_tests {
+    use super::*;
+
+    /// The head strip is the only place a mixed project says which tile is
+    /// which, and it has to say it without losing what it already said.
+    #[test]
+    fn a_head_strip_names_its_agent_alongside_what_it_already_said() {
+        assert_eq!(
+            head_text_for("working", Some(Kind::Codex)),
+            "working \u{b7} codex",
+        );
+        assert_eq!(
+            head_text_for("agenttilecli", Some(Kind::Claude)),
+            "agenttilecli \u{b7} claude",
+        );
+    }
+
+    /// The state is the more urgent fact and keeps the front of the strip,
+    /// where the eye already looks for it.
+    #[test]
+    fn the_state_comes_first_and_the_agent_after() {
+        let text = head_text_for(&status_words(&PaneState::Waiting), Some(Kind::Codex));
+        assert!(
+            text.starts_with("asking permission"),
+            "the agent's name displaced the thing worth reading: {text}",
+        );
+        assert!(text.ends_with("codex"), "{text}");
+    }
+
+    /// A pane with no agent - the update script's, and the editor's - has
+    /// nothing to name, and a trailing separator would promise a word that
+    /// never comes.
+    #[test]
+    fn a_pane_with_no_agent_says_only_what_it_said_before() {
+        assert_eq!(head_text_for("building", None), "building");
+        assert_eq!(head_text_for("", None), "");
+    }
+
+    /// Every pane has *something* to say before its first hook arrives, and a
+    /// strip that opened with a bare separator would look like a bug.
+    #[test]
+    fn an_agent_with_nothing_else_to_say_still_names_itself() {
+        assert_eq!(head_text_for("", Some(Kind::Claude)), "claude");
     }
 }
 

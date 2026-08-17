@@ -18,6 +18,7 @@ use gtk4::{gdk, GestureClick, PropagationPhase};
 use vte4::prelude::*;
 
 use super::Tiler;
+use crate::agent::Kind;
 use crate::hooks;
 use crate::ipc;
 use crate::model::PaneState;
@@ -169,12 +170,32 @@ impl Tiler {
     /// creating a whole new project (see `crate::app::App::new_project`)
     /// rather than mixing an unrelated project's panes into this grid.
     pub fn spawn_pane_here(&self) {
-        let cwd = self.imp().cwd.borrow().clone();
-        self.spawn_pane_in(&cwd);
+        self.spawn_pane_of(self.default_kind());
     }
 
-    fn spawn_pane_in(&self, cwd: &str) {
-        self.attach_process_pane(Pane::new(cwd));
+    /// Which agent the bare `+` starts in this group.
+    pub fn default_kind(&self) -> Kind {
+        self.imp().default_kind.get()
+    }
+
+    pub fn set_default_kind(&self, kind: Kind) {
+        self.imp().default_kind.set(kind);
+    }
+
+    /// Spawns an agent of `kind` in this group, and remembers it.
+    ///
+    /// Remembering is the point of the menu having been used at all: choosing
+    /// codex once is a statement about this project, not about this click, and
+    /// making someone reach past the `+` for every subsequent agent would be a
+    /// worse answer than the dialog this app already refuses to show.
+    pub fn spawn_pane_of(&self, kind: Kind) {
+        self.set_default_kind(kind);
+        let cwd = self.imp().cwd.borrow().clone();
+        self.spawn_pane_in(&cwd, kind);
+    }
+
+    fn spawn_pane_in(&self, cwd: &str, kind: Kind) {
+        self.attach_process_pane(Pane::new(cwd, kind));
     }
 
     /// Spawns a pane running `command` rather than `claude` - the update

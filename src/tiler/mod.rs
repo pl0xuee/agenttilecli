@@ -14,6 +14,7 @@ mod resize;
 pub(crate) use manager::{GridDragState, Handle, TilerLayout};
 pub(crate) use panes::Tally;
 
+use crate::agent::Kind;
 use crate::layout::Mode;
 use crate::pane::Pane;
 
@@ -65,6 +66,14 @@ mod imp {
         pub panes: RefCell<Vec<Rc<Pane>>>,
         pub focus: Cell<usize>,
         pub cwd: RefCell<String>,
+        /// Which agent the bare `+` starts in this group.
+        ///
+        /// Per group rather than per app because it is a fact about a project:
+        /// the folder you run codex in is not usually the folder you run claude
+        /// in. Seeded from the config's `default_agent` and then learned from
+        /// whatever you last chose here - the same way the *number* of agents a
+        /// new project opens with is learned rather than asked for.
+        pub default_kind: Cell<Kind>,
         pub title_cb: TextCallback,
         /// Invoked when a pane in this group wants the user - see
         /// `Tiler::set_attention_callback`.
@@ -330,6 +339,7 @@ impl Tiler {
     pub fn new(cwd: String) -> Self {
         let this: Self = glib::Object::new();
         *this.imp().cwd.borrow_mut() = cwd;
+        this.imp().default_kind.set(crate::config::get().default_kind());
         this.imp().font_scale.set(1.0);
         this.setup_resize();
         this
