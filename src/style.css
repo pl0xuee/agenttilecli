@@ -585,6 +585,32 @@ menubutton.header-action > button:checked:hover {
   box-shadow: inset 0 0 0 1px alpha(@filament, 0.55);
 }
 
+/* ── The spawn split ───────────────────────────────────────────────────────
+   The `+` with a chevron beside it for choosing which agent, once there was
+   more than one to choose.
+
+   Deliberately *not* drawn as a joined pill with a divider down the middle,
+   which is the conventional split-button shape. Every other control in this
+   bar is a bare glyph on a circle, and a pill would be the only object in the
+   strip with an outline - drawing more attention to "which agent" than to
+   spawning one, when the whole point of the split is that the common case
+   keeps its single click.
+
+   So it stays two discs, and the second is smaller and quieter than the
+   first: the `+` keeps its filament ring and its @text glyph, the chevron sits
+   at @muted like the rest of the row until you approach it. The tightened gap
+   is what says they are one control rather than two neighbours. */
+.header-split {
+  /* Closer than the bar's own spacing, so the pair reads as one object. */
+  margin-right: -0.15em;
+}
+
+.header-split-arrow > button {
+  min-width: 1.15em;
+  /* No ring: one filament outline per control, and it belongs to the `+`. */
+  box-shadow: none;
+}
+
 /* ── The header's title block ──────────────────────────────────────────────
    Where you are, and what is happening there - see `HeaderTitle`.
 

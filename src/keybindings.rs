@@ -143,6 +143,20 @@ pub const SECTIONS: &[Section] = &[
 /// shell, claude or readline inside a pane wants to do with a bare key, and
 /// (unlike plain Super+key) don't fight the desktop's own global shortcuts -
 /// KDE's Super+L, for one.
+/// The two agent-specific spawns, as free functions because `Action::Tiler`
+/// holds a plain fn pointer and a closure carrying the `Kind` is not one.
+///
+/// The generic "start another agent" above stays, and stays first: it is the
+/// one most people want, and it starts whichever agent this project has been
+/// using. These two are for saying otherwise.
+fn spawn_claude(tiler: &Tiler) {
+    tiler.spawn_pane_of(crate::agent::Kind::Claude);
+}
+
+fn spawn_codex(tiler: &Tiler) {
+    tiler.spawn_pane_of(crate::agent::Kind::Codex);
+}
+
 pub const COMMANDS: &[Command] = &[
     // ── Projects ──────────────────────────────────────────────────────────
     Command {
@@ -227,6 +241,20 @@ pub const COMMANDS: &[Command] = &[
         accelerator: "",
         shift: Shift::Any,
         run: Some(Action::Tiler(Tiler::spawn_pane_here)),
+    },
+    Command {
+        section: "Panes",
+        title: "Start a claude agent in this project",
+        accelerator: "",
+        shift: Shift::Any,
+        run: Some(Action::Tiler(spawn_claude)),
+    },
+    Command {
+        section: "Panes",
+        title: "Start a codex agent in this project",
+        accelerator: "",
+        shift: Shift::Any,
+        run: Some(Action::Tiler(spawn_codex)),
     },
     // ── Layout ────────────────────────────────────────────────────────────
     Command {

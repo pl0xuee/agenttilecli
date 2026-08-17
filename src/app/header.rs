@@ -18,6 +18,7 @@ use adw::prelude::*;
 use gtk4::gio;
 
 use super::{App, Mode};
+use crate::agent::Kind;
 use crate::update;
 
 /// The layout modes the header bar offers, with the icon and tooltip for each.
@@ -318,6 +319,34 @@ impl App {
             }
         });
 
+        // A split rather than a menu on the `+` itself. Spawning an agent is
+        // the action this window exists for and it keeps its single click; the
+        // arrow is for the other answer, which is rarer by construction, since
+        // a project tends to be a project you run one kind of agent in. The
+        // group remembers what the arrow was last used for, so it is rarer
+        // still after the first time.
+        let agent_menu = gio::Menu::new();
+        for kind in Kind::ALL {
+            agent_menu.append(
+                Some(&format!("Spawn {}", kind.label())),
+                Some(&format!("win.spawn-{}", kind.label())),
+            );
+        }
+        let choose_agent = gtk4::MenuButton::builder()
+            .can_focus(false)
+            .valign(gtk4::Align::Center)
+            .css_classes(["header-action", "header-split-arrow"])
+            .menu_model(&agent_menu)
+            .tooltip_text("Choose which agent to spawn")
+            .build();
+
+        let spawn_split = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .css_classes(["header-split"])
+            .build();
+        spawn_split.append(&new_agent);
+        spawn_split.append(&choose_agent);
+
         // Broadcast is a `ToggleButton` rather than a plain one because it is a
         // *mode*, not an action, and a mode has to show whether it is on. Typing
         // one line into four agents is what it is for and also what makes it
@@ -344,7 +373,7 @@ impl App {
         *self.0.broadcast_button.borrow_mut() = Some(broadcast.clone());
 
         header.pack_end(&menu_button);
-        header.pack_end(&new_agent);
+        header.pack_end(&spawn_split);
         header.pack_end(&broadcast);
         // The layout switcher moves to this end, away from the title.
         //
@@ -662,6 +691,20 @@ impl App {
         let about = gio::SimpleAction::new("about", None);
         about.connect_activate(move |_, _| this.show_about());
         self.0.window.add_action(&about);
+
+        // One per agent, named after it: the split button's menu, the command
+        // palette and any future keybinding all want the same verb, and an
+        // action is the one place GTK lets three callers share one.
+        for kind in Kind::ALL {
+            let this = self.clone();
+            let spawn = gio::SimpleAction::new(&format!("spawn-{}", kind.label()), None);
+            spawn.connect_activate(move |_, _| {
+                if let Some(tiler) = this.active_tiler() {
+                    tiler.spawn_pane_of(kind);
+                }
+            });
+            self.0.window.add_action(&spawn);
+        }
     }
 
     /// Says that the config file could not be used, and what was wrong with it.
