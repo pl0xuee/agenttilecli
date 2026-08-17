@@ -44,7 +44,13 @@ EOF
     exit 1
 fi
 
-sandbox="${TMPDIR:-/tmp}/agenttilecli-dev/$branch"
+# Deliberately not under /tmp. Codex refuses to create its PATH helper binaries
+# when CODEX_HOME sits in a temporary directory ("Refusing to create helper
+# binaries under temporary dir"), and the private CODEX_HOME this app builds
+# lives under XDG_CACHE_HOME - so a sandbox in /tmp would make codex panes
+# behave differently under test than they ever do in production, which is the
+# one thing a test environment must not do.
+sandbox="$HOME/.cache/agenttilecli-dev/$branch"
 export XDG_CONFIG_HOME="$sandbox/config"
 export XDG_CACHE_HOME="$sandbox/cache"
 export XDG_STATE_HOME="$sandbox/state"

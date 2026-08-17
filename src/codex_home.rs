@@ -281,6 +281,43 @@ mod tests {
         assert!(!ours["hooks"]["Stop"].is_null());
     }
 
+    /// `prepare` is the half that reads the environment, and the half a unit
+    /// test is least likely to cover - so it covers it. Both variables are read
+    /// at call time, which is what makes this testable at all.
+    ///
+    /// Serialised against the other env-reading tests by running in one test:
+    /// `set_var` is process-wide and cargo runs tests in threads.
+    #[test]
+    fn prepare_builds_under_the_cache_dir_it_is_pointed_at() {
+        let base = std::env::temp_dir().join(format!("atc-prepare-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let real = base.join("codex");
+        fs::create_dir_all(&real).unwrap();
+        fs::write(real.join("auth.json"), "{}").unwrap();
+
+        // SAFETY: single-threaded within this test, and both variables are read
+        // by `prepare` on the line below rather than cached anywhere.
+        unsafe {
+            std::env::set_var("XDG_CACHE_HOME", base.join("cache"));
+            std::env::set_var("CODEX_HOME", &real);
+        }
+
+        let home = prepare("/usr/bin/agenttilecli", "true").expect("prepares");
+        assert_eq!(home, base.join("cache").join("agenttilecli").join("codex-home"));
+        assert!(home.join("hooks.json").is_file(), "hooks were installed");
+        assert!(
+            fs::symlink_metadata(home.join("auth.json"))
+                .unwrap()
+                .is_symlink(),
+            "and the real home was mirrored",
+        );
+
+        unsafe {
+            std::env::remove_var("XDG_CACHE_HOME");
+            std::env::remove_var("CODEX_HOME");
+        }
+    }
+
     /// The rebuild-every-launch rule, which is what stops a hook written by an
     /// older build outliving the version that wrote it.
     #[test]
