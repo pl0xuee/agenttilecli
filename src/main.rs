@@ -2,6 +2,7 @@ mod agent;
 mod app;
 mod appearance;
 mod clipboard;
+mod codex_home;
 mod commands;
 mod config;
 mod editor;
