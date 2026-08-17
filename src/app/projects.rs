@@ -17,6 +17,7 @@ use adw::prelude::*;
 use gtk4::gio;
 
 use super::{ATTENTION_CLASS, App, ProjectView};
+use crate::agent::Kind;
 use crate::model::{ProjectId, Removal};
 use crate::pane::folder_name;
 use crate::tiler::Tiler;
@@ -147,10 +148,12 @@ impl App {
         tiler
     }
 
-    /// Asks (via a folder picker) which project to open, then creates it,
-    /// switches to it, and starts however many agents you last worked with.
-    /// Cancelling the picker creates nothing at all, rather than falling back to
-    /// a project nobody asked for.
+    /// Asks (via a folder picker, then an agent picker) what to open, then
+    /// creates it, switches to it, and starts however many agents you last
+    /// worked with.
+    ///
+    /// Cancelling either dialog creates nothing at all, rather than falling
+    /// back to a project nobody asked for.
     pub fn new_project(&self) {
         let dialog = gtk4::FileDialog::builder()
             .title("Open project as a new group")
@@ -167,23 +170,83 @@ impl App {
             };
             let dir = dir.to_string_lossy().into_owned();
             this.0.last_dir.replace(dir.clone());
-            this.open_project(dir);
+            this.ask_which_agent(dir);
         });
     }
 
-    /// Opens `dir` as a new group and starts it with as many agents as the last
-    /// project you worked in ended up running.
+    /// The second half of opening a project: which agent it is for.
     ///
-    /// This replaces a modal asking "how many agents?" with buttons for 1-4. The
-    /// question was asked every single time a project was opened, and answered
-    /// the same way almost every time - which is a dialog earning its place
-    /// once and then costing a click forever after. The count you actually use
-    /// is a habit, so it's remembered rather than re-asked, and a project that
-    /// wants a different number is one spawn away (the + button, or
-    /// `Super+Alt+Return`'s sibling `spawn_pane_here`).
-    pub(super) fn open_project(&self, dir: String) {
+    /// A dialog, which this app spent a release getting rid of - the old "how
+    /// many agents?" modal was asked every time and answered the same way
+    /// almost every time, and that is a dialog costing a click forever in
+    /// exchange for earning its place once. What makes this one different is
+    /// that its answer genuinely varies: a project is usually a project you
+    /// work on with one agent or the other, and which one is not something the
+    /// app can infer from a folder.
+    ///
+    /// It is still built to cost as little as possible. The default response is
+    /// whichever agent you chose last, so Enter takes the common path, Escape
+    /// cancels the whole thing, and anyone who always answers the same way is
+    /// paying one keystroke rather than one decision.
+    ///
+    /// Built from `Kind::ALL` rather than from two hardcoded buttons, so an
+    /// agent added to `agent` turns up here rather than being quietly
+    /// unreachable from the one screen that opens projects.
+    fn ask_which_agent(&self, dir: String) {
+        let ask = adw::AlertDialog::new(
+            Some("Which agent?"),
+            Some(&format!(
+                "{} will open with it.",
+                folder_name(&dir)
+            )),
+        );
+
+        let responses: Vec<(String, String)> = Kind::ALL
+            .iter()
+            .map(|kind| (kind.label().to_string(), kind.label().to_string()))
+            .collect();
+        for (id, label) in &responses {
+            ask.add_response(id, label);
+        }
+        ask.add_response("cancel", "Cancel");
+        ask.set_close_response("cancel");
+
+        let remembered = self.0.last_agent_kind.get();
+        ask.set_response_appearance(remembered.label(), adw::ResponseAppearance::Suggested);
+        ask.set_default_response(Some(remembered.label()));
+
+        let this = self.clone();
+        ask.connect_response(None, move |_, response| {
+            // Cancel, Escape, and anything unrecognised all mean the same
+            // thing: no project. Falling back to a default here would create a
+            // group out of a dialog somebody dismissed.
+            let Some(kind) = Kind::parse(response) else {
+                return;
+            };
+            this.0.last_agent_kind.set(kind);
+            this.open_project(dir.clone(), kind);
+        });
+        ask.present(Some(&self.0.window));
+    }
+
+    /// Opens `dir` as a new group running `kind`, and starts it with as many
+    /// agents as the last project you worked in ended up running.
+    ///
+    /// *How many* is remembered rather than asked, and that half is unchanged:
+    /// this replaced a modal offering buttons for 1-4, asked every single time
+    /// a project was opened and answered the same way almost every time. The
+    /// count you use is a habit, so it is learned, and a project that wants a
+    /// different number is one spawn away (the + button, or `Super+Alt+Return`'s
+    /// sibling `spawn_pane_here`).
+    ///
+    /// *Which agent* is asked, because that one is not a habit - see
+    /// `ask_which_agent`. Setting it as the group's default before spawning is
+    /// what makes the answer stick: every agent this opens with is that kind,
+    /// and so is every later one the group's own + starts.
+    pub(super) fn open_project(&self, dir: String, kind: Kind) {
         let count = self.0.last_agent_count.get().max(1);
         let tiler = self.add_project(&dir, folder_name(&dir), "folder-symbolic");
+        tiler.set_default_kind(kind);
         for _ in 0..count {
             tiler.spawn_pane_here();
         }

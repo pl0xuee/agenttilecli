@@ -21,10 +21,14 @@ you want to nudge it.
   Drag a row to reorder it (or `Super+Alt+{` / `}`), and drag the seam on the
   drawer's right edge to make it wider or narrower. The dashed **+** at the
   rail's foot (or `Super+Alt+Return`, or the drawer's "Open a project…" row)
-  opens a new project as a new group via a native folder picker, and starts
-  it with as many agents as the project you were last working in had running
-  — pick the folder and it opens, with no second dialog asking a question you
-  answer the same way every time. On a narrow window the rail stays put and
+  opens a new project as a new group via a native folder picker, then asks
+  which agent it's for, and starts it with as many agents as the project you
+  were last working in had running. *How many* is never asked — that one you
+  do answer the same way every time, so it's learned rather than re-asked.
+  *Which agent* is asked, because with two of them it stopped being the same
+  answer every time and a folder can't tell the app which you meant; the
+  dialog opens on whichever you picked last, so Enter takes the common path
+  and Escape abandons the whole thing. On a narrow window the rail stays put and
   the drawer floats over the panes as a near-opaque sheet instead of
   squeezing them.
 - **Every project's files, in the rack** — a chevron beside a project's icon

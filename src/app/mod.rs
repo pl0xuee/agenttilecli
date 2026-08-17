@@ -243,6 +243,14 @@ struct Inner {
     /// zero - "I closed everything" is not a preference for starting nothing.
     /// Phase 3's config file is where this stops being per-run memory.
     last_agent_count: Cell<usize>,
+    /// Which agent a newly-opened project is offered first.
+    ///
+    /// Asked rather than learned - unlike the count above - because with two
+    /// agents it stopped being a question people answer the same way every
+    /// time, which was the whole argument for not asking. What is remembered is
+    /// only the *default* the dialog opens on, so answering it is a keystroke
+    /// rather than a decision for anyone who does always answer the same way.
+    last_agent_kind: Cell<crate::agent::Kind>,
     font_scale: Cell<f64>,
     /// Whether a session save is already waiting to happen, so a burst of
     /// changes - dragging a seam produces one per motion event - costs one
@@ -392,6 +400,7 @@ impl App {
             sidebar_toggle: sidebar_toggle.clone(),
             last_dir: RefCell::new(cwd.to_string()),
             last_agent_count: Cell::new(crate::config::get().agents.max(1)),
+            last_agent_kind: Cell::new(crate::config::get().default_kind()),
             font_scale: Cell::new(1.0),
             save_queued: Cell::new(false),
             socket: RefCell::new(None),

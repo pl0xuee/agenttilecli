@@ -745,6 +745,29 @@ mod tests {
     use super::*;
     use crate::testing::gtk_test;
 
+    /// A new group starts on the config's agent, and takes whatever it is given
+    /// instead - which is what `App::open_project` relies on to make the answer
+    /// to "which agent?" stick. Without it, a project opened as a codex project
+    /// would spawn codexes and then hand its `+` back to claude.
+    #[test]
+    fn a_group_opens_on_the_configured_agent_and_keeps_what_it_is_given() {
+        gtk_test(|| {
+            let group = Tiler::new("/tmp".to_string());
+            assert_eq!(
+                group.default_kind(),
+                crate::config::get().default_kind(),
+                "a group with nothing said about it follows the config",
+            );
+
+            group.set_default_kind(Kind::Codex);
+            assert_eq!(
+                group.default_kind(),
+                Kind::Codex,
+                "and the + in that group starts codexes from then on",
+            );
+        });
+    }
+
     /// `remove_pane` forces a display round trip on its way to unparenting a
     /// pane - see `settle_input_method` for what that is buying - and it asks
     /// the departing frame itself for the display to sync. So the round trip has
