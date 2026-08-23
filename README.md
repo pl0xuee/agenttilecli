@@ -196,6 +196,20 @@ you want to nudge it.
   project rack are translucent to your desktop; the terminals are opaque, so agent
   output never competes with a wallpaper. Take the terminals to glass as well if
   you want that — `pane_opacity`, or the slider in Preferences.
+- **It wears your Omarchy theme, and so does Claude Code** — on an
+  [Omarchy](https://omarchy.org/) desktop the whole window is painted from
+  whatever `omarchy theme set` last chose: the floor, the rack, the panes, the
+  focus lamp and the sixteen colours inside every terminal, read from that
+  theme's own `colors.toml`. Claude Code follows too — each pane launches it
+  with the `dark-ansi` (or `light-ansi`) theme, which renders it from the
+  terminal's palette instead of its own, so a theme change reaches inside a
+  pane rather than stopping at its border. Nothing in `~/.claude` is written
+  to get there; the theme rides in the same per-pane `--settings` file the
+  hooks already use, so claude in any other terminal keeps whatever theme you
+  set it. Light themes are honoured as light, not forced dark. Change the
+  theme while the app is running and it repaints in place. No Omarchy, no
+  change: the app's own gunmetal palette is still there, and still the
+  fallback.
 
 ## Configuration
 
