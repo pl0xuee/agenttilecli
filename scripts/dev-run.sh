@@ -27,13 +27,36 @@
 #      - $XDG_STATE_HOME/agenttilecli/session.json is the live app's project
 #        list, overwritten when an instance exits.
 #
+#   3. The working directory, which is this app's *first project* - and
+#      therefore the directory its agents get spawned into.
+#
+#      Left alone, that is the checkout: the script has to cd to the repo root
+#      to build, `cargo run` hands the binary the cwd it inherited, and
+#      `build_window` opens its first project there. So a dev build launched to
+#      test a change came up holding a claude with write access to the working
+#      tree that change was being written in - a second agent editing the branch
+#      under the person testing it. It happened on 2026-08-23, and it is the
+#      kind of thing that is obvious only afterwards.
+#
+#      So the build and the run are separated: --manifest-path points cargo at
+#      the repo (keeping one shared target/ and incremental builds), while the
+#      process cwd is a scratch project inside the sandbox. Agents spawned in a
+#      dev window work there and cannot reach the checkout.
+#
 # HOME is deliberately left alone: ~/.claude and ~/.codex hold the agents' own
 # credentials, and a dev instance that cannot log its agents in cannot be used
-# to test agents.
+# to test agents. It is also where Omarchy keeps the current theme
+# ($HOME/.local/state/omarchy/current, hardcoded there rather than under
+# XDG_STATE_HOME - see src/omarchy.rs), so a dev build follows the real
+# desktop's theme despite every XDG_* variable above being redirected. That is
+# wanted: testing theming against a state directory with no theme in it tests
+# nothing.
 
 set -euo pipefail
 
-cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.."
+repo="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.."
+repo="$(cd "$repo" && pwd)"
+cd "$repo"
 
 branch="$(git rev-parse --abbrev-ref HEAD)"
 if [ "$branch" = "master" ]; then
@@ -66,9 +89,32 @@ if [ -f "$real_config" ] && [ ! -f "$XDG_CONFIG_HOME/agenttilecli/config.toml" ]
     cp "$real_config" "$XDG_CONFIG_HOME/agenttilecli/config.toml"
 fi
 
+# The first project a dev window opens, and so the directory its agents run in.
+# Seeded with a note rather than left bare, because an empty folder in a cache
+# directory is a thing someone finds later and cannot explain.
+project="$sandbox/project"
+mkdir -p "$project"
+if [ ! -f "$project/README.md" ]; then
+    cat > "$project/README.md" <<'NOTE'
+Scratch project for the AgentTileCLI dev build.
+
+A dev window opens this folder as its first project, so any agent started in one
+works here. That is deliberate: the dev build shares $HOME with the live one so
+its agents can log in, and a dev project pointed at the checkout would put a
+second agent inside the working tree the branch is being written in.
+
+Safe to delete. scripts/dev-run.sh recreates it.
+NOTE
+fi
+
 printf 'branch    %s\n' "$branch"
 printf 'app id    dev.agenttilecli.AgentTileCli.%s\n' "${branch//[^a-zA-Z0-9]/-}"
 printf 'sandbox   %s\n' "$sandbox"
+printf 'project   %s\n' "$project"
 printf 'live app  %s (untouched)\n\n' "$(pgrep -x agenttilecli >/dev/null && echo "PID $(pgrep -x agenttilecli | tr '\n' ' ')" || echo 'not running')"
 
-exec cargo run "$@"
+# Run from the scratch project, build from the repo. `cargo run` hands the
+# binary whatever cwd it inherits, so this is what keeps agents out of the
+# checkout; --manifest-path is what still lets cargo find the crate.
+cd "$project"
+exec cargo run --manifest-path "$repo/Cargo.toml" "$@"

@@ -276,6 +276,13 @@ struct Inner {
     /// change rather than recreated, so it keeps sitting at the priority it was
     /// added with.
     css_provider: gtk4::CssProvider,
+    /// Keeps the watch on the desktop's current theme alive.
+    ///
+    /// A `FileMonitor` stops reporting the moment it is dropped, and every other
+    /// reference to this one lives inside the closure it owns - so a monitor
+    /// that isn't held here is a monitor that fires exactly never, silently and
+    /// without failing to start. `None` on a machine with no Omarchy.
+    theme_monitor: RefCell<Option<gtk4::gio::FileMonitor>>,
 }
 
 /// The application window and everything in it.
@@ -407,6 +414,7 @@ impl App {
             base_title: title.to_string(),
             css_provider,
             search: RefCell::new(None),
+            theme_monitor: RefCell::new(None),
         }));
 
         // Start listening before the first pane is spawned, so its agent finds a
@@ -491,6 +499,7 @@ impl App {
         // skips the branch above, which would leave the window with no floor
         // painted at all and the desktop showing through the gutters.
         this.refresh_appearance_css();
+        this.watch_desktop_theme();
         this.save_on_close();
         // A staged window for taking the README's screenshots: sidebar open, a
         // couple of extra projects, some panes to tile. `debug_assertions`
@@ -958,6 +967,74 @@ impl App {
             view.tiler.refresh_appearance();
         }
         self.schedule_save();
+    }
+
+    /// Repaints the window in the desktop's palette, having re-read it.
+    ///
+    /// Goes through the same three layers `set_appearance` does, and for the
+    /// same reason: a palette reaches CSS, VTE and libadwaita, and those three
+    /// have nothing else in common. A theme change that moved only the
+    /// stylesheet would repaint the chrome and leave every terminal in the old
+    /// theme's colours - which, since the terminals are most of the window,
+    /// would read as the theme not having applied at all.
+    ///
+    /// Not saved to the session. The theme is the desktop's state, not this
+    /// window's; the next launch reads it from Omarchy again.
+    pub fn refresh_theme(&self) {
+        crate::omarchy::reload();
+        crate::refresh_theme_css();
+        crate::apply_color_scheme();
+        self.refresh_appearance_css();
+        for view in self.0.views.borrow().iter() {
+            view.tiler.refresh_appearance();
+        }
+    }
+
+    /// Watches `~/.local/state/omarchy/current/theme.name` and repaints when it
+    /// changes, so `omarchy theme set` reaches a running window.
+    ///
+    /// A file monitor rather than an `omarchy hook install theme-set` script,
+    /// which is the mechanism Omarchy actually documents for this. The hook is
+    /// the better-mannered answer and it was not chosen, because it has to be
+    /// *installed*: it writes a script into the user's `~/.config/omarchy`, it
+    /// has to be kept in step with the binary's path across updates, and a user
+    /// who installs this app from a package and never runs a setup step gets an
+    /// app that silently doesn't follow their theme. Watching a file the desktop
+    /// already rewrites costs one inotify watch and works for everybody who
+    /// launches the binary, which is the whole population.
+    ///
+    /// Every event is treated the same rather than filtering for
+    /// `ChangesDoneHint`: `omarchy-theme-set` writes `theme.name` and relinks
+    /// the `theme` symlink beside it as separate steps, so the interesting
+    /// moments arrive as some sequence of created / changed / renamed that
+    /// depends on how the file happened to be written. `refresh_theme` re-reads
+    /// from scratch and is cheap enough to run twice; missing the one event
+    /// that mattered is not recoverable.
+    fn watch_desktop_theme(&self) {
+        let Some(path) = crate::omarchy::name_path() else {
+            return;
+        };
+        let file = gtk4::gio::File::for_path(&path);
+        let monitor = match file.monitor_file(
+            gtk4::gio::FileMonitorFlags::WATCH_MOVES,
+            gtk4::gio::Cancellable::NONE,
+        ) {
+            Ok(monitor) => monitor,
+            // No Omarchy, or no inotify watches left. The app keeps the theme it
+            // read at startup, which is the behaviour it had before any of this
+            // existed - not worth a toast.
+            Err(_) => return,
+        };
+
+        // Weak, because the monitor is owned by the struct whose closure this
+        // is: a strong clone here would be a window that can never be dropped.
+        let weak = Rc::downgrade(&self.0);
+        monitor.connect_changed(move |_, _, _, _| {
+            if let Some(inner) = weak.upgrade() {
+                App(inner).refresh_theme();
+            }
+        });
+        self.0.theme_monitor.replace(Some(monitor));
     }
 
     /// A quiet aside over the workspace - the editor's refusals and save

@@ -12,6 +12,7 @@ mod keybindings;
 mod layout;
 mod links;
 mod model;
+mod omarchy;
 mod palette;
 mod pane;
 mod preferences;
@@ -23,6 +24,8 @@ mod testing;
 mod tiler;
 mod update;
 mod updates;
+
+use std::cell::RefCell;
 
 use adw::prelude::*;
 use gtk4::{CssProvider, gdk, glib};
@@ -89,15 +92,12 @@ fn main() -> glib::ExitCode {
     };
     let application = builder.build();
     application.connect_startup(|_| {
+        // Before the stylesheet, because the stylesheet is built from whatever
+        // this finds: `standalone_colour_css` reads through `palette`, and
+        // `palette` answers from the desktop's theme when there is one.
+        omarchy::reload();
         load_css();
-        // This app has exactly one palette, and it is a dark one - the graphite
-        // ramp, the warm focus lamp and the ANSI colours inside every pane are
-        // all built against each other and against a dark surface. Letting
-        // libadwaita follow the desktop's light/dark preference would repaint
-        // its own widgets light while every terminal stayed dark, which is not
-        // a light theme - it's a broken dark one. A real light variant means a
-        // second ramp, and that is its own piece of work.
-        adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
+        apply_color_scheme();
     });
     application.connect_activate(build_window);
     application.run()
@@ -115,6 +115,19 @@ fn base_title() -> String {
     }
 }
 
+thread_local! {
+    /// The two providers whose contents depend on the desktop's theme, kept so
+    /// `refresh_theme_css` can rewrite them in place when it changes.
+    ///
+    /// In place, and not by adding another provider: a provider cannot be
+    /// removed from a display without the handle that added it, so a reload
+    /// that installed a fresh one would leave every theme this session has ever
+    /// worn stacked on the display, the oldest still winning ties. Six theme
+    /// changes would be six live stylesheets.
+    static THEMED_PROVIDERS: RefCell<Option<(CssProvider, CssProvider)>> =
+        const { RefCell::new(None) };
+}
+
 fn load_css() {
     let display = gdk::Display::default().expect("no default display");
 
@@ -130,12 +143,30 @@ fn load_css() {
     // allowed to hold - see `standalone_colour_css`. Empty on an older GTK, and
     // an empty provider costs nothing, so this is unconditional.
     let standalone = CssProvider::new();
-    standalone.load_from_string(&standalone_colour_css());
     gtk4::style_context_add_provider_for_display(
         &display,
         &standalone,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+
+    // And a third, one notch above `style.css`, holding the desktop's palette
+    // aliased onto this app's colour names. Above, because that is the whole
+    // mechanism: for a `@define-color` name the highest-priority definition
+    // wins everywhere the name is referenced, so redefining `@tile` here
+    // repaints every rule in `style.css` that mentions it - and every alias in
+    // `adwaita-colors.css` too, without either file knowing this one exists.
+    //
+    // Empty when the desktop has no theme, which leaves the ramp exactly as
+    // `style.css` states it.
+    let themed = CssProvider::new();
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &themed,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+    );
+
+    THEMED_PROVIDERS.with(|cell| *cell.borrow_mut() = Some((standalone, themed)));
+    refresh_theme_css();
 
     // And the palette aliases for libadwaita's named colours, one notch above
     // the user's own gtk.css - the only provider of this app's that is. A
@@ -196,6 +227,53 @@ fn standalone_colour_css() -> String {
     }
     css.push_str("}\n");
     css
+}
+
+/// Rewrites the two theme-dependent providers from whatever `omarchy` currently
+/// holds.
+///
+/// Both, and always together. They are one statement of the palette split
+/// across two files for reasons that have nothing to do with theming - one
+/// holds `@define-color` names, the other the five `:root` custom properties
+/// libadwaita reads instead of them - and a refresh that moved one would leave
+/// the accent on the old theme while every surface moved to the new one.
+pub(crate) fn refresh_theme_css() {
+    THEMED_PROVIDERS.with(|cell| {
+        if let Some((standalone, themed)) = cell.borrow().as_ref() {
+            themed.load_from_string(&omarchy::css().unwrap_or_default());
+            // After the themed provider, not before: this one is *generated*
+            // from `palette`, which answers from the theme, and GTK resolves a
+            // provider's contents when it is loaded rather than when it is
+            // read.
+            standalone.load_from_string(&standalone_colour_css());
+        }
+    });
+}
+
+/// Tells libadwaita which half of the world it is painting in.
+///
+/// This app used to force dark unconditionally, and the note here said why: the
+/// ramp, the warm focus lamp and the ANSI colours in every pane were built
+/// against each other and against a dark surface, so following the desktop's
+/// preference would have repainted libadwaita's own widgets light while every
+/// terminal stayed dark - not a light theme, a broken dark one.
+///
+/// What changed is that there is now a second ramp, and it is the desktop's.
+/// Under a light Omarchy theme every one of those surfaces moves together
+/// (`omarchy::Theme::parse` orders them by brightness precisely so that they
+/// can), and the terminals move with them, because the same theme states their
+/// sixteen colours too. Forcing dark *now* would be the mismatch the old note
+/// was guarding against, arriving from the other side.
+///
+/// Still forced rather than `ColorScheme::Default`. The desktop's GTK
+/// preference and the desktop's Omarchy theme are two settings that can
+/// disagree, and the one this app is painted from is the second.
+pub(crate) fn apply_color_scheme() {
+    let scheme = match omarchy::mode() {
+        Some(omarchy::Mode::Light) => adw::ColorScheme::ForceLight,
+        _ => adw::ColorScheme::ForceDark,
+    };
+    adw::StyleManager::default().set_color_scheme(scheme);
 }
 
 /// The event named by `--hook <event>`, if this process was launched as one.
@@ -478,6 +556,56 @@ mod tests {
                 errors.len(),
                 errors.join("\n"),
             );
+        });
+    }
+
+    /// The same check again, for the palette the desktop supplies.
+    ///
+    /// `omarchy::Theme::css` is generated, so `the_stylesheet_parses_without_
+    /// errors` never sees it - and it is generated from a file this project does
+    /// not own, on a schema Omarchy is free to change. A colour that arrives in
+    /// a shape `Rgb::to_hex` mangles produces a declaration GTK drops on the
+    /// floor without a word, and the visible result is one surface of the window
+    /// still wearing gunmetal while the rest moved.
+    ///
+    /// Run over every stock theme on the machine rather than a fixture, because
+    /// the fixtures in `omarchy::tests` are copies and a copy cannot notice the
+    /// original changing.
+    #[test]
+    fn every_themes_generated_css_parses_without_errors() {
+        gtk_test(|| {
+            let stock = std::path::Path::new("/usr/share/omarchy/themes");
+            let Ok(entries) = std::fs::read_dir(stock) else {
+                return; // not an Omarchy machine
+            };
+            for entry in entries.flatten() {
+                let Ok(source) = std::fs::read_to_string(entry.path().join("colors.toml")) else {
+                    continue;
+                };
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let Some(theme) = omarchy::Theme::parse(&name, &source) else {
+                    panic!("stock theme {name} failed to parse");
+                };
+
+                let errors = Rc::new(RefCell::new(Vec::new()));
+                let provider = CssProvider::new();
+                let sink = errors.clone();
+                provider.connect_parsing_error(move |_, section, error| {
+                    sink.borrow_mut()
+                        .push(format!("{}: {error}", section.to_str()));
+                });
+                let css = theme.css();
+                provider.load_from_string(&css);
+
+                let errors = errors.borrow();
+                assert!(
+                    errors.is_empty(),
+                    "theme {name} generated {} parse error(s) GTK would have silently \
+                     ignored:\n{}\nthe css was:\n{css}",
+                    errors.len(),
+                    errors.join("\n"),
+                );
+            }
         });
     }
 

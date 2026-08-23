@@ -67,6 +67,12 @@ impl Rgb {
         }
     }
 
+    /// `#rrggbb`, the inverse of `from_hex` - for writing a colour back out as
+    /// the CSS that `omarchy::Theme::css` builds a provider from.
+    pub fn to_hex(self) -> String {
+        format!("#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
+    }
+
     /// The GDK colour VTE wants. Built component-wise rather than through
     /// `RGBA::parse`, so no hex string has to be reconstructed only to be
     /// re-parsed by GDK - and so nothing here can fail at runtime.
@@ -104,7 +110,7 @@ impl Rgb {
 /// written in a form this doesn't handle surfaces as a missing name from
 /// `color()` - caught by `every_required_colour_is_defined` - rather than as a
 /// silently wrong colour.
-fn declarations() -> impl Iterator<Item = (&'static str, Rgb)> {
+pub fn literal_declarations() -> impl Iterator<Item = (&'static str, Rgb)> {
     STYLESHEET.lines().filter_map(|line| {
         let rest = line.trim().strip_prefix("@define-color")?;
         let mut tokens = rest.split_whitespace();
@@ -120,7 +126,10 @@ fn declarations() -> impl Iterator<Item = (&'static str, Rgb)> {
 /// runtime condition - the names are fixed strings in this crate, checked by
 /// `every_required_colour_is_defined`.
 pub fn color(name: &str) -> Rgb {
-    declarations()
+    if let Some(themed) = crate::omarchy::color(name) {
+        return themed;
+    }
+    literal_declarations()
         .find(|(n, _)| *n == name)
         .map(|(_, c)| c)
         .unwrap_or_else(|| panic!("style.css defines no @define-color named {name:?}"))
@@ -138,7 +147,39 @@ const SELECTION_TINT: f32 = 0.24;
 /// selection tint that matched only one of them would be the same bug this
 /// module exists to prevent, one rung further down.
 pub fn selection(surface: Rgb) -> Rgb {
+    // A themed desktop states its own selection background, and it is a colour
+    // chosen against that theme's text rather than derived from its accent. The
+    // mix below is what this app does when nobody else has an opinion.
+    if let Some(themed) = crate::omarchy::selection() {
+        return themed;
+    }
     surface.mix(color("filament"), SELECTION_TINT)
+}
+
+/// Every `@define-color` line in the stylesheet whose value is *not* a plain
+/// hex - `alpha(@text, 0.05)` and the rest of the interaction ramp - handed back
+/// as the source text, verbatim.
+///
+/// For `omarchy::Theme::css`, which repoints the ramp at the desktop's palette
+/// and then has to restate these on top of it. A tint written as `alpha(@text,
+/// …)` only resolves against the `@text` visible in the same provider, so a
+/// provider that redefines `@text` and stops there leaves every hover and
+/// selection in the window resolving against the gunmetal `@text` it just
+/// replaced - which is not a parse error, not a warning, and not visible until
+/// somebody notices the washes are the wrong temperature.
+///
+/// Re-emitted rather than recomputed, because the alternative is a second copy
+/// of those alpha values living in `omarchy.rs`, and a colour that exists in two
+/// files drifts. This module's whole opening argument is about what that costs.
+pub fn derived_declarations() -> impl Iterator<Item = &'static str> {
+    STYLESHEET.lines().map(str::trim).filter(|line| {
+        line.starts_with("@define-color")
+            && line.ends_with(';')
+            && !line
+                .split_whitespace()
+                .nth(2)
+                .is_some_and(|value| Rgb::from_hex(value.trim_end_matches(';')).is_some())
+    })
 }
 
 #[cfg(test)]
@@ -146,7 +187,8 @@ mod tests {
     use super::*;
 
     /// The parser has to actually find the ramp. Without this, a stylesheet
-    /// edit that put the declarations into a shape `declarations()` skips
+    /// edit that put the declarations into a shape `literal_declarations()`
+    /// skips
     /// would leave it returning nothing at all - and since `color()` panics on
     /// a name it can't find, that reads as "the colour is missing" rather than
     /// "the parser stopped working".
@@ -156,7 +198,7 @@ mod tests {
     /// where they're asked for.
     #[test]
     fn the_ramp_is_parsed_out_of_the_stylesheet() {
-        let found: Vec<_> = declarations().collect();
+        let found: Vec<_> = literal_declarations().collect();
         assert!(
             found.len() >= 10,
             "parsed only {} declarations out of style.css: {found:?}",

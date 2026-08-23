@@ -214,6 +214,22 @@ fn rgb(hex: &str) -> palette::Rgb {
 /// the only place the terminal-only hexes are written, and `rgb` panics on a
 /// malformed one.
 fn ansi_palette(surface: palette::Rgb) -> [palette::Rgb; 16] {
+    // The desktop's sixteen, when the desktop states them.
+    //
+    // This is the whole of what "put claude back to its default state" means.
+    // The palette below substitutes this app's three signal colours into ANSI
+    // 1, 2 and 3 - a deliberate choice, argued for at length, and the reason a
+    // claude running here has always looked like this app rather than like the
+    // terminal next to it. Under a theme that substitution is the wrong one to
+    // make twice: the desktop already has a red, a green and a yellow, every
+    // other window on it agrees about them, and claude launched with
+    // `dark-ansi` (see `claude_settings_file`) draws its entire interface out
+    // of these sixteen slots. Handing it the theme's own is what lets an
+    // `omarchy theme set` reach inside a pane at all.
+    if let Some(themed) = crate::omarchy::ansi(surface) {
+        return themed;
+    }
+
     // ANSI 0 and 7 sit on the gunmetal ramp rather than being literal black
     // and white: programs paint "black" backgrounds and "white" text far more
     // often than they mean the actual colours, so anything else leaves
@@ -446,7 +462,16 @@ fn claude_settings_file() -> Option<String> {
 
     let path = dir.join("claude-settings.json");
     let hook_bin = crate::update::exe().ok()?;
-    std::fs::write(&path, crate::hooks::settings_json(&hook_bin, BELL_HOOK)).ok()?;
+    // The theme rides along in the same file the hooks do, and reaches claude
+    // the same way: `--settings` outranks `~/.claude/settings.json`, so a user
+    // who has pinned `"theme": "dark"` there keeps it in every other terminal
+    // and only the panes in this window follow the desktop. Nothing in
+    // `~/.claude` is written, which is the promise this file has always kept.
+    std::fs::write(
+        &path,
+        crate::hooks::settings_json(&hook_bin, BELL_HOOK, crate::omarchy::claude_theme()),
+    )
+    .ok()?;
     Some(path.to_string_lossy().into_owned())
 }
 

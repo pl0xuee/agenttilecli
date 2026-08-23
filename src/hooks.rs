@@ -121,7 +121,8 @@ pub fn advance(state: &PaneState, event: Event, tool: Option<&str>) -> PaneState
     }
 }
 
-/// The `--settings` payload that registers `hook_bin` against all six events.
+/// The `--settings` payload that registers `hook_bin` against all six events,
+/// and names the theme claude should draw itself in.
 ///
 /// Layered over the user's own settings by claude rather than replacing them,
 /// and written per-pane, so nothing in `~/.claude` is touched and their claude
@@ -132,7 +133,7 @@ pub fn advance(state: &PaneState, event: Event, tool: Option<&str>) -> PaneState
 /// moments still light up a sidebar row exactly as they did before any of this
 /// existed - which is the behaviour this feature is an improvement on, not a
 /// replacement for.
-pub fn settings_json(hook_bin: &str, bell_hook: &str) -> String {
+pub fn settings_json(hook_bin: &str, bell_hook: &str, theme: Option<&str>) -> String {
     // Built as a value and serialised, rather than formatted as text. A hook is
     // a shell command containing quotes and backslashes, going into a JSON
     // string, inside a JSON document - and the first draft of this escaped it
@@ -178,7 +179,20 @@ pub fn settings_json(hook_bin: &str, bell_hook: &str) -> String {
             serde_json::json!([{ "hooks": commands }]),
         );
     }
-    serde_json::json!({ "hooks": hooks }).to_string()
+    let mut settings = serde_json::Map::new();
+    settings.insert("hooks".to_string(), serde_json::Value::Object(hooks));
+
+    // Present only when the desktop has a theme, and absent rather than set to
+    // some default when it doesn't. `--settings` outranks the user's own
+    // `~/.claude/settings.json`, so a key written here is a key they cannot
+    // override - and "no opinion" has to be expressible, or a machine with no
+    // Omarchy on it would have this app quietly overriding a theme its owner
+    // chose by hand.
+    if let Some(theme) = theme {
+        settings.insert("theme".to_string(), serde_json::Value::from(theme));
+    }
+
+    serde_json::Value::Object(settings).to_string()
 }
 
 /// The `hooks.json` written into the private `CODEX_HOME`, registering
@@ -222,6 +236,36 @@ pub fn codex_hooks_json(hook_bin: &str, bell_hook: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The half of "the desktop's theme reaches claude" that lives outside the
+    /// terminal.
+    ///
+    /// Handing VTE the theme's sixteen colours does nothing on its own: claude
+    /// renders from its own hexes unless it is told to render from the
+    /// terminal's palette, and `dark-ansi` is that instruction. The two changes
+    /// only mean anything together, which is why this test names the value
+    /// rather than merely checking that some theme was set.
+    #[test]
+    fn a_themed_desktop_tells_claude_to_draw_from_the_terminals_palette() {
+        let json = settings_json("/usr/bin/agenttilecli", "true", Some("dark-ansi"));
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert_eq!(parsed["theme"], "dark-ansi");
+        // The hooks are still there beside it - this file's original job.
+        assert!(parsed["hooks"].is_object());
+    }
+
+    /// No theme means no key, not a default one. `--settings` outranks the
+    /// user's own settings file, so a `"theme"` written here on a machine with
+    /// no Omarchy would silently overrule a choice they made by hand.
+    #[test]
+    fn an_unthemed_desktop_leaves_claudes_own_theme_alone() {
+        let json = settings_json("/usr/bin/agenttilecli", "true", None);
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        assert!(
+            parsed.get("theme").is_none(),
+            "wrote a theme key with no theme to write: {json}"
+        );
+    }
     use super::*;
 
     #[test]
@@ -466,7 +510,7 @@ mod tests {
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).expect("chmod");
 
         let path = binary.to_string_lossy().into_owned();
-        let json = settings_json(&path, "true");
+        let json = settings_json(&path, "true", None);
 
         // Valid JSON first - the payload is a shell command inside a JSON string
         // inside a JSON document, and the quoting added above is one more layer
@@ -510,6 +554,6 @@ mod tests {
     }
 
     fn hooks_json(bell: &str) -> String {
-        settings_json("/usr/bin/agenttilecli", bell)
+        settings_json("/usr/bin/agenttilecli", bell, None)
     }
 }
