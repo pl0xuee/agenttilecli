@@ -6,6 +6,7 @@ mod codex_home;
 mod commands;
 mod config;
 mod editor;
+mod grok_home;
 mod hooks;
 mod ipc;
 mod keybindings;
@@ -53,8 +54,8 @@ fn app_id() -> String {
 }
 
 fn main() -> glib::ExitCode {
-    // Before anything else at all: this process may not be a window. claude runs
-    // `agenttilecli --hook <event>` from inside a pane, and that invocation has
+    // Before anything else at all: this process may not be a window. Agents run
+    // `agenttilecli --hook <event>` from inside panes, and that invocation has
     // to do its one small job and get out of the way - no GTK, no application
     // id, no single-instance handshake that would hand the work to the running
     // window and wait for it.
@@ -287,10 +288,10 @@ fn hook_event() -> Option<hooks::Event> {
 
 /// Tells the window what just happened in this pane, and returns.
 ///
-/// Every path here is infallible by construction, because the caller is claude
-/// and the cost of failing is claude's. A window that has closed, a socket that
-/// was never created, a hook environment that isn't there: all of them mean the
-/// same thing - nobody is listening - and the answer to that is to exit
+/// Every path here is infallible by construction, because the caller is an
+/// agent hook and the cost of failing is the agent's. A window that has closed,
+/// a socket that was never created, a hook environment that isn't there: all
+/// mean the same thing - nobody is listening - and the answer is to exit
 /// quietly. The bell hook on `Stop` and `Notification` is what still gets
 /// through when this doesn't (see `hooks::settings_json`).
 fn report_hook(event: hooks::Event) {
@@ -299,16 +300,23 @@ fn report_hook(event: hooks::Event) {
         return;
     };
 
-    // claude hands the hook a JSON object on stdin. The only field this app has
-    // a use for is which tool is about to run - and reading it is best-effort
-    // for the same reason as everything else here: an event with no tool name
-    // is still worth reporting.
+    // Every agent hands the hook a JSON object on stdin. Claude and Codex use
+    // snake_case while Grok uses camelCase; the field means the same thing.
+    // Reading it is best-effort: an event with no tool name is still useful.
     let tool = std::io::read_to_string(std::io::stdin())
         .ok()
-        .and_then(|input| serde_json::from_str::<serde_json::Value>(&input).ok())
-        .and_then(|v| v["tool_name"].as_str().map(str::to_string));
+        .and_then(|input| hook_tool(&input));
 
     let _ = ipc::send(&socket, &ipc::Message { pane, event, tool });
+}
+
+fn hook_tool(input: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(input).ok()?;
+    value
+        .get("tool_name")
+        .or_else(|| value.get("toolName"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 fn build_window(application: &adw::Application) {
@@ -479,6 +487,19 @@ mod tests {
     use crate::testing::gtk_test;
     use std::cell::RefCell;
     use std::rc::Rc;
+
+    #[test]
+    fn hook_tool_accepts_each_agents_json_vocabulary() {
+        assert_eq!(
+            hook_tool(r#"{"tool_name":"Bash"}"#).as_deref(),
+            Some("Bash")
+        );
+        assert_eq!(
+            hook_tool(r#"{"toolName":"run_terminal_command"}"#).as_deref(),
+            Some("run_terminal_command")
+        );
+        assert_eq!(hook_tool("not json"), None);
+    }
 
     /// GTK doesn't reject a stylesheet it can't understand - it drops the
     /// offending declaration, prints a warning to a terminal a GUI app doesn't

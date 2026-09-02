@@ -1,14 +1,15 @@
 //! What an agent tells us about itself, and what it means.
 //!
 //! The only signal a pane has ever emitted is a bell byte (`pane::BELL_HOOK`),
-//! rung when claude finishes a turn or stops to ask. One byte, one meaning:
+//! rung when an agent finishes a turn or stops to ask. One byte, one meaning:
 //! *something happened*. It is enough to flash a sidebar row and nothing more -
 //! an agent that finishes in the group you are already looking at marks nothing
 //! at all, and "three agents" on a strip cannot say whether that is three
 //! working, three waiting on you, or three finished an hour ago.
 //!
-//! claude will say considerably more than that if asked. It runs a command of
-//! our choosing at six points in its life, handing it a JSON object on stdin,
+//! The supported agents will say considerably more than that if asked. They run
+//! a command of our choosing at six points in their life, handing it a JSON
+//! object on stdin,
 //! and this module is the vocabulary for those six points plus the rule for
 //! what each one does to a pane's state.
 //!
@@ -18,7 +19,7 @@
 
 use crate::model::PaneState;
 
-/// The moments in an agent's turn that this app asks claude to report.
+/// The moments in an agent's turn that this app asks it to report.
 ///
 /// Six rather than the two the bell covered, because the two only ever meant
 /// "look at me": what is missing is everything between, which is the difference
@@ -51,8 +52,8 @@ impl Event {
         Event::Stop,
     ];
 
-    /// claude's own name for this event, which is both the settings key and the
-    /// argument the hook is invoked with.
+    /// Claude and Grok's name for this event, and the common argument our hook
+    /// process receives from every agent.
     pub fn name(self) -> &'static str {
         match self {
             Event::SessionStart => "SessionStart",
@@ -234,6 +235,16 @@ pub fn codex_hooks_json(hook_bin: &str, bell_hook: &str) -> String {
     serde_json::json!({ "hooks": hooks }).to_string()
 }
 
+/// The global hook file written into the private `GROK_HOME`.
+///
+/// Grok Build deliberately accepts Claude Code's hook JSON format and event
+/// names, so with no Claude-only theme key this is the same document as our
+/// `--settings` layer. Keeping that equivalence here avoids inventing a third
+/// spelling of an identical wire contract.
+pub fn grok_hooks_json(hook_bin: &str, bell_hook: &str) -> String {
+    settings_json(hook_bin, bell_hook, None)
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -276,8 +287,8 @@ mod tests {
         assert_eq!(Event::parse("NoSuchEvent"), None);
     }
 
-    /// The two agents differ by exactly one word, and it is the word that
-    /// matters most: the moment an agent stops to ask you something. Getting it
+    /// Codex differs from Claude and Grok by exactly one word, and it is the
+    /// word that matters most: the moment an agent stops to ask you. Getting it
     /// wrong costs the amber dot, and nothing else complains.
     #[test]
     fn codex_names_the_blocked_moment_its_own_way() {
@@ -287,7 +298,7 @@ mod tests {
                 assert_eq!(
                     event.codex_key(),
                     event.name(),
-                    "{} is spelt the same by both agents",
+                    "{} keeps the common spelling",
                     event.name(),
                 );
             }
@@ -361,6 +372,32 @@ mod tests {
             command.contains("'/home/dev/agent$tile/agenttilecli'"),
             "the path lost its quoting: {command}",
         );
+    }
+
+    /// Grok speaks Claude's event vocabulary, including `Notification`, and
+    /// reads the same JSON shape from `$GROK_HOME/hooks/*.json`.
+    #[test]
+    fn the_grok_payload_registers_every_event_in_its_native_vocabulary() {
+        let json = grok_hooks_json("/opt/agent tile/agenttilecli", "printf '\\a'");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+        let hooks = &parsed["hooks"];
+
+        for event in Event::ALL {
+            assert!(
+                hooks[event.name()].is_array(),
+                "{} is not registered",
+                event.name(),
+            );
+        }
+        assert!(
+            hooks.get("PermissionRequest").is_none(),
+            "that is Codex's event name, not Grok's",
+        );
+        assert!(hooks["Notification"][0]["hooks"]
+            .as_array()
+            .expect("notification handlers")
+            .iter()
+            .any(|hook| hook["command"].as_str().unwrap_or_default().contains("printf")));
     }
 
     /// A turn, start to finish, is the sequence this state machine exists for.

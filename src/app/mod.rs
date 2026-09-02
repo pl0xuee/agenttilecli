@@ -740,7 +740,7 @@ impl App {
                 master_ratio: project.master_ratio,
                 master_count: project.master_count,
                 // The agent tally, not the pane count: this number is what a
-                // restore with `restore_agents` on will *spawn claudes from*,
+                // restore with `restore_agents` on will *spawn agents from*,
                 // and an open editor pane counted here would come back as an
                 // extra agent nobody started.
                 agents: views

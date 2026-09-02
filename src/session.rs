@@ -85,7 +85,7 @@ pub struct Project {
     pub agents: usize,
     /// Which agent each of those was, in pane order.
     ///
-    /// Absent from every file written before there were two agents, which is
+    /// Absent from every file written before agents had kinds, which is
     /// why it is read through `kinds` and never directly: an empty list means
     /// claude, because claude is the only thing it could have been.
     pub agent_kinds: Vec<String>,
@@ -356,11 +356,14 @@ mod tests {
     #[test]
     fn a_mixed_project_remembers_which_was_which() {
         let project = Project {
-            agents: 2,
-            agent_kinds: vec!["codex".into(), "claude".into()],
+            agents: 3,
+            agent_kinds: vec!["codex".into(), "claude".into(), "grok".into()],
             ..Project::default()
         };
-        assert_eq!(project.kinds(), vec![Kind::Codex, Kind::Claude]);
+        assert_eq!(
+            project.kinds(),
+            vec![Kind::Codex, Kind::Claude, Kind::Grok]
+        );
     }
 
     /// A half-written or hand-edited state file is not the user's mistake, so
@@ -422,7 +425,7 @@ mod tests {
                     master_ratio: 0.6,
                     master_count: 2,
                     agents: 3,
-                    agent_kinds: vec!["claude".into(), "codex".into(), "claude".into()],
+                    agent_kinds: vec!["claude".into(), "grok".into(), "codex".into()],
                     active: true,
                 },
                 Project {

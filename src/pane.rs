@@ -16,7 +16,7 @@ use crate::palette;
 /// syscall pair per pane) so a short interval is fine.
 const CWD_POLL_INTERVAL: Duration = Duration::from_millis(1000);
 
-/// The shell one-liner claude runs when it finishes a turn (`Stop`) or stops
+/// The shell one-liner an agent runs when it finishes a turn (`Stop`) or stops
 /// to ask for something (`Notification`) - the two moments a watching human
 /// would want to know about, and the two this app repaints a sidebar row for
 /// (see `App::flash_row`). All it does is ring the pane's bell, which VTE
@@ -24,15 +24,15 @@ const CWD_POLL_INTERVAL: Duration = Duration::from_millis(1000);
 /// you".
 ///
 /// It has to find the terminal the hard way, because both obvious routes are
-/// closed: claude runs hooks with *no controlling terminal* (`/dev/tty` there
+/// closed: agents run hooks with *no controlling terminal* (`/dev/tty` there
 /// is "No such device or address"), and it captures their stdout rather than
-/// letting it through to the pane. What is still open is claude's own stdin -
+/// letting it through to the pane. What is still open is the agent's own stdin -
 /// the pane's pty - so the hook reads its parent's fd 0 back out of /proc and
 /// writes the bell byte straight to that device. Bytes written to a pty slave
 /// surface on the master exactly as if the program had printed them, which is
 /// precisely the thing the bell signal watches for.
 ///
-/// POSIX sh, not the login shell: claude runs hook commands through /bin/sh.
+/// POSIX sh, not the login shell: agents run hook commands through /bin/sh.
 const BELL_HOOK: &str = r#"PTY=$(readlink /proc/$PPID/fd/0 2>/dev/null); case "$PTY" in /dev/pts/*) printf '\a' > "$PTY" ;; esac"#;
 
 /// The working directory of whichever process currently holds the
@@ -475,7 +475,7 @@ fn claude_settings_file() -> Option<String> {
     Some(path.to_string_lossy().into_owned())
 }
 
-/// A single tile: a bordered frame containing a VTE terminal, running `claude`
+/// A single tile: a bordered frame containing a VTE terminal, running an agent
 /// (or, for the update pane, a build script) via the user's login shell - so
 /// PATH/nvm/aliases resolve the same way an interactive terminal would.
 pub struct Pane {
@@ -797,15 +797,16 @@ impl Pane {
     /// installed, so a finished or waiting agent lights up its group's sidebar
     /// row.
     ///
-    /// How the hooks get in front of the agent is the whole of what differs
-    /// between the two, and the whole reason `agent` exists. Claude takes a
+    /// How the hooks get in front of the agent is the whole of what differs,
+    /// and the whole reason `agent` exists. Claude takes a
     /// `--settings` file, which layers over the user's own settings rather than
     /// replacing them. Codex takes no such flag, so it is handed a `CODEX_HOME`
-    /// built for the purpose instead. Both routes keep the same promise:
-    /// nothing in `~/.claude` or `~/.codex` is written to, and the user's own
-    /// agents in any other terminal are untouched.
+    /// built for the purpose instead. Grok likewise reads hooks from its home,
+    /// so it gets a private `GROK_HOME`. All three routes keep the same promise:
+    /// nothing in the user's agent homes is written merely to install our hook,
+    /// and agents in other terminals are untouched.
     ///
-    /// Both are best-effort in the same way, too. If the hooks can't be
+    /// All are best-effort in the same way, too. If the hooks can't be
     /// installed for any reason the pane still gets a perfectly good agent -
     /// just a silent one, which is exactly what every pane was before any of
     /// this existed.
@@ -834,6 +835,18 @@ impl Pane {
                     .unwrap_or_default();
                 (configured, env)
             }
+            // Grok discovers global hooks under `$GROK_HOME/hooks/*.json`.
+            // Pointing it at a mirrored private home lets this pane keep the
+            // user's auth, config, sessions and hooks without installing our
+            // hook into every Grok process they launch elsewhere.
+            Kind::Grok => {
+                let env = crate::update::exe()
+                    .ok()
+                    .and_then(|bin| crate::grok_home::prepare(&bin, BELL_HOOK))
+                    .map(|home| vec![format!("GROK_HOME={}", home.display())])
+                    .unwrap_or_default();
+                (configured, env)
+            }
         };
         Self::spawn(cwd, &command, true, Some(kind), env)
     }
@@ -850,8 +863,8 @@ impl Pane {
     /// hooks will ever speak for this pane, which is what its head strip is
     /// allowed to claim - see `Head::reports`. `kind` is the agent the strip
     /// names, and `extra_env` whatever else that agent needs in its
-    /// environment to be reachable - codex's `CODEX_HOME`, and nothing else so
-    /// far.
+    /// environment to be reachable - currently the private home used by Codex
+    /// or Grok.
     fn spawn(
         cwd: &str,
         command: &str,
@@ -1169,6 +1182,7 @@ mod head_tests {
     #[test]
     fn an_agent_with_nothing_else_to_say_still_names_itself() {
         assert_eq!(head_text_for("", Some(Kind::Claude)), "claude");
+        assert_eq!(head_text_for("", Some(Kind::Grok)), "grok");
     }
 }
 

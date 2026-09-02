@@ -59,7 +59,7 @@ pub fn problem() -> Option<&'static str> {
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    /// What each pane ran, before there were two kinds of pane.
+    /// What each pane ran, before panes had an agent kind.
     ///
     /// Superseded by `[agent.claude] command`, and kept because
     /// `deny_unknown_fields` would otherwise greet everyone who has ever
@@ -121,7 +121,7 @@ pub struct Config {
     pub font: String,
 }
 
-/// The `[agent.claude]` and `[agent.codex]` tables.
+/// The per-agent command tables.
 ///
 /// Named fields rather than a map keyed by string: the set of agents is closed
 /// (see `agent`), and a map would accept `[agent.gemini]` silently, which is
@@ -131,6 +131,7 @@ pub struct Config {
 pub struct AgentTable {
     pub claude: AgentConfig,
     pub codex: AgentConfig,
+    pub grok: AgentConfig,
 }
 
 /// What one agent's table can say.
@@ -209,12 +210,13 @@ impl Config {
         Config::parse(&text, &path.display().to_string())
     }
 
-    /// The command line a pane of `kind` runs, before either agent's hooks are
+    /// The command line a pane of `kind` runs, before that agent's hooks are
     /// layered on top of it.
     pub fn command_for(&self, kind: Kind) -> String {
         let configured = match kind {
             Kind::Claude => &self.agent.claude.command,
             Kind::Codex => &self.agent.codex.command,
+            Kind::Grok => &self.agent.grok.command,
         };
         if !configured.trim().is_empty() {
             return configured.clone();
@@ -248,10 +250,10 @@ impl Config {
                     notes.push(
                         "`command` is deprecated. Write it as:\n\n    \
                          [agent.claude]\n    command = \"…\"\n\nIt still works, and \
-                         still means claude's command. To run codex instead, set \
-                         `default_agent = \"codex\"` - `command = \"codex\"` never \
-                         worked, because claude's own options were being appended \
-                         to whatever it named."
+                         still means claude's command. To run another agent, set \
+                         `default_agent = \"codex\"` or `default_agent = \"grok\"`. \
+                         The old `command` key never selected an agent, because \
+                         claude's own options were appended to whatever it named."
                             .to_string(),
                     );
                 }
@@ -357,17 +359,19 @@ mod tests {
     }
 
     /// The lossy case, and the reason the deprecation text has to be specific:
-    /// this person was trying to run codex, it has never once worked, and
+    /// this person was trying to run a different agent, it has never once worked, and
     /// mapping them silently to claude would be the third confusing thing to
     /// happen to them.
     #[test]
-    fn an_old_command_naming_codex_is_called_out() {
-        let loaded = Config::parse("command = \"codex\"\n", "config.toml");
-        let problem = loaded.problem.expect("this case is explained");
-        assert!(
-            problem.contains("default_agent"),
-            "points at the key that actually switches agent: {problem}",
-        );
+    fn an_old_command_naming_another_agent_is_called_out() {
+        for command in ["codex", "grok"] {
+            let loaded = Config::parse(&format!("command = \"{command}\"\n"), "config.toml");
+            let problem = loaded.problem.expect("this case is explained");
+            assert!(
+                problem.contains("default_agent"),
+                "points at the key that actually switches agent: {problem}",
+            );
+        }
     }
 
     #[test]
@@ -375,13 +379,15 @@ mod tests {
         let loaded = Config::parse(
             "default_agent = \"codex\"\n\
              [agent.claude]\ncommand = \"claude --model opus\"\n\
-             [agent.codex]\ncommand = \"codex --full-auto\"\n",
+             [agent.codex]\ncommand = \"codex --full-auto\"\n\
+             [agent.grok]\ncommand = \"grok --always-approve\"\n",
             "config.toml",
         );
         assert!(loaded.problem.is_none(), "{:?}", loaded.problem);
         assert_eq!(loaded.config.default_kind(), Kind::Codex);
         assert_eq!(loaded.config.command_for(Kind::Claude), "claude --model opus");
         assert_eq!(loaded.config.command_for(Kind::Codex), "codex --full-auto");
+        assert_eq!(loaded.config.command_for(Kind::Grok), "grok --always-approve");
     }
 
     #[test]
@@ -389,6 +395,7 @@ mod tests {
         let loaded = Config::parse("", "config.toml");
         assert_eq!(loaded.config.command_for(Kind::Claude), "claude");
         assert_eq!(loaded.config.command_for(Kind::Codex), "codex");
+        assert_eq!(loaded.config.command_for(Kind::Grok), "grok");
         assert_eq!(loaded.config.default_kind(), Kind::Claude);
     }
 
@@ -421,6 +428,9 @@ mod tests {
                 },
                 codex: AgentConfig {
                     command: "codex".into(),
+                },
+                grok: AgentConfig {
+                    command: "grok".into(),
                 },
             },
             agents: 2,

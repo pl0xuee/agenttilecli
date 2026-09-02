@@ -1,9 +1,10 @@
 //! Which agent a pane is running.
 //!
-//! Two of them, named and known: adding a third is a code change, deliberately.
+//! A small closed set, named and known: adding one is a code change,
+//! deliberately.
 //! What varies between them is small and awkward - what the binary is called,
 //! how you get your hooks in front of it, what it calls each moment of a turn -
-//! and an enum keeps the two answers to each question on adjacent lines, where
+//! and an enum keeps the answers to each question on adjacent lines, where
 //! a difference is visible. A trait would put them in separate files and buy
 //! an extensibility nobody has asked for.
 //!
@@ -16,11 +17,12 @@ pub enum Kind {
     #[default]
     Claude,
     Codex,
+    Grok,
 }
 
 impl Kind {
     /// Every agent, in the order they are offered in the menu.
-    pub const ALL: [Kind; 2] = [Kind::Claude, Kind::Codex];
+    pub const ALL: [Kind; 3] = [Kind::Claude, Kind::Codex, Kind::Grok];
 
     /// What it is called - in the config file, in the menu, and on the head
     /// strip. One word, lowercase, because it is all three of those things and
@@ -29,6 +31,7 @@ impl Kind {
         match self {
             Kind::Claude => "claude",
             Kind::Codex => "codex",
+            Kind::Grok => "grok",
         }
     }
 
@@ -37,6 +40,7 @@ impl Kind {
         match self {
             Kind::Claude => "claude",
             Kind::Codex => "codex",
+            Kind::Grok => "grok",
         }
     }
 
@@ -67,11 +71,13 @@ mod tests {
     fn a_label_is_read_the_way_a_person_would_write_it() {
         assert_eq!(Kind::parse(" Claude "), Some(Kind::Claude));
         assert_eq!(Kind::parse("CODEX"), Some(Kind::Codex));
+        assert_eq!(Kind::parse(" Grok "), Some(Kind::Grok));
     }
 
     #[test]
     fn each_kind_defaults_to_the_binary_it_is_named_for() {
         assert_eq!(Kind::Claude.default_command(), "claude");
         assert_eq!(Kind::Codex.default_command(), "codex");
+        assert_eq!(Kind::Grok.default_command(), "grok");
     }
 }

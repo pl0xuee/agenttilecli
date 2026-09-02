@@ -1,8 +1,8 @@
-//! The wire between a claude hook and the window that spawned it.
+//! The wire between an agent hook and the window that spawned it.
 //!
-//! Every pane launches claude with a `--settings` layer registering this
-//! binary's own `--hook` mode against six events (see `hooks`). When one fires,
-//! claude runs `agenttilecli --hook <event>`, that process writes a single line
+//! Every pane registers this binary's own `--hook` mode against six lifecycle
+//! events (see `hooks`). When one fires, the agent runs
+//! `agenttilecli --hook <event>`, that process writes a single line
 //! to this socket, and exits. The window is listening on the other end and moves
 //! the pane's state.
 //!
@@ -13,7 +13,7 @@
 //! pane" or "which tool". A private socket has all three properties the bell
 //! lacks - out of band, addressed, and structured.
 //!
-//! The hook side must never be able to hold claude up. It gets a short timeout,
+//! The hook side must never be able to hold an agent up. It gets a short timeout,
 //! and every failure path exits 0: a window that has gone away, a socket that
 //! was never created, a line that could not be written. Losing a status update
 //! costs a stale dot in a sidebar. Blocking the hook costs the user's agent.
@@ -32,7 +32,7 @@ use gtk4::glib;
 use crate::hooks::Event;
 
 /// How long the hook waits on a window that isn't reading. Generous for a local
-/// socket handshake, and far below anything a person would notice claude pause
+/// socket handshake, and far below anything a person would notice an agent pause
 /// for if the window has wedged.
 const HOOK_TIMEOUT: Duration = Duration::from_millis(250);
 
@@ -77,7 +77,7 @@ pub struct Message {
 impl Message {
     /// The wire form: three tab-separated fields and a newline.
     ///
-    /// Tabs rather than spaces because a tool name is chosen by claude and a
+    /// Tabs rather than spaces because a tool name is chosen by an agent and a
     /// pane id by us, and only one of those is under this program's control.
     /// Newline-terminated because the reader is a `BufReader::read_line` and a
     /// message that never terminates is a reader that never returns.

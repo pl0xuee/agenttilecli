@@ -25,7 +25,7 @@ you want to nudge it.
   which agent it's for, and starts it with as many agents as the project you
   were last working in had running. *How many* is never asked — that one you
   do answer the same way every time, so it's learned rather than re-asked.
-  *Which agent* is asked, because with two of them it stopped being the same
+  *Which agent* is asked, because with several of them it stopped being the same
   answer every time and a folder can't tell the app which you meant; the
   dialog opens on whichever you picked last, so Enter takes the common path
   and Escape abandons the whole thing. On a narrow window the rail stays put and
@@ -63,25 +63,23 @@ you want to nudge it.
   from the terminal output, so it knows *which* pane and *which* tool — and if
   the socket can't be opened, panes fall back to the bell below and nothing
   breaks.
-- **Claude and Codex, side by side** — the chevron beside the header's **+**
-  picks which agent to start, and a project can hold both at once: a claude and
-  a codex tiled in the same folder, each with its own dot. The group remembers
-  what you last chose, so picking codex once is a statement about that project
+- **Claude, Codex, and Grok, side by side** — the chevron beside the header's
+  **+** picks which agent to start, and a project can hold all three at once,
+  tiled in the same folder and each with its own dot. The group remembers what
+  you last chose, so picking grok once is a statement about that project
   rather than about that click, and the **+** keeps its single click. Each
   pane's head strip names its agent after whatever it was already saying —
-  `working · Bash · codex`. Codex reports through the same six moments claude
-  does (it spells one of them `PermissionRequest` rather than `Notification`),
-  so the dots, the tally and the amber "wants you" all mean the same thing
-  whichever agent is running. Getting hooks in front of codex takes more work
-  than claude's `--settings`, because codex reads them only from its home
-  directory: rather than write to yours, each pane runs against a `CODEX_HOME`
-  of this app's own making — a cache directory of symlinks to your real one, so
-  your auth, config and sessions are read through, with our `hooks.json` as the
-  single real file beside them. `~/.codex` is never written to, and if you
-  already keep hooks there they're merged in rather than replaced. One note: if
-  your own hooks live inline in `~/.codex/config.toml` rather than in a
-  `hooks.json`, codex will warn that it loaded both representations. It's
-  harmless, and it's codex talking, not this app.
+  `working · run_terminal_command · grok`. All three report through the same
+  six lifecycle moments (Codex spells `Notification` as `PermissionRequest`),
+  so the dots, tally, and amber "wants you" state mean the same thing whichever
+  agent is running. Claude accepts a per-process `--settings` layer. Codex and
+  Grok instead discover hooks from their home directories, so each gets a
+  private home in AgentTileCLI's cache: symlinks expose your real auth, config,
+  sessions, and existing hooks, while our hook is the only file owned by the
+  overlay. AgentTileCLI never installs hooks into `~/.codex` or `~/.grok`, and
+  agents launched in other terminals remain untouched. If Codex hooks also
+  live inline in `~/.codex/config.toml`, Codex may warn that it loaded both the
+  inline and JSON representations; that warning is harmless.
 - **Background agents tell you when they want you** — when an agent finishes a
   turn, or stops to ask permission, its group's sidebar row pulses and then
   stays quietly tinted until you open that group, so a finished agent in a
@@ -219,7 +217,7 @@ you make it:
 ```toml
 # ~/.config/agenttilecli/config.toml
 
-default_agent = "claude"  # which agent the + starts: claude or codex
+default_agent = "claude"  # which agent the + starts: claude, codex, or grok
 agents = 1                # agents a newly-opened project starts with
 restore_agents = false    # reopen a saved session's agents too?
 gap = 6                   # half the space between tiles, in pixels
@@ -233,6 +231,9 @@ command = "claude"        # what a claude pane runs
 
 [agent.codex]
 command = "codex"         # what a codex pane runs
+
+[agent.grok]
+command = "grok"          # what a Grok Build pane runs
 ```
 
 A mistake in it — a typo'd key, broken TOML — is reported when the app starts,
@@ -341,6 +342,13 @@ by name, and Preferences.
 
   ```sh
   curl -fsSL https://claude.ai/install.sh | bash
+  ```
+
+  Codex and Grok are optional alternatives selected from the **+** menu. Install
+  Grok Build's official `grok` binary with:
+
+  ```sh
+  curl -fsSL https://x.ai/cli/install.sh | bash
   ```
 
 ## Install

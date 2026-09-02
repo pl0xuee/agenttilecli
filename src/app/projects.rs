@@ -181,7 +181,7 @@ impl App {
     /// almost every time, and that is a dialog costing a click forever in
     /// exchange for earning its place once. What makes this one different is
     /// that its answer genuinely varies: a project is usually a project you
-    /// work on with one agent or the other, and which one is not something the
+    /// work on with one particular agent, and which one is not something the
     /// app can infer from a folder.
     ///
     /// It is still built to cost as little as possible. The default response is
@@ -189,7 +189,7 @@ impl App {
     /// cancels the whole thing, and anyone who always answers the same way is
     /// paying one keystroke rather than one decision.
     ///
-    /// Built from `Kind::ALL` rather than from two hardcoded buttons, so an
+    /// Built from `Kind::ALL` rather than from hardcoded buttons, so an
     /// agent added to `agent` turns up here rather than being quietly
     /// unreachable from the one screen that opens projects.
     fn ask_which_agent(&self, dir: String) {
