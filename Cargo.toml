@@ -1,6 +1,6 @@
 [package]
 name = "agenttilecli"
-version = "3.2.0"
+version = "4.0.0"
 edition = "2024"
 # Two binaries: the window, and `agenttilecli-hook` (src/bin/), the small one
 # agents run at every moment of their turn. `cargo run` means the window.
