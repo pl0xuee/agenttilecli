@@ -550,6 +550,7 @@ impl App {
                 // would panic.
                 this.0.list.invalidate_sort();
                 this.refresh_rail();
+                this.schedule_save();
             }
             moved
         });
@@ -638,86 +639,66 @@ impl App {
     /// tile's head strip is showing. This was a row of dots on the strip
     /// itself - see `build_row` for why it stopped being one.
     ///
-    /// Rebuilt whole on every change, like the rail and the file tree, and for
-    /// the same reason: a handful of small widgets are cheap to remake and
-    /// impossible to desynchronise from the panes they describe.
+    /// Rows are rebuilt only when the agents themselves change - one arrives,
+    /// one leaves - and otherwise their dot and words are updated in place.
+    /// This runs twice per tool call per agent, drawer open or shut, and
+    /// remaking thirty widgets (each matched against the whole stylesheet) that
+    /// often was the most expensive thing the window did while agents worked.
     ///
     /// The row is looked up by id rather than captured, because the pane-count
     /// callback is registered before the row it writes to exists; the very
     /// first call finds nothing and does nothing, which is correct, since a
     /// project with no panes yet has nothing to report.
     pub(super) fn refresh_row_tally(&self, id: ProjectId) {
-        let views = self.0.views.borrow();
-        let Some(view) = views.iter().find(|v| v.id == id) else {
-            return;
-        };
-        let rows = view.tiler.agent_rows();
-
-        while let Some(child) = view.agents.first_child() {
-            view.agents.remove(&child);
-        }
-
         // Past a handful the list stops being a list and starts being the whole
         // drawer - eight agents in three projects would push the projects
         // themselves off the bottom of a panel whose first job is naming them.
         // The rest are said in a number, which is the one thing a number was
         // always better at than a picture.
         const MAX_ROWS: usize = 6;
+
+        let views = self.0.views.borrow();
+        let Some(view) = views.iter().find(|v| v.id == id) else {
+            return;
+        };
+        let rows = view.tiler.agent_rows();
         let shown = rows.len().min(MAX_ROWS);
-        for (index, label, state) in &rows[..shown] {
-            let dot = gtk4::Box::builder()
-                .css_classes(["rack-dot", crate::pane::status_class(state)])
-                .valign(gtk4::Align::Center)
-                .build();
-            let text = gtk4::Label::builder()
-                .label(label)
-                .halign(gtk4::Align::Start)
-                .hexpand(true)
-                .ellipsize(gtk4::pango::EllipsizeMode::End)
-                .css_classes(["sidebar-agent-label"])
-                .build();
+        let hidden = rows.len() - shown;
 
-            let content = gtk4::Box::builder()
-                .orientation(gtk4::Orientation::Horizontal)
-                .spacing(8)
-                .build();
-            content.append(&dot);
-            content.append(&text);
-
-            // A button, for the same reason the tree's folder rows are: it
-            // swallows its own click, so going to an agent in a project you are
-            // not in does not also count as a click on that project's strip -
-            // which would select the project and then fight this handler over
-            // which pane ends up focused.
-            let button = gtk4::Button::builder()
-                .css_classes(["sidebar-agent"])
-                .can_focus(false)
-                .child(&content)
-                .tooltip_text(format!("Go to this agent \u{2014} {label}"))
-                .build();
-
-            let this = self.clone();
-            let index = *index;
-            button.connect_clicked(move |_| {
-                // Switch first, then focus. `select` is what makes the project
-                // visible, and focusing a pane in a hidden tiler puts the
-                // keyboard somewhere nobody can see.
-                this.select(id);
-                if let Some(tiler) = this.tiler_for(id) {
-                    tiler.focus_pane(index);
-                }
-            });
-
-            view.agents.append(&button);
-        }
-        if rows.len() > shown {
-            view.agents.append(
-                &gtk4::Label::builder()
-                    .label(format!("+{} more", rows.len() - shown))
-                    .halign(gtk4::Align::Start)
-                    .css_classes(["sidebar-tree-note"])
-                    .build(),
-            );
+        let same_agents = {
+            let built = view.agent_rows.borrow();
+            built.rows.len() == shown
+                && built.hidden == hidden
+                && built.rows.iter().zip(&rows).all(|(row, facts)| row.index == facts.index)
+        };
+        if same_agents {
+            for (row, facts) in view.agent_rows.borrow().iter_rows().zip(&rows) {
+                row.update(facts);
+            }
+        } else {
+            while let Some(child) = view.agents.first_child() {
+                view.agents.remove(&child);
+            }
+            let mut built = AgentRows {
+                rows: Vec::with_capacity(shown),
+                hidden,
+            };
+            for facts in &rows[..shown] {
+                let row = AgentRow::new(self, id, facts);
+                row.update(facts);
+                view.agents.append(&row.button);
+                built.rows.push(row);
+            }
+            if hidden > 0 {
+                view.agents.append(
+                    &gtk4::Label::builder()
+                        .label(format!("+{hidden} more"))
+                        .halign(gtk4::Align::Start)
+                        .css_classes(["sidebar-tree-note"])
+                        .build(),
+                );
+            }
+            *view.agent_rows.borrow_mut() = built;
         }
 
         // The header's subtitle falls back to this same tally when no agent has
@@ -731,6 +712,110 @@ impl App {
         // The rail glyph's tooltip carries this same tally in words, so it
         // goes stale at the same moments these rows would.
         self.refresh_rail();
+    }
+}
+
+/// The agent rows under one project's strip, as last built.
+#[derive(Default)]
+pub(super) struct AgentRows {
+    rows: Vec<AgentRow>,
+    /// How many agents didn't get a row, said as "+N more".
+    hidden: usize,
+}
+
+impl AgentRows {
+    fn iter_rows(&self) -> impl Iterator<Item = &AgentRow> {
+        self.rows.iter()
+    }
+}
+
+/// One agent's row in the drawer: a button that goes to it, wearing its dot,
+/// its name as a tag, and what it is doing in a few words.
+struct AgentRow {
+    /// The pane index it goes to.
+    index: usize,
+    button: gtk4::Button,
+    dot: gtk4::Box,
+    text: gtk4::Label,
+}
+
+impl AgentRow {
+    fn new(app: &App, id: ProjectId, facts: &crate::tiler::AgentRowFacts) -> Self {
+        let index = facts.index;
+        let dot = gtk4::Box::builder()
+            .css_classes(["rack-dot"])
+            .valign(gtk4::Align::Center)
+            .build();
+        // The agent's name, first and fixed: which agent is the thing a row is
+        // *for*, and the state beside it is what changes.
+        let kind = gtk4::Label::builder()
+            .label(facts.kind.map_or("agent", |k| k.label()))
+            .css_classes(["sidebar-agent-kind"])
+            .valign(gtk4::Align::Center)
+            .build();
+        let text = gtk4::Label::builder()
+            .halign(gtk4::Align::Start)
+            .hexpand(true)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .css_classes(["sidebar-agent-label"])
+            .build();
+
+        let content = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(7)
+            .build();
+        content.append(&dot);
+        content.append(&kind);
+        content.append(&text);
+
+        // A button, for the same reason the tree's folder rows are: it
+        // swallows its own click, so going to an agent in a project you are
+        // not in does not also count as a click on that project's strip -
+        // which would select the project and then fight this handler over
+        // which pane ends up focused.
+        let button = gtk4::Button::builder()
+            .css_classes(["sidebar-agent"])
+            .can_focus(false)
+            .child(&content)
+            .build();
+
+        let weak = Rc::downgrade(&app.0);
+        button.connect_clicked(move |_| {
+            let Some(inner) = weak.upgrade() else { return };
+            let this = App(inner);
+            // Switch first, then focus. `select` is what makes the project
+            // visible, and focusing a pane in a hidden tiler puts the
+            // keyboard somewhere nobody can see.
+            this.select(id);
+            if let Some(tiler) = this.tiler_for(id) {
+                tiler.focus_pane(index);
+            }
+        });
+
+        AgentRow {
+            index,
+            button,
+            dot,
+            text,
+        }
+    }
+
+    /// Wears `facts`' dot and says its words, touching only what changed.
+    fn update(&self, facts: &crate::tiler::AgentRowFacts) {
+        let class = crate::pane::status_class(&facts.state);
+        if !self.dot.has_css_class(class) {
+            for other in ["starting", "working", "idle", "waiting", "exited"] {
+                self.dot.remove_css_class(other);
+            }
+            self.dot.add_css_class(class);
+        }
+        if self.text.label() != facts.words {
+            self.text.set_label(&facts.words);
+        }
+        let tooltip = format!("Go to this agent \u{2014} {}", facts.strip);
+        if self.button.tooltip_text().as_deref() != Some(tooltip.as_str()) {
+            self.button.set_tooltip_text(Some(&tooltip));
+        }
     }
 }
 

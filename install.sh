@@ -70,6 +70,11 @@ ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
 mkdir -p "$BIN_DIR" "$APPS_DIR" "$ICON_DIR"
 
 install -m 755 "target/release/$BIN_NAME" "$BIN_DIR/$BIN_NAME"
+# The small binary every agent runs at each moment of its turn. It has to sit
+# beside the window's own binary, which is where the window looks for it; without
+# it the window falls back to running itself as the hook, which works and costs
+# every tool call an agent makes about 12ms of loading GTK.
+install -m 755 "target/release/$BIN_NAME-hook" "$BIN_DIR/$BIN_NAME-hook"
 install -m 644 assets/icon.svg "$ICON_DIR/$BIN_NAME.svg"
 
 # The desktop file's id must match the GTK application id (APP_ID) so that

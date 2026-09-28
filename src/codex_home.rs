@@ -58,11 +58,7 @@ pub fn build(real: &Path, into: &Path, hooks_json: &str) -> std::io::Result<()> 
             if name == std::ffi::OsStr::new(HOOKS_FILE) {
                 continue;
             }
-            let link = into.join(&name);
-            if std::fs::symlink_metadata(&link).is_ok() {
-                continue;
-            }
-            let _ = std::os::unix::fs::symlink(entry.path(), link);
+            mirror(&entry.path(), &into.join(&name));
         }
     }
 
@@ -71,47 +67,33 @@ pub fn build(real: &Path, into: &Path, hooks_json: &str) -> std::io::Result<()> 
     // replacing them - somebody who loses their own hooks by opening a window
     // manager has no reason at all to connect the two events.
     let merged = match std::fs::read_to_string(real.join(HOOKS_FILE)) {
-        Ok(theirs) => merge(&theirs, hooks_json),
+        Ok(theirs) => crate::hooks::merge_hook_files(&theirs, hooks_json),
         Err(_) => hooks_json.to_string(),
     };
-    std::fs::write(into.join(HOOKS_FILE), merged)
+    crate::hooks::write_if_changed(&into.join(HOOKS_FILE), &merged)
 }
 
-/// Adds our event entries to theirs, keeping both.
+/// Points `link` at `source`, unless something that isn't a link is already
+/// there.
 ///
-/// Anything unparseable on their side means ours alone: a codex that cannot
-/// read their file was not going to run their hooks either, and losing our dots
-/// as well would help nobody.
-fn merge(theirs: &str, ours: &str) -> String {
-    let (Ok(mut theirs), Ok(ours)) = (
-        serde_json::from_str::<serde_json::Value>(theirs),
-        serde_json::from_str::<serde_json::Value>(ours),
-    ) else {
-        return ours.to_string();
-    };
-
-    let Some(our_events) = ours["hooks"].as_object().cloned() else {
-        return ours.to_string();
-    };
-    if !theirs["hooks"].is_object() {
-        theirs["hooks"] = serde_json::json!({});
-    }
-    let their_events = theirs["hooks"]
-        .as_object_mut()
-        .expect("just replaced with an object if it wasn't one");
-    for (event, entries) in our_events {
-        let slot = their_events
-            .entry(event)
-            .or_insert_with(|| serde_json::json!([]));
-        match (slot.as_array_mut(), entries.as_array()) {
-            (Some(slot), Some(entries)) => slot.extend(entries.iter().cloned()),
-            // Their value for this event isn't a list at all. It is not this
-            // app's job to have an opinion about that, but it is this app's job
-            // to still get its own hook registered.
-            _ => *slot = entries,
+/// A link that points somewhere *else* is re-pointed, not kept. It used to be
+/// kept - "already present" was the whole test - so a home built while
+/// `CODEX_HOME` named one directory went on serving that directory's auth and
+/// config after it named another. Only a real file is left alone: that is state
+/// codex created in the private home itself (a first login inside a pane, say),
+/// and deleting somebody's state to tidy a mirror is not this function's call.
+pub(crate) fn mirror(source: &Path, link: &Path) {
+    match std::fs::symlink_metadata(link) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            if std::fs::read_link(link).is_ok_and(|target| target == source) {
+                return;
+            }
+            let _ = std::fs::remove_file(link);
         }
+        Ok(_) => return,
+        Err(_) => {}
     }
-    theirs.to_string()
+    let _ = std::os::unix::fs::symlink(source, link);
 }
 
 /// The private home for this run, or `None` if it could not be built - in which
@@ -131,6 +113,14 @@ pub fn prepare(hook_bin: &str, bell_hook: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".codex")))?;
 
+    // A window started from inside one of its own codex panes inherits that
+    // pane's `CODEX_HOME` - which is this private home. Mirroring it into
+    // itself would link every entry to itself and append another copy of our
+    // hooks to the hooks it already has, once per pane, for ever.
+    if same_directory(&real, &into) {
+        return None;
+    }
+
     build(
         &real,
         &into,
@@ -140,10 +130,46 @@ pub fn prepare(hook_bin: &str, bell_hook: &str) -> Option<PathBuf> {
     Some(into)
 }
 
+/// Whether two paths name one directory, however they are spelled.
+pub(crate) fn same_directory(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    /// A home built while `CODEX_HOME` named one place must follow it to the
+    /// next, rather than serving the old place's auth for ever.
+    #[test]
+    fn a_link_to_an_old_home_is_repointed() {
+        let (real, into) = scratch("repoint");
+        let elsewhere = real.parent().unwrap().join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        fs::write(elsewhere.join("auth.json"), "old").unwrap();
+        fs::create_dir_all(&into).unwrap();
+        std::os::unix::fs::symlink(elsewhere.join("auth.json"), into.join("auth.json")).unwrap();
+
+        fs::write(real.join("auth.json"), "new").unwrap();
+        build(&real, &into, "{}").expect("builds");
+        assert_eq!(fs::read_to_string(into.join("auth.json")).unwrap(), "new");
+    }
+
+    /// State codex made inside the private home is somebody's, and a mirror is
+    /// not allowed to delete it.
+    #[test]
+    fn a_real_file_in_the_private_home_is_left_alone() {
+        let (real, into) = scratch("keep");
+        fs::create_dir_all(&into).unwrap();
+        fs::write(into.join("history.jsonl"), "mine").unwrap();
+        fs::write(real.join("history.jsonl"), "theirs").unwrap();
+        build(&real, &into, "{}").expect("builds");
+        assert_eq!(fs::read_to_string(into.join("history.jsonl")).unwrap(), "mine");
+    }
 
     /// A scratch pair of directories, unique per test so the suite can run
     /// them in parallel the way it runs everything else.

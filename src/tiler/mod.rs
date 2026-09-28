@@ -12,7 +12,7 @@ mod panes;
 mod resize;
 
 pub(crate) use manager::{GridDragState, Handle, TilerLayout};
-pub(crate) use panes::Tally;
+pub(crate) use panes::{AgentRowFacts, Report, Tally};
 
 use crate::agent::Kind;
 use crate::layout::Mode;
@@ -106,6 +106,11 @@ mod imp {
         /// stops that, since only the focused pane broadcasts - this is the belt
         /// to that braces.
         pub broadcasting: Cell<bool>,
+        /// The agents this group had running when the window last closed, and
+        /// the conversation each was in, not yet brought back. What the empty
+        /// state's "Resume" button offers, and what a session keeps saying
+        /// until it is taken up - see `Tiler::resume_saved`.
+        pub saved: RefCell<Vec<(Kind, Option<String>)>>,
     }
 
     #[glib::object_subclass]
@@ -262,7 +267,7 @@ mod imp {
             // is a sibling of this widget rather than a child of it, so it paints
             // its own - see `appearance::content_css`.)
             if tiles.is_empty() {
-                snapshot.append_color(&floor, &bounds);
+                paint_floor(snapshot, &bounds, &floor);
                 return;
             }
 
@@ -277,9 +282,39 @@ mod imp {
                 snapshot.pop();
             }
             snapshot.pop();
-            snapshot.append_color(&floor, &bounds);
+            paint_floor(snapshot, &bounds, &floor);
             snapshot.pop();
         }
+    }
+
+    /// The floor's paint: its flat tone, and a horizon.
+    ///
+    /// The horizon is the lamp's colour - @filament, the theme's accent - rising
+    /// from below the bottom edge and gone well before the top, so the floor
+    /// reads as a space with a light in it rather than as a colour. It fades out
+    /// before it reaches the header, which paints its own flat floor, so the two
+    /// meet without a seam. And it is laid on the floor rather than over the
+    /// window, so the tiles - cut out of this - never have it behind them, and a
+    /// glass pane shows the desktop through it rather than a glow.
+    fn paint_floor(snapshot: &gtk4::Snapshot, bounds: &graphene::Rect, floor: &gdk::RGBA) {
+        snapshot.append_color(floor, bounds);
+        let (width, height) = (bounds.width(), bounds.height());
+        let opacity = crate::appearance::get().window_opacity as f32;
+        let lamp = crate::palette::color("filament");
+        let stops = [
+            gsk::ColorStop::new(0.0, lamp.to_rgba_alpha(0.20 * opacity)),
+            gsk::ColorStop::new(0.45, lamp.to_rgba_alpha(0.07 * opacity)),
+            gsk::ColorStop::new(1.0, lamp.to_rgba_alpha(0.0)),
+        ];
+        snapshot.append_radial_gradient(
+            bounds,
+            &graphene::Point::new(width * 0.5, height * 1.1),
+            width * 0.7,
+            height * 0.78,
+            0.0,
+            1.0,
+            &stops,
+        );
     }
 
     impl WidgetImpl for Tiler {
@@ -352,19 +387,27 @@ impl Tiler {
             .expect("Tiler's layout manager is always a TilerLayout")
     }
 
-
-
-
-
     /// Change focus, refresh the focus-border CSS, re-tile (needed in
     /// Monocle mode, harmless elsewhere), and grab keyboard focus onto the
-    /// newly-focused pane's terminal.
+    /// newly-focused pane's terminal. For the things a person does - a click,
+    /// a key, a drawer row - which always mean "put me there".
     fn set_focus(&self, idx: usize) {
-        self.imp().focus.set(idx);
+        self.move_focus(idx, true);
+    }
+
+    /// The same, deciding whether the keyboard goes with it. Things that happen
+    /// *to* a group - an agent exiting, a background agent arriving - move the
+    /// lit tile but must not move the keyboard out of wherever you are typing.
+    fn move_focus(&self, idx: usize, take_keyboard: bool) {
+        let changed = self.imp().focus.replace(idx) != idx;
         self.update_focus_style();
         self.relayout();
-        self.grab_focus_on_current();
-        self.notify_layout();
+        if take_keyboard {
+            self.grab_focus_on_current();
+        }
+        if changed {
+            self.notify_layout();
+        }
     }
 
     /// Push this widget's focus index into the layout manager and request a
@@ -404,18 +447,6 @@ impl Tiler {
             pane.frame.set_parent(self);
         }
     }
-
-
-
-
-
-
-
-
-
-
-
-
 
     pub fn focus_next(&self) {
         let len = self.imp().panes.borrow().len();
@@ -633,7 +664,10 @@ impl Tiler {
 
     fn grab_focus_on_current(&self) {
         let focus = self.imp().focus.get();
-        if let Some(pane) = self.imp().panes.borrow().get(focus) {
+        // Cloned out of the list first: grabbing focus emits focus signals
+        // synchronously, and nothing should be holding the list when they run.
+        let pane = self.imp().panes.borrow().get(focus).cloned();
+        if let Some(pane) = pane {
             pane.focus_input();
         }
         self.notify_title();

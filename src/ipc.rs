@@ -1,9 +1,9 @@
 //! The wire between an agent hook and the window that spawned it.
 //!
-//! Every pane registers this binary's own `--hook` mode against six lifecycle
-//! events (see `hooks`). When one fires, the agent runs
-//! `agenttilecli --hook <event>`, that process writes a single line
-//! to this socket, and exits. The window is listening on the other end and moves
+//! Every pane registers a hook command against six lifecycle events (see
+//! `hooks`). When one fires, the agent runs `agenttilecli-hook <event>` - a
+//! small binary of its own, see `wire` for why - which writes a single line to
+//! this socket and exits. The window is listening on the other end and moves
 //! the pane's state.
 //!
 //! A socket rather than the terminal's byte stream, which is where the bell
@@ -18,34 +18,29 @@
 //! was never created, a line that could not be written. Losing a status update
 //! costs a stale dot in a sidebar. Blocking the hook costs the user's agent.
 
-use std::io::Write;
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::OnceLock;
-use std::time::Duration;
 
 use gtk4::gio;
 use gtk4::gio::prelude::*;
 use gtk4::glib;
 
-use crate::hooks::Event;
-
-/// How long the hook waits on a window that isn't reading. Generous for a local
-/// socket handshake, and far below anything a person would notice an agent pause
-/// for if the window has wedged.
-const HOOK_TIMEOUT: Duration = Duration::from_millis(250);
+/// The protocol itself - the message, its encoding, and the environment that
+/// carries the socket's address - lives in `wire`, which the hook binary
+/// compiles too. This module is the window's end of it: the listener.
+pub use crate::wire::{ENV_BIN, ENV_PANE, ENV_SOCKET, Message};
 
 /// The longest line this socket will assemble before hanging up on whoever is
 /// writing it.
 ///
-/// Sized from what a message actually is, which is tiny: a pane id (`p` and a
+/// Sized from what a message actually is, which is small: a pane id (`p` and a
 /// counter), the longest event name there is ("UserPromptSubmit", sixteen
-/// bytes), and the one field this program doesn't choose - the tool name, a
-/// short word for a builtin and an `mcp__server__tool` triple at its longest.
-/// Two tabs and a newline, and the whole message is well under a hundred bytes,
-/// so 4 KiB is two orders of magnitude of headroom for the field with any give
-/// in it. Anything past it is, by definition, not one of ours.
+/// bytes), and three fields this program doesn't choose - a tool name, a session
+/// id, and the sentence an agent says when it stops to ask - each of which
+/// `wire` cuts to a few hundred bytes before it is sent. So the longest message
+/// the hook can produce is a little over a kilobyte, and 4 KiB is headroom
+/// rather than a budget. Anything past it is, by definition, not one of ours.
 ///
 /// A hard cap rather than a hint, because the obvious reader has no cap at all:
 /// `DataInputStream::read_line` (`g_data_input_stream_read_line`) *doubles* its
@@ -58,56 +53,6 @@ const HOOK_TIMEOUT: Duration = Duration::from_millis(250);
 /// `Message::parse` was already careful about what a line says; this is the
 /// other half - how long it is allowed to be before nobody cares what it says.
 const MAX_LINE: usize = 4096;
-
-/// The environment a pane hands its agent so the hooks can find their way home.
-pub const ENV_SOCKET: &str = "ATC_SOCKET";
-pub const ENV_PANE: &str = "ATC_PANE_ID";
-pub const ENV_BIN: &str = "ATC_HOOK_BIN";
-
-/// One thing an agent said about itself.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Message {
-    /// Which pane said it - the id its agent was launched with.
-    pub pane: String,
-    pub event: Event,
-    /// Which tool, when the event carries one.
-    pub tool: Option<String>,
-}
-
-impl Message {
-    /// The wire form: three tab-separated fields and a newline.
-    ///
-    /// Tabs rather than spaces because a tool name is chosen by an agent and a
-    /// pane id by us, and only one of those is under this program's control.
-    /// Newline-terminated because the reader is a `BufReader::read_line` and a
-    /// message that never terminates is a reader that never returns.
-    pub fn encode(&self) -> String {
-        let tool = self.tool.as_deref().unwrap_or_default();
-        format!("{}\t{}\t{}\n", self.pane, self.event.name(), tool)
-    }
-
-    /// Parses a line, or `None` if it is not one of ours.
-    ///
-    /// Everything about this is defensive. The socket has 0700 on its directory
-    /// and lives under the user's own runtime dir, so this is not a trust
-    /// boundary in the security sense - but it is one in the "a stray write
-    /// should not take the window down" sense, and the cost of tolerance here is
-    /// one ignored line.
-    pub fn parse(line: &str) -> Option<Self> {
-        let mut fields = line.trim_end_matches('\n').split('\t');
-        let pane = fields.next()?;
-        let event = Event::parse(fields.next()?)?;
-        let tool = fields.next().filter(|t| !t.is_empty());
-        if pane.is_empty() {
-            return None;
-        }
-        Some(Message {
-            pane: pane.to_string(),
-            event,
-            tool: tool.map(str::to_string),
-        })
-    }
-}
 
 /// This window's socket, once it is listening.
 ///
@@ -269,13 +214,6 @@ pub fn remove_socket(path: &std::path::Path) {
     let _ = std::fs::remove_file(path);
 }
 
-/// Sends one message and returns - the whole of the `--hook` process's job.
-pub fn send(socket: &str, message: &Message) -> std::io::Result<()> {
-    let stream = UnixStream::connect(socket)?;
-    stream.set_write_timeout(Some(HOOK_TIMEOUT))?;
-    (&stream).write_all(message.encode().as_bytes())
-}
-
 /// Best-effort 0700 on the socket's directory.
 ///
 /// Best-effort because failing to tighten permissions is not a reason to refuse
@@ -289,61 +227,6 @@ fn restrict(dir: &std::path::Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_message_round_trips() {
-        let m = Message {
-            pane: "p7".into(),
-            event: Event::PreToolUse,
-            tool: Some("Bash".into()),
-        };
-        assert_eq!(Message::parse(&m.encode()), Some(m));
-    }
-
-    #[test]
-    fn a_message_without_a_tool_round_trips() {
-        let m = Message {
-            pane: "p7".into(),
-            event: Event::Stop,
-            tool: None,
-        };
-        assert_eq!(Message::parse(&m.encode()), Some(m));
-    }
-
-    /// A tool name is chosen by claude, not by this program. A name with a space
-    /// in it must not turn into a different message.
-    #[test]
-    fn a_tool_name_with_spaces_survives() {
-        let m = Message {
-            pane: "p1".into(),
-            event: Event::PreToolUse,
-            tool: Some("Bash Command Runner".into()),
-        };
-        let parsed = Message::parse(&m.encode()).expect("parses");
-        assert_eq!(parsed.tool.as_deref(), Some("Bash Command Runner"));
-    }
-
-    /// Nothing arriving on this socket should be able to panic the window.
-    #[test]
-    fn rubbish_is_ignored_rather_than_trusted() {
-        for line in [
-            "",
-            "\n",
-            "onlyonefield\n",
-            "\tStop\t\n",         // no pane
-            "p1\tNotAnEvent\t\n", // unknown event
-            "p1\n",               // truncated
-            "p1\tStop",           // no newline at all
-        ] {
-            let parsed = Message::parse(line);
-            assert!(
-                parsed.is_none() || parsed.as_ref().is_some_and(|m| !m.pane.is_empty()),
-                "accepted {line:?}",
-            );
-        }
-        assert_eq!(Message::parse("p1\tNotAnEvent\t"), None);
-        assert_eq!(Message::parse("\tStop\t"), None);
-    }
 
     /// The unlink is best-effort in both directions: it takes the file away when
     /// there is one, and says nothing when there isn't. A window closing after
@@ -364,20 +247,6 @@ mod tests {
         remove_socket(&dir.join("never-existed.sock"));
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A line with no trailing newline is still a line - a writer that died
-    /// mid-flush should not produce a message that looks fine but isn't.
-    #[test]
-    fn a_message_missing_its_newline_still_parses() {
-        assert_eq!(
-            Message::parse("p1\tStop"),
-            Some(Message {
-                pane: "p1".into(),
-                event: Event::Stop,
-                tool: None,
-            }),
-        );
     }
 
     /// A stream that hands over one piece per read, which is what a socket read
@@ -467,11 +336,7 @@ mod tests {
         let line = read_line_from(&[b"p1\tStop\t\n", &flood]).expect("the line before the flood");
         assert_eq!(
             Message::parse(&String::from_utf8_lossy(&line)),
-            Some(Message {
-                pane: "p1".into(),
-                event: Event::Stop,
-                tool: None,
-            }),
+            Some(Message::bare("p1", crate::wire::Event::Stop)),
         );
     }
 }

@@ -116,5 +116,11 @@ printf 'live app  %s (untouched)\n\n' "$(pgrep -x agenttilecli >/dev/null && ech
 # Run from the scratch project, build from the repo. `cargo run` hands the
 # binary whatever cwd it inherits, so this is what keeps agents out of the
 # checkout; --manifest-path is what still lets cargo find the crate.
+#
+# Every binary first, not just the window: `cargo run` builds only the one it
+# runs, and the window looks for `agenttilecli-hook` beside itself. Without this
+# a dev window's agents would report through a stale hook binary, or through the
+# slow fallback, and neither is what a change to the hook is being tested with.
 cd "$project"
+cargo build --manifest-path "$repo/Cargo.toml" --bins
 exec cargo run --manifest-path "$repo/Cargo.toml" "$@"

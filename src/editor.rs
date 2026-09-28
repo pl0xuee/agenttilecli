@@ -22,10 +22,12 @@
 //! back as an `Err` sentence for the caller to toast, because a click that
 //! silently does nothing reads as a broken app.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
-use gtk4::glib;
+use gtk4::{gio, glib};
 use sourceview5::prelude::*;
 
 /// Where the editor stops pretending to be an editor. Past this a file is a
@@ -62,19 +64,23 @@ fn load(path: &Path) -> Result<String, String> {
 }
 
 /// One editor: the widget that shows a file, the buffer that holds it, and
-/// the controls the pane's head strip packs. Everything GTK in here is a
-/// reference-counted handle, which is what lets the tiler's close flow hold a
-/// cheap clone while the pane owns the original.
+/// the controls the pane's head strip packs.
 ///
 /// "One editor", not "one open file": which file it holds changes over its
-/// life (see `open`), which is why the path and name sit behind
-/// `Rc<RefCell>`. A `Clone` of this struct is a second handle to the *same*
-/// editor, the way its widget fields already are, and the clones the close
-/// flow and the save shortcut hold have to see a switch. A derived clone of
-/// a bare `RefCell` would copy the path instead of sharing it, and Ctrl+S
-/// after switching files would write the new text over the old file.
+/// life (see `open`). A `Clone` of this is a second handle to the *same*
+/// editor - the close flow and the save shortcut each hold one, and they have
+/// to see a switch, or Ctrl+S after switching files would write the new text
+/// over the old file.
+///
+/// A handle around an `Rc` rather than a struct of handles, and the reason is
+/// the closures. The save button and the Ctrl+S shortcut both need the editor,
+/// and both are owned by widgets the editor owns - so a strong handle in either
+/// is a cycle, and every editor ever closed stayed in memory with its buffer
+/// (up to 2 MB) and its whole undo history. The closures hold a `Weak` now.
 #[derive(Clone)]
-pub struct Editor {
+pub struct Editor(Rc<Inner>);
+
+pub struct Inner {
     /// The body the pane frames: the error line, then the scrolled view.
     pub root: gtk4::Box,
     pub view: sourceview5::View,
@@ -82,15 +88,45 @@ pub struct Editor {
     /// Undo, redo, Save - built here so their sensitivity can be wired to the
     /// buffer they act on, packed by the pane whose strip they sit in.
     pub controls: gtk4::Box,
-    path: std::rc::Rc<std::cell::RefCell<PathBuf>>,
-    name: std::rc::Rc<std::cell::RefCell<String>>,
+    path: RefCell<PathBuf>,
+    name: RefCell<String>,
+    /// The file's contents as this editor last read or wrote them - what "the
+    /// disk" meant the last time the two agreed.
+    ///
+    /// This is what makes the editor safe beside agents, whose whole job is
+    /// editing these files. Without it a save was a blind overwrite: open a file,
+    /// let claude change it, fix a typo, press Ctrl+S, and claude's change was
+    /// gone - with nothing on screen to say it had ever been there. Now a save
+    /// re-reads the file first, and a file that no longer says this is a file
+    /// somebody else has written to since.
+    on_disk: RefCell<String>,
+    /// Watches the open file, so a buffer with no edits of its own follows the
+    /// agents' edits live, and one with edits says the file moved under it.
+    /// Replaced when the editor switches file.
+    monitor: RefCell<Option<gio::FileMonitor>>,
     /// Where a failed save says why, since an editor pane has no terminal to
     /// say it in and a toast belongs to the window, not the tile. Hidden until
     /// there is something to admit.
     error: gtk4::Label,
 }
 
+impl std::ops::Deref for Editor {
+    type Target = Inner;
+
+    fn deref(&self) -> &Inner {
+        &self.0
+    }
+}
+
 impl Editor {
+    fn downgrade(&self) -> Weak<Inner> {
+        Rc::downgrade(&self.0)
+    }
+
+    fn from_weak(weak: &Weak<Inner>) -> Option<Editor> {
+        weak.upgrade().map(Editor)
+    }
+
     /// Opens `path` for editing, or says in a sentence why it won't.
     pub fn load(path: &Path) -> Result<Editor, String> {
         let content = load(path)?;
@@ -142,7 +178,7 @@ impl Editor {
         root.append(&error);
         root.append(&scrolled);
 
-        let editor = Editor {
+        let editor = Editor(Rc::new(Inner {
             root,
             view,
             buffer,
@@ -150,10 +186,12 @@ impl Editor {
                 .orientation(gtk4::Orientation::Horizontal)
                 .spacing(2)
                 .build(),
-            path: std::rc::Rc::new(std::cell::RefCell::new(PathBuf::new())),
-            name: std::rc::Rc::new(std::cell::RefCell::new(String::new())),
+            path: RefCell::new(PathBuf::new()),
+            name: RefCell::new(String::new()),
+            on_disk: RefCell::new(String::new()),
+            monitor: RefCell::new(None),
             error,
-        };
+        }));
         editor.apply(path, &content);
         editor.build_controls();
         editor.install_save_key();
@@ -210,8 +248,94 @@ impl Editor {
         self.buffer.set_modified(false);
 
         self.error.set_visible(false);
+        // A new file needs a new watch; the same file reloaded keeps the one it
+        // has - GIO watches a file by its name in its directory, so it follows
+        // the file through the rename-over most tools save with.
+        let same_file = *self.path.borrow() == path && self.monitor.borrow().is_some();
         *self.path.borrow_mut() = path.to_path_buf();
         *self.name.borrow_mut() = name_of(path);
+        *self.on_disk.borrow_mut() = content.to_string();
+        if !same_file {
+            self.watch(path);
+        }
+    }
+
+    /// Starts watching `path` for changes made by anything but this editor.
+    ///
+    /// Every event is treated as "look again" rather than decoded: an agent
+    /// writes a file in place, a formatter replaces it by rename, an editor
+    /// elsewhere does both, and each arrives as a different sequence of events.
+    /// Re-reading and comparing is the one answer that is right for all of
+    /// them, and a file this editor will open is at most 2 MB. A short delay
+    /// folds the burst one write produces into one look.
+    fn watch(&self, path: &Path) {
+        let monitor = gio::File::for_path(path)
+            .monitor_file(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE)
+            .ok();
+        if let Some(monitor) = &monitor {
+            let weak = self.downgrade();
+            let pending = Rc::new(std::cell::Cell::new(false));
+            monitor.connect_changed(move |_, _, _, event| {
+                if matches!(
+                    event,
+                    gio::FileMonitorEvent::AttributeChanged
+                        | gio::FileMonitorEvent::PreUnmount
+                        | gio::FileMonitorEvent::Unmounted
+                ) || pending.replace(true)
+                {
+                    return;
+                }
+                let weak = weak.clone();
+                let pending = pending.clone();
+                glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
+                    pending.set(false);
+                    if let Some(editor) = Editor::from_weak(&weak) {
+                        editor.on_disk_changed();
+                    }
+                });
+            });
+        }
+        *self.monitor.borrow_mut() = monitor;
+    }
+
+    /// What the file says now, if it can still be read as the editor would.
+    fn read_disk(&self) -> Option<String> {
+        load(&self.path.borrow()).ok()
+    }
+
+    /// Answers the file changing under the editor.
+    ///
+    /// With no edits of its own the buffer simply follows - the agents are
+    /// editing this file, and a pane showing yesterday's version of it is
+    /// worse than useless. The cursor stays on the line it was on, so reading
+    /// along while an agent works doesn't throw you back to the top each time.
+    ///
+    /// With edits of its own it can't follow without throwing them away, so it
+    /// says what happened instead, and leaves the choice to the next save.
+    fn on_disk_changed(&self) {
+        let Some(now) = self.read_disk() else {
+            return;
+        };
+        if now == *self.on_disk.borrow() {
+            return;
+        }
+        if self.is_modified() {
+            self.error.set_label(&format!(
+                "{} changed on disk \u{2014} saving will ask before overwriting it",
+                self.name.borrow(),
+            ));
+            self.error.set_visible(true);
+            return;
+        }
+        let line = self
+            .buffer
+            .iter_at_mark(&self.buffer.get_insert())
+            .line();
+        let path = self.path.borrow().clone();
+        self.apply(&path, &now);
+        if let Some(iter) = self.buffer.iter_at_line(line) {
+            self.buffer.place_cursor(&iter);
+        }
     }
 
     /// The head strip's three verbs. Undo and redo answer to the buffer's own
@@ -249,8 +373,12 @@ impl Editor {
             });
         }
         {
-            let editor = self.clone();
-            save.connect_clicked(move |_| editor.save());
+            let weak = self.downgrade();
+            save.connect_clicked(move |_| {
+                if let Some(editor) = Editor::from_weak(&weak) {
+                    editor.save();
+                }
+            });
         }
 
         self.controls.append(&undo);
@@ -263,32 +391,95 @@ impl Editor {
     /// are editing - a Ctrl+S over some other pane's terminal must keep
     /// meaning whatever the program in that terminal says it means.
     fn install_save_key(&self) {
-        let editor = self.clone();
+        let weak = self.downgrade();
         let shortcuts = gtk4::ShortcutController::new();
         shortcuts.add_shortcut(gtk4::Shortcut::new(
             gtk4::ShortcutTrigger::parse_string("<Control>s"),
             Some(gtk4::CallbackAction::new(move |_, _| {
-                editor.save();
+                if let Some(editor) = Editor::from_weak(&weak) {
+                    editor.save();
+                }
                 glib::Propagation::Stop
             })),
         ));
         self.view.add_controller(shortcuts);
     }
 
-    /// Writes the buffer back to disk. Success is silent - the Save button
-    /// dimming and the dot going quiet are the receipt - and failure stays on
-    /// screen in the error line until a save lands, with the buffer still
-    /// modified so nothing anywhere claims a save that didn't happen.
+    /// Writes the buffer back to disk - unless the file has changed since this
+    /// editor last read it, in which case it asks first (see `on_disk`).
+    ///
+    /// Success is silent - the Save button dimming and the dot going quiet are
+    /// the receipt - and failure stays on screen in the error line until a save
+    /// lands, with the buffer still modified so nothing anywhere claims a save
+    /// that didn't happen.
     pub fn save(&self) {
+        // Read at the moment of writing, not when the button was wired: this
+        // editor switches files (see `open`), and a save must land on the file
+        // whose text it is.
+        let current = std::fs::read(&*self.path.borrow()).ok();
+        let changed_under_us = current
+            .as_deref()
+            .is_some_and(|bytes| bytes != self.on_disk.borrow().as_bytes());
+        if changed_under_us {
+            self.ask_about_conflict();
+            return;
+        }
+        self.write();
+    }
+
+    /// The file moved under an edit: say so, and let the person holding both
+    /// versions pick. Keep editing is the default, because it is the one answer
+    /// that loses nothing.
+    fn ask_about_conflict(&self) {
+        let ask = adw::AlertDialog::new(
+            Some("The file changed on disk"),
+            Some(&format!(
+                "{} was changed by something else - an agent, probably - since \
+                 you started editing it. Saving now would undo that change.",
+                self.name.borrow(),
+            )),
+        );
+        ask.add_responses(&[
+            ("cancel", "Keep editing"),
+            ("reload", "Reload theirs"),
+            ("overwrite", "Overwrite"),
+        ]);
+        ask.set_response_appearance("overwrite", adw::ResponseAppearance::Destructive);
+        ask.set_default_response(Some("cancel"));
+        ask.set_close_response("cancel");
+        let weak = self.downgrade();
+        ask.connect_response(None, move |_, response| {
+            let Some(editor) = Editor::from_weak(&weak) else { return };
+            match response {
+                "overwrite" => editor.write(),
+                "reload" => {
+                    if let Some(theirs) = editor.read_disk() {
+                        let path = editor.path.borrow().clone();
+                        editor.apply(&path, &theirs);
+                    }
+                }
+                _ => {}
+            }
+        });
+        ask.present(Some(&self.root));
+    }
+
+    /// Writes the buffer to the file, atomically and in place.
+    ///
+    /// Through a temporary file and a rename, beside the original, because a
+    /// plain write truncates first - so a full disk half way through left the
+    /// file cut short, which is the one outcome worse than the save failing.
+    /// The rename lands on the symlink's *target* and the new file wears the
+    /// old one's permissions, so saving a script doesn't make it unrunnable and
+    /// saving through a link doesn't replace the link with a copy.
+    fn write(&self) {
         let text = self
             .buffer
             .text(&self.buffer.start_iter(), &self.buffer.end_iter(), true);
-        // The path read at the moment of writing, not captured when the
-        // button was wired: this editor switches files (see `open`), and a
-        // save must land on the file whose text it is.
         let path = self.path.borrow().clone();
-        match std::fs::write(&path, text.as_bytes()) {
+        match write_in_place(&path, text.as_bytes()) {
             Ok(()) => {
+                *self.on_disk.borrow_mut() = text.to_string();
                 self.buffer.set_modified(false);
                 self.error.set_visible(false);
             }
@@ -326,9 +517,10 @@ impl Editor {
         ask.set_response_appearance("save", adw::ResponseAppearance::Suggested);
         ask.set_default_response(Some("save"));
         ask.set_close_response("cancel");
-        let editor = self.clone();
+        let weak = self.downgrade();
         ask.connect_response(None, move |_, response| match response {
             "save" => {
+                let Some(editor) = Editor::from_weak(&weak) else { return };
                 editor.save();
                 if !editor.is_modified() {
                     close();
@@ -339,6 +531,47 @@ impl Editor {
         });
         ask.present(Some(parent));
     }
+}
+
+/// Replaces `path`'s contents with `bytes` so that no reader - and no crash -
+/// ever sees half of them. See `Editor::write`.
+///
+/// Through a hidden temporary file beside the target - hidden so the folder
+/// tree, and any agent watching the directory, never shows a stray file for the
+/// instant it exists - and a rename over it.
+///
+/// Two cases can't be done that way and are written in place instead, as every
+/// editor has always done them: a directory the file may be written in but not
+/// added to, and a file with more than one name, where a rename would quietly
+/// split one file into two.
+fn write_in_place(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let meta = std::fs::metadata(&target).ok();
+    if meta.as_ref().is_some_and(|m| m.nlink() > 1) {
+        return std::fs::write(&target, bytes);
+    }
+    let name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let temporary = target.with_file_name(format!(".{name}.atc-{}.tmp", std::process::id()));
+    if let Err(e) = std::fs::write(&temporary, bytes) {
+        return if e.kind() == std::io::ErrorKind::PermissionDenied {
+            std::fs::write(&target, bytes)
+        } else {
+            Err(e)
+        };
+    }
+    if let Some(meta) = &meta {
+        let _ = std::fs::set_permissions(
+            &temporary,
+            std::fs::Permissions::from_mode(meta.permissions().mode()),
+        );
+    }
+    std::fs::rename(&temporary, &target).inspect_err(|_| {
+        let _ = std::fs::remove_file(&temporary);
+    })
 }
 
 /// One small verb for the head strip, in the close button's own geometry so
@@ -475,6 +708,148 @@ mod tests {
             let missing = std::env::temp_dir().join("atc-editor-switch-missing");
             assert!(editor.open(&missing).is_err());
             assert_eq!(editor.name(), name_of(&second.0), "a failed switch changes nothing");
+        });
+    }
+
+    /// The bug this editor used to have: an agent changes the file, you save
+    /// your own edit, and the agent's change silently vanishes. Now the save
+    /// sees the file has moved and stops to ask instead of writing.
+    #[test]
+    fn a_save_never_silently_overwrites_a_change_made_underneath_it() {
+        gtk_test(|| {
+            let scratch = Scratch::new("conflict", b"fn main() {}\n");
+            let editor = Editor::load(&scratch.0).expect("a text file loads");
+            editor.buffer.insert(&mut editor.buffer.end_iter(), "// mine\n");
+
+            // An agent writes to the file while the edit is open.
+            std::fs::write(&scratch.0, b"fn main() { agent(); }\n").expect("writes");
+            editor.save();
+
+            assert_eq!(
+                std::fs::read_to_string(&scratch.0).expect("readable"),
+                "fn main() { agent(); }\n",
+                "the agent's change is still on disk",
+            );
+            assert!(editor.is_modified(), "and the edit is still unsaved, not lost");
+
+            // Overwriting is still possible - on purpose.
+            editor.write();
+            assert_eq!(
+                std::fs::read_to_string(&scratch.0).expect("readable"),
+                "fn main() {}\n// mine\n",
+            );
+        });
+    }
+
+    /// With nothing of its own to lose, the buffer follows the file.
+    #[test]
+    fn a_clean_buffer_follows_the_file() {
+        gtk_test(|| {
+            let scratch = Scratch::new("follow", b"one\ntwo\n");
+            let editor = Editor::load(&scratch.0).expect("a text file loads");
+            std::fs::write(&scratch.0, b"one\ntwo\nthree\n").expect("writes");
+            editor.on_disk_changed();
+            let text = editor
+                .buffer
+                .text(&editor.buffer.start_iter(), &editor.buffer.end_iter(), true);
+            assert_eq!(text, "one\ntwo\nthree\n");
+            assert!(!editor.is_modified(), "following is not an edit");
+        });
+    }
+
+    /// The whole path, through the real file monitor rather than a direct call:
+    /// something else writes the file, and without anyone touching the editor
+    /// its buffer comes to say what the file says.
+    #[test]
+    fn the_monitor_carries_an_outside_write_into_a_clean_buffer() {
+        gtk_test(|| {
+            let scratch = Scratch::new("monitor", b"before\n");
+            let editor = Editor::load(&scratch.0).expect("a text file loads");
+            // Let the monitor's inotify watch settle before writing under it.
+            let context = glib::MainContext::default();
+            let settle = std::time::Instant::now() + std::time::Duration::from_millis(100);
+            while std::time::Instant::now() < settle {
+                context.iteration(false);
+            }
+
+            std::fs::write(&scratch.0, b"written by an agent\n").expect("writes");
+
+            let text = || {
+                editor
+                    .buffer
+                    .text(&editor.buffer.start_iter(), &editor.buffer.end_iter(), true)
+                    .to_string()
+            };
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            while text() != "written by an agent\n" && std::time::Instant::now() < deadline {
+                context.iteration(false);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert_eq!(text(), "written by an agent\n", "the buffer never followed the file");
+            assert!(!editor.is_modified());
+        });
+    }
+
+    /// A save keeps the file's permissions - saving a script must not make it
+    /// unrunnable - and lands through a symlink rather than replacing it.
+    #[test]
+    fn a_save_keeps_the_files_mode_and_its_links() {
+        use std::os::unix::fs::PermissionsExt;
+        gtk_test(|| {
+            let scratch = Scratch::new("mode", b"#!/bin/sh\n");
+            std::fs::set_permissions(&scratch.0, std::fs::Permissions::from_mode(0o755))
+                .expect("chmod");
+            let link = std::env::temp_dir().join(format!("atc-editor-link-{}", std::process::id()));
+            let _ = std::fs::remove_file(&link);
+            std::os::unix::fs::symlink(&scratch.0, &link).expect("symlink");
+
+            let editor = Editor::load(&link).expect("loads through the link");
+            editor.buffer.insert(&mut editor.buffer.end_iter(), "echo hi\n");
+            editor.save();
+
+            assert!(
+                std::fs::symlink_metadata(&link).expect("the link").is_symlink(),
+                "the link is still a link",
+            );
+            assert_eq!(
+                std::fs::read_to_string(&scratch.0).expect("readable"),
+                "#!/bin/sh\necho hi\n",
+                "and the save landed on its target",
+            );
+            let mode = std::fs::metadata(&scratch.0).expect("meta").permissions().mode();
+            assert_eq!(mode & 0o777, 0o755, "and the target is still executable");
+            let _ = std::fs::remove_file(&link);
+        });
+    }
+
+    /// A file with two names stays one file: a rename would have given the
+    /// saved text to one name and left the old text under the other.
+    #[test]
+    fn a_hard_linked_file_is_saved_in_place() {
+        gtk_test(|| {
+            let scratch = Scratch::new("hardlink", b"one");
+            let other = std::env::temp_dir().join(format!("atc-editor-other-{}", std::process::id()));
+            let _ = std::fs::remove_file(&other);
+            std::fs::hard_link(&scratch.0, &other).expect("hard link");
+            let editor = Editor::load(&scratch.0).expect("loads");
+            editor.buffer.insert(&mut editor.buffer.end_iter(), " two");
+            editor.save();
+            assert_eq!(std::fs::read_to_string(&other).expect("readable"), "one two");
+            let _ = std::fs::remove_file(&other);
+        });
+    }
+
+    /// The leak this struct's shape exists to prevent: dropping the last handle
+    /// has to drop the editor, buffer and all, even though its own widgets hold
+    /// closures that call back into it.
+    #[test]
+    fn a_closed_editor_is_actually_freed() {
+        gtk_test(|| {
+            let scratch = Scratch::new("leak", b"text");
+            let editor = Editor::load(&scratch.0).expect("loads");
+            let weak = editor.downgrade();
+            drop(editor);
+            assert!(weak.upgrade().is_none(), "something still holds the editor");
         });
     }
 

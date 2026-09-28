@@ -14,6 +14,7 @@
 //! this; silently ignoring what they typed and carrying on with defaults is the
 //! behaviour that has people convinced the file does nothing.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -41,10 +42,25 @@ pub fn get() -> &'static Config {
 /// Anything wrong with the file, kept for the window to report once it exists.
 static PROBLEM: OnceLock<Option<String>> = OnceLock::new();
 
+/// Whether the file's settings are the ones in effect - `false` only when it
+/// couldn't be read or parsed and the run fell back to defaults.
+static IN_EFFECT: OnceLock<bool> = OnceLock::new();
+
 /// Installs the config for the rest of the run. Called once, from `main`.
 pub fn install(loaded: Loaded) {
     let _ = ACTIVE.set(loaded.config);
     let _ = PROBLEM.set(loaded.problem);
+    let _ = IN_EFFECT.set(loaded.in_effect);
+}
+
+/// Whether the config file is being used at all, as opposed to having been set
+/// aside for defaults. A file that is in effect can still have a line in it
+/// that wasn't - a deprecated key, a shortcut that names no command - and the
+/// report says which of the two it is, because "your config wasn't used" about
+/// a file that was is how a person ends up re-reading a working file for an
+/// evening.
+pub fn in_effect() -> bool {
+    IN_EFFECT.get().copied().unwrap_or(true)
 }
 
 /// What was wrong with the config file, if anything.
@@ -116,9 +132,20 @@ pub struct Config {
     /// preferences dialog applies it live so the judgement can be made by looking,
     /// which is the only way it can honestly be made at all.
     pub pane_opacity: f64,
-    /// The terminal font, as Pango describes one ("Fira Mono 10"). Empty means
+    /// The terminal font, as Pango describes one ("JetBrains Mono 10"). Empty means
     /// the desktop's own monospace.
     pub font: String,
+    /// Whether an agent that finishes, or stops to ask something, while you
+    /// aren't looking says so with a desktop notification (see `notify`). On by
+    /// default: it is the one signal that reaches you away from the window,
+    /// which is where running agents in parallel leaves you most of the time.
+    pub notifications: bool,
+    /// Keyboard shortcuts moved from their defaults, by command id:
+    /// `find = "Super+Alt+F"`, or `"none"` to give one up. A map rather than
+    /// named fields because there are forty commands and a person wants to
+    /// write the two they care about; `keybindings::resolve` is what says so
+    /// when an id names nothing.
+    pub keys: BTreeMap<String, String>,
 }
 
 /// The per-agent command tables.
@@ -153,21 +180,24 @@ impl Default for Config {
             agent: AgentTable::default(),
             agents: 1,
             restore_agents: false,
-            // Six rather than the four this was before the tiles cast a shadow.
-            // A shadow needs somewhere to land, and at four the 16px ambient one
-            // was falling almost entirely on the neighbouring tile rather than on
-            // the floor between them.
-            gap: 6,
+            // Eight: the tiles are objects standing on a lit floor now, with
+            // rounder corners, a deeper shadow and a glow when focused or
+            // asking, and all of that needs floor between them to land on. It
+            // was four before the tiles cast a shadow, and six until 4.0.
+            gap: 8,
             scrollback: 10_000,
             window_opacity: 0.92,
             pane_opacity: 1.0,
-            // Fira Mono because the rack is already set in Fira Sans, which was
-            // drawn as its companion - so the chrome and the terminals end up
-            // speaking one type family rather than two. `monospace` behind it in
-            // the Pango string is not possible (a font description names one
-            // family), so a machine without Fira falls back through Pango's own
-            // substitution, which lands on the desktop monospace.
-            font: "Fira Mono 10".to_string(),
+            // JetBrains Mono, which is Omarchy's own terminal face and the
+            // monospace the chrome sets its values in - so a state in a head
+            // strip and the agent's output under it are one family. A list,
+            // which a Pango description allows: the Nerd Font build Omarchy
+            // installs, then the plain one, then Fira Mono (the old default),
+            // then whatever `monospace` is on this machine. This used to name
+            // Fira Mono alone, which is installed almost nowhere.
+            font: "JetBrainsMono Nerd Font, JetBrains Mono, Fira Mono, monospace 10".to_string(),
+            notifications: true,
+            keys: BTreeMap::new(),
         }
     }
 }
@@ -175,10 +205,12 @@ impl Default for Config {
 /// What reading the config produced, including anything worth telling the user.
 pub struct Loaded {
     pub config: Config,
-    /// Set when a file exists but could not be used. The app runs on defaults
-    /// and says so, rather than leaving someone to wonder why their edit did
-    /// nothing.
+    /// Set when a file exists but could not be used, or was used with
+    /// something in it worth saying. The app says so rather than leaving
+    /// someone to wonder why their edit did nothing.
     pub problem: Option<String>,
+    /// Whether `config` is the file's, rather than the defaults it fell back to.
+    pub in_effect: bool,
 }
 
 impl Config {
@@ -189,6 +221,7 @@ impl Config {
             return Loaded {
                 config: Config::default(),
                 problem: None,
+                in_effect: true,
             };
         };
         let text = match std::fs::read_to_string(&path) {
@@ -198,12 +231,14 @@ impl Config {
                 return Loaded {
                     config: Config::default(),
                     problem: None,
+                    in_effect: true,
                 };
             }
             Err(e) => {
                 return Loaded {
                     config: Config::default(),
                     problem: Some(format!("{} couldn't be read: {e}", path.display())),
+                    in_effect: false,
                 };
             }
         };
@@ -271,9 +306,14 @@ impl Config {
                 }
                 let problem =
                     (!notes.is_empty()).then(|| format!("{whence}:\n\n{}", notes.join("\n\n")));
-                Loaded { config, problem }
+                Loaded {
+                    config,
+                    problem,
+                    in_effect: true,
+                }
             }
             Err(e) => Loaded {
+                in_effect: false,
                 config: Config::default(),
                 // `to_string` on a toml error carries the line and column, which
                 // is the entire value of reporting this at all.
@@ -417,6 +457,26 @@ mod tests {
         assert_eq!(loaded.config.default_kind(), Kind::Claude, "and falls back");
     }
 
+    /// A file with a deprecated key in it is still the file in use, and saying
+    /// otherwise sends someone to re-read a config that works.
+    #[test]
+    fn the_report_knows_whether_the_file_was_used() {
+        assert!(!Config::parse("agents = = 3", "c").in_effect, "a broken file is set aside");
+        let noted = Config::parse("command = \"claude\"\n", "c");
+        assert!(noted.problem.is_some() && noted.in_effect, "a noted file is still used");
+    }
+
+    #[test]
+    fn a_key_can_be_moved_by_its_command_id() {
+        let loaded = Config::parse(
+            "[keys]\nfind = \"Super+Alt+F\"\nfocus-previous = \"Super+Alt+K\"\n",
+            "config.toml",
+        );
+        assert!(loaded.problem.is_none(), "{:?}", loaded.problem);
+        assert_eq!(loaded.config.keys.get("find").map(String::as_str), Some("Super+Alt+F"));
+        assert_eq!(loaded.config.keys.len(), 2);
+    }
+
     #[test]
     fn a_config_round_trips() {
         let config = Config {
@@ -440,6 +500,8 @@ mod tests {
             window_opacity: 0.8,
             pane_opacity: 0.95,
             font: "JetBrains Mono 11".into(),
+            notifications: false,
+            keys: BTreeMap::from([("find".to_string(), "Super+Alt+F".to_string())]),
         };
         let text = toml::to_string(&config).expect("serialises");
         let back = Config::parse(&text, "test");

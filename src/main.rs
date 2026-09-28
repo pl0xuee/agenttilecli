@@ -5,6 +5,7 @@ mod clipboard;
 mod codex_home;
 mod commands;
 mod config;
+mod desktop_keys;
 mod editor;
 mod grok_home;
 mod hooks;
@@ -13,6 +14,7 @@ mod keybindings;
 mod layout;
 mod links;
 mod model;
+mod notify;
 mod omarchy;
 mod palette;
 mod pane;
@@ -25,6 +27,7 @@ mod testing;
 mod tiler;
 mod update;
 mod updates;
+mod wire;
 
 use std::cell::RefCell;
 
@@ -59,8 +62,19 @@ fn main() -> glib::ExitCode {
     // to do its one small job and get out of the way - no GTK, no application
     // id, no single-instance handshake that would hand the work to the running
     // window and wait for it.
-    if let Some(event) = hook_event() {
-        report_hook(event);
+    //
+    // Agents are normally pointed at `agenttilecli-hook` instead, which is the
+    // same code without the 138 shared libraries this binary loads before `main`
+    // (see `wire`). This path stays for the settings files an older build wrote,
+    // for a dev tree where the hook binary hasn't been built, and as the
+    // fallback `hooks::hook_bin` chooses when it can't find the other one.
+    //
+    // Only the flagged spelling here. The hook binary also takes a bare event
+    // name, but this is the window, and `agenttilecli Stop` should open one.
+    if std::env::args().nth(1).as_deref() == Some("--hook")
+        && let Some(event) = wire::event_from_args(std::env::args().skip(1))
+    {
+        wire::report(event);
         return glib::ExitCode::SUCCESS;
     }
 
@@ -277,48 +291,6 @@ pub(crate) fn apply_color_scheme() {
     adw::StyleManager::default().set_color_scheme(scheme);
 }
 
-/// The event named by `--hook <event>`, if this process was launched as one.
-fn hook_event() -> Option<hooks::Event> {
-    let mut args = std::env::args().skip(1);
-    if args.next()? != "--hook" {
-        return None;
-    }
-    hooks::Event::parse(&args.next()?)
-}
-
-/// Tells the window what just happened in this pane, and returns.
-///
-/// Every path here is infallible by construction, because the caller is an
-/// agent hook and the cost of failing is the agent's. A window that has closed,
-/// a socket that was never created, a hook environment that isn't there: all
-/// mean the same thing - nobody is listening - and the answer is to exit
-/// quietly. The bell hook on `Stop` and `Notification` is what still gets
-/// through when this doesn't (see `hooks::settings_json`).
-fn report_hook(event: hooks::Event) {
-    let (Ok(pane), Ok(socket)) = (std::env::var(ipc::ENV_PANE), std::env::var(ipc::ENV_SOCKET))
-    else {
-        return;
-    };
-
-    // Every agent hands the hook a JSON object on stdin. Claude and Codex use
-    // snake_case while Grok uses camelCase; the field means the same thing.
-    // Reading it is best-effort: an event with no tool name is still useful.
-    let tool = std::io::read_to_string(std::io::stdin())
-        .ok()
-        .and_then(|input| hook_tool(&input));
-
-    let _ = ipc::send(&socket, &ipc::Message { pane, event, tool });
-}
-
-fn hook_tool(input: &str) -> Option<String> {
-    let value = serde_json::from_str::<serde_json::Value>(input).ok()?;
-    value
-        .get("tool_name")
-        .or_else(|| value.get("toolName"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-}
-
 fn build_window(application: &adw::Application) {
     // `activate` fires again every time another launch forwards to this
     // process - GApplication is single-instance per id, and a second
@@ -339,15 +311,27 @@ fn build_window(application: &adw::Application) {
         .unwrap_or_else(|_| "/".to_string());
 
     let app = App::new(application, &cwd, &base_title());
-    keybindings::install(app.window(), &app);
+    let key_problems = keybindings::install(app.window(), &app);
     app.present();
 
     // After presenting, so the dialog has a window to sit on. Someone typed
     // that file; a mistake in it gets said out loud rather than silently
-    // replaced with defaults.
-    if let Some(problem) = config::problem() {
-        app.report_config_problem(problem);
+    // replaced with defaults. The `[keys]` table can only be checked once GTK
+    // is up to parse accelerators, so its complaints join the rest here.
+    let mut problems: Vec<String> = config::problem().map(str::to_string).into_iter().collect();
+    if !key_problems.is_empty() {
+        let whence = config::config_path()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "config.toml".to_string());
+        problems.push(format!("{whence}, [keys]:\n\n{}", key_problems.join("\n\n")));
     }
+    if !problems.is_empty() {
+        app.report_config_problem(&problems.join("\n\n"));
+    }
+
+    // And whatever the desktop itself is holding. Asked off the main thread,
+    // since it means running `hyprctl`, and answered only if it finds anything.
+    desktop_keys::check(&app);
 
     #[cfg(debug_assertions)]
     if let Some(path) = std::env::var_os("ATC_SHOT") {
@@ -384,7 +368,13 @@ fn capture_and_quit(application: &adw::Application, app: &App, path: std::path::
     // A beat after presenting, so the window has been mapped, laid out and had
     // its first frame drawn. Rendering before that yields a texture of the
     // window's idea of itself before the tiler has allocated anything.
-    glib::timeout_add_local_once(std::time::Duration::from_millis(1200), move || {
+    // `ATC_SHOT_AFTER=ms` waits longer, for a shot of something that takes a
+    // while to happen - agents reporting their first turns, say.
+    let after = std::env::var("ATC_SHOT_AFTER")
+        .ok()
+        .and_then(|ms| ms.parse().ok())
+        .unwrap_or(1200);
+    glib::timeout_add_local_once(std::time::Duration::from_millis(after), move || {
         // `ATC_SHOT_SIDEBAR=1` re-opens the rack for the shot. At overlay
         // widths startup's own project pick has always closed it by now, so
         // without this the collapsed rack cannot be photographed at all.
@@ -452,8 +442,14 @@ mod tests {
     /// than derived, because the property that matters is one a reader of
     /// `style.css` cannot see: whether the widget wearing that class was built
     /// with `EllipsizeMode` set on it.
-    const ELLIPSIZING_LABELS: &[&str] =
-        &[".pane-head-label", ".sidebar-row-label", ".sidebar-version"];
+    const ELLIPSIZING_LABELS: &[&str] = &[
+        ".pane-head-label",
+        ".pane-kind",
+        ".sidebar-row-label",
+        ".sidebar-version",
+        ".sidebar-agent-label",
+        ".header-title-name",
+    ];
 
     /// An ellipsizing label must not be given `letter-spacing`.
     ///
@@ -487,19 +483,6 @@ mod tests {
     use crate::testing::gtk_test;
     use std::cell::RefCell;
     use std::rc::Rc;
-
-    #[test]
-    fn hook_tool_accepts_each_agents_json_vocabulary() {
-        assert_eq!(
-            hook_tool(r#"{"tool_name":"Bash"}"#).as_deref(),
-            Some("Bash")
-        );
-        assert_eq!(
-            hook_tool(r#"{"toolName":"run_terminal_command"}"#).as_deref(),
-            Some("run_terminal_command")
-        );
-        assert_eq!(hook_tool("not json"), None);
-    }
 
     /// GTK doesn't reject a stylesheet it can't understand - it drops the
     /// offending declaration, prints a warning to a terminal a GUI app doesn't
@@ -566,7 +549,7 @@ mod tests {
                 sink.borrow_mut()
                     .push(format!("{}: {error}", section.to_str()));
             });
-            let css = appearance::content_css(1.25);
+            let css = format!("{}\n{}", appearance::content_css(1.25), appearance::ink_css());
             provider.load_from_string(&css);
 
             let errors = errors.borrow();

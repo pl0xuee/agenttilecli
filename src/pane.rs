@@ -2,19 +2,18 @@ use std::cell::{Cell, RefCell};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Duration;
 
 use gtk4::prelude::*;
 use gtk4::{gdk, Frame};
 use vte4::{prelude::*, PtyFlags, Terminal};
 
-use crate::agent::Kind;
+use crate::agent::{Kind, Launch};
 use crate::model::PaneState;
 use crate::palette;
 
-/// How often to re-check a pane's current directory. Cheap (a single
-/// syscall pair per pane) so a short interval is fine.
-const CWD_POLL_INTERVAL: Duration = Duration::from_millis(1000);
+/// How often to re-check a pane's current directory, in whole seconds. Cheap
+/// (a single syscall pair per pane) so a short interval is fine.
+const CWD_POLL_SECONDS: u32 = 1;
 
 /// The shell one-liner an agent runs when it finishes a turn (`Stop`) or stops
 /// to ask for something (`Notification`) - the two moments a watching human
@@ -58,8 +57,8 @@ fn foreground_cwd(terminal: &Terminal) -> Option<String> {
 
 /// Every class `set_state` might put on the dot, so it can take the previous
 /// one off without knowing which it was.
-const STATUS_CLASSES: [&str; 5] = [
-    "starting", "working", "idle", "waiting", "exited",
+const STATUS_CLASSES: [&str; 6] = [
+    "starting", "working", "idle", "waiting", "exited", "unsaved",
 ];
 
 /// The dot's class for a state. `pub(crate)` because the rack draws the same
@@ -70,9 +69,25 @@ pub(crate) fn status_class(state: &PaneState) -> &'static str {
         PaneState::Starting => "starting",
         PaneState::Working { .. } => "working",
         PaneState::Idle => "idle",
-        PaneState::Waiting => "waiting",
+        PaneState::Waiting { .. } => "waiting",
         PaneState::Exited => "exited",
     }
+}
+
+/// The class the whole tile wears for a state, so the stylesheet can light the
+/// *tile* - an amber edge on one that is asking, a sweep across one that is
+/// working - rather than only the dot in its corner. A dot is a thing you read;
+/// a lit edge is a thing you see from across the room.
+fn state_frame_class(state: &PaneState) -> String {
+    format!("state-{}", status_class(state))
+}
+
+/// Puts `class`'s tile treatment on `frame`, taking any other state's off.
+fn set_frame_state(frame: &Frame, class: &str) {
+    for other in STATUS_CLASSES {
+        frame.remove_css_class(&format!("state-{other}"));
+    }
+    frame.add_css_class(&format!("state-{class}"));
 }
 
 /// What the dot says when you rest on it. The tool name is the whole reason
@@ -83,7 +98,8 @@ fn status_tooltip(state: &PaneState) -> String {
         PaneState::Working { tool: Some(tool) } => format!("Working \u{b7} {tool}"),
         PaneState::Working { tool: None } => "Working".to_string(),
         PaneState::Idle => "Waiting for you".to_string(),
-        PaneState::Waiting => "Asking for permission".to_string(),
+        PaneState::Waiting { tool: Some(tool) } => format!("Asking permission to use {tool}"),
+        PaneState::Waiting { tool: None } => "Asking for permission".to_string(),
         PaneState::Exited => "The agent has exited".to_string(),
     }
 }
@@ -100,7 +116,8 @@ fn status_words(state: &PaneState) -> String {
         PaneState::Working { tool: Some(tool) } => format!("working \u{b7} {tool}"),
         PaneState::Working { tool: None } => "working".to_string(),
         PaneState::Idle => "waiting for you".to_string(),
-        PaneState::Waiting => "asking permission".to_string(),
+        PaneState::Waiting { tool: Some(tool) } => format!("asking permission \u{b7} {tool}"),
+        PaneState::Waiting { tool: None } => "asking permission".to_string(),
         PaneState::Exited => "exited".to_string(),
     }
 }
@@ -130,30 +147,58 @@ struct Head {
     /// running for ten minutes is worse than saying nothing, so those panes
     /// keep naming their folder, which is at least true.
     reports: bool,
-    /// Which agent is running here, for the strip to name. `None` for a pane
-    /// running a command rather than an agent - the update script's - which has
-    /// no agent to name.
-    kind: Option<Kind>,
 }
 
-/// The strip's text, given what it would otherwise have said and which agent is
-/// running.
+/// The same fact again, cut to fit a drawer row beside the agent's name.
 ///
-/// Split out of `refresh` because it is the part with a decision in it, and a
-/// `gtk4::Label` is not something a unit test should have to own.
-///
-/// The agent's name rides on the end rather than replacing anything. What the
-/// strip already said - the state, or the folder once the agent has wandered
-/// out of it - is the more urgent fact and stays where the eye already looks
-/// for it. The name is only worth saying at all because a project can now hold
-/// two kinds of tile, and two identical strips over two different agents is the
-/// one thing this feature must not produce.
-fn head_text_for(base: &str, kind: Option<Kind>) -> String {
-    match kind {
-        Some(kind) if !base.is_empty() => format!("{base} \u{b7} {}", kind.label()),
-        Some(kind) => kind.label().to_string(),
-        None => base.to_string(),
+/// The drawer is a column a few hundred pixels wide, and "asking permission ·
+/// Bash" beside a name ellipsized to "asking permiss…" - the one word that
+/// mattered, gone. So the drawer has its own, shorter vocabulary: the verb and
+/// what it is about, nothing more.
+pub(crate) fn brief_words(state: &PaneState) -> String {
+    match state {
+        PaneState::Starting => "starting".to_string(),
+        PaneState::Working { tool: Some(tool) } => format!("working \u{b7} {tool}"),
+        PaneState::Working { tool: None } => "thinking".to_string(),
+        PaneState::Idle => "idle".to_string(),
+        PaneState::Waiting { tool: Some(tool) } => format!("asking \u{b7} {tool}"),
+        PaneState::Waiting { tool: None } => "asking".to_string(),
+        PaneState::Exited => "exited".to_string(),
     }
+}
+
+/// What the strip says: the folder the agent has wandered into, if it has left
+/// the project's own; otherwise what it is doing, for a pane an agent reports
+/// for; otherwise the folder it started in, which is at least true.
+///
+/// Split out of `Head::refresh` because it is the part with a decision in it,
+/// and a `gtk4::Label` is not something a unit test should have to own.
+///
+/// The agent's *name* is not part of it any more. It used to ride on the end of
+/// this text - "working · Edit · codex" - and it was the least urgent word in
+/// the strip competing for the room the most urgent one needed. It is a badge
+/// of its own now, at the strip's far end (see `Pane::spawn`), where a glance
+/// finds it without reading.
+fn head_base(cwd: Option<&str>, root: &str, reports: bool, state: &PaneState) -> String {
+    match cwd {
+        Some(cwd) if cwd != root => cwd.to_string(),
+        _ if reports => status_words(state),
+        _ => root.to_string(),
+    }
+}
+
+/// The badge an agent's tile wears: its name, set in the stylesheet as a small
+/// monospaced tag. One word, and the same one the config file and the menu use.
+fn badge_text(kind: Kind) -> &'static str {
+    kind.label()
+}
+
+/// An editor's badge: the file's extension, or `txt` for a file with none.
+fn file_badge(path: &std::path::Path) -> String {
+    path.extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .filter(|e| !e.is_empty() && e.len() <= 6)
+        .unwrap_or_else(|| "txt".to_string())
 }
 
 impl Head {
@@ -166,14 +211,18 @@ impl Head {
     /// when the agent has moved somewhere else, and the rest of the time the
     /// strip has something better to say: what the agent is actually doing.
     fn refresh(&self) {
-        let base = match self.cwd.borrow().as_deref() {
-            // It has moved out of the project's folder, which is the one case
-            // where naming a folder tells you something you didn't know.
-            Some(cwd) if cwd != self.root.borrow().as_str() => cwd.to_string(),
-            _ if self.reports => status_words(&self.state.borrow()),
-            _ => self.root.borrow().clone(),
-        };
-        self.label.set_label(&head_text_for(&base, self.kind));
+        let text = head_base(
+            self.cwd.borrow().as_deref(),
+            &self.root.borrow(),
+            self.reports,
+            &self.state.borrow(),
+        );
+        // A label that is set queues a resize, and a resize climbs to the window
+        // - so an unchanged strip is left alone rather than re-set, which is
+        // most of the time a hook arrives.
+        if self.label.label() != text {
+            self.label.set_label(&text);
+        }
     }
 }
 
@@ -429,16 +478,24 @@ fn report_in_pane(terminal: &Terminal, message: &str) {
 /// exactly what an empty setting asks for anyway.
 fn apply_font(terminal: &Terminal) {
     let font = crate::appearance::get().font;
-    if font.trim().is_empty() {
-        terminal.set_font(None);
+    let wanted = (!font.trim().is_empty())
+        .then(|| gtk4::pango::FontDescription::from_string(&font));
+    // Unchanged is left alone. Every appearance refresh - a theme change, a
+    // slider step in Preferences - comes through here for every pane, and VTE
+    // rebuilds its glyph cache and reflows the grid on any `set_font`, same
+    // font or not.
+    let current = terminal.font().map(|f| f.to_str().to_string());
+    if current == wanted.as_ref().map(|f| f.to_str().to_string()) {
         return;
     }
-    terminal.set_font(Some(&gtk4::pango::FontDescription::from_string(&font)));
+    terminal.set_font(wanted.as_ref());
 }
 
-
-/// The `--settings` layer every claude pane is launched with: `BELL_HOOK`,
-/// wired to the two events worth interrupting someone for.
+/// The `--settings` layer every claude pane is launched with: the hooks that
+/// report each moment of its turn, and the bell on the ones worth interrupting
+/// someone for. Returns its path, or `None` if it couldn't be written - in
+/// which case panes fall back to a plain, silent `claude` rather than failing
+/// to start.
 ///
 /// Written out as a file rather than passed inline (`--settings` takes either)
 /// because an inline JSON argument would have to survive being quoted through
@@ -446,13 +503,11 @@ fn apply_font(terminal: &Terminal) {
 /// inside single quotes differ from POSIX sh's, which is precisely enough to
 /// turn the hook's `printf '\a'` into a hook that prints the letter "a". A
 /// file has no quoting layers to get wrong.
-/// Writes the hook settings under the user's cache directory and returns
-/// its path, or `None` if it couldn't be written - in which case panes fall
-/// back to a plain, bell-less `claude` rather than failing to start.
 ///
-/// Rewritten on every pane launch instead of only when absent, so a stale hook
+/// Checked on every pane launch instead of only when absent, so a stale hook
 /// left behind by an older AgentTileCLI can't outlive the version that wrote
-/// it.
+/// it - and rewritten only when what it says has changed (see
+/// `hooks::write_if_changed`).
 fn claude_settings_file() -> Option<String> {
     let dir = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
@@ -461,15 +516,15 @@ fn claude_settings_file() -> Option<String> {
     std::fs::create_dir_all(&dir).ok()?;
 
     let path = dir.join("claude-settings.json");
-    let hook_bin = crate::update::exe().ok()?;
+    let hook_bin = crate::hooks::hook_bin().ok()?;
     // The theme rides along in the same file the hooks do, and reaches claude
     // the same way: `--settings` outranks `~/.claude/settings.json`, so a user
     // who has pinned `"theme": "dark"` there keeps it in every other terminal
     // and only the panes in this window follow the desktop. Nothing in
     // `~/.claude` is written, which is the promise this file has always kept.
-    std::fs::write(
+    crate::hooks::write_if_changed(
         &path,
-        crate::hooks::settings_json(&hook_bin, BELL_HOOK, crate::omarchy::claude_theme()),
+        &crate::hooks::settings_json(&hook_bin, BELL_HOOK, crate::omarchy::claude_theme()),
     )
     .ok()?;
     Some(path.to_string_lossy().into_owned())
@@ -491,6 +546,9 @@ pub struct Pane {
     /// pane's state - shared with the cwd poll, which also rewrites it.
     head: Rc<Head>,
     pid: Rc<Cell<Option<libc::pid_t>>>,
+    /// How many times this pane has been asked to close, so that asking again
+    /// asks harder - see `hangup`.
+    hangups: Cell<u8>,
     /// What `apply_theme` was last called with, so `set_focused` can skip the
     /// repaint when nothing changed. `Tiler::update_focus_style` runs over
     /// every pane after any pane operation, and all but one of those panes
@@ -500,6 +558,14 @@ pub struct Pane {
     /// holding a file. Read when a session is saved, so a project reopens with
     /// the agents it had rather than with claudes.
     kind: Option<Kind>,
+    /// The agent's own id for the conversation it is having, as it last
+    /// reported it (see `wire::Message::session`). Saved with the session, so a
+    /// reopened project can hand each agent back the conversation it was in
+    /// rather than a blank one - see `agent::Kind::resume_args`.
+    session: RefCell<Option<String>>,
+    /// Whether anything has been said in that conversation - see
+    /// `resumable_session`.
+    conversed: Cell<bool>,
 }
 
 /// What fills the frame under the head strip.
@@ -604,14 +670,28 @@ impl Pane {
         close_button.set_halign(gtk4::Align::End);
         close_button.set_hexpand(false);
 
+        // The activity strip: a hairline under the head that the stylesheet
+        // turns into a moving sweep while the agent works, and into nothing
+        // the rest of the time. A widget of its own rather than a border on
+        // the head, because a border can't be animated along its length and
+        // this has to read as *motion* - four tiles all holding still look
+        // exactly alike whether their agents are thinking or finished, and
+        // that sameness is the thing a glance at the grid has to cut through.
+        let activity = gtk4::Box::builder()
+            .css_classes(["pane-activity"])
+            .can_target(false)
+            .build();
+
         let body = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
             .build();
         body.append(&head);
+        body.append(&activity);
         body.append(content);
 
         let frame = Frame::new(None);
         frame.add_css_class("pane");
+        frame.add_css_class(&state_frame_class(&PaneState::Starting));
         frame.set_overflow(gtk4::Overflow::Hidden);
         frame.set_child(Some(&body));
 
@@ -661,11 +741,20 @@ impl Pane {
             cwd: RefCell::new(None),
             state: RefCell::new(PaneState::Idle),
             reports: false,
-            // An editor is deliberately not an agent, so it names none. It
-            // shows the file's name, which is the thing about it worth reading.
-            kind: None,
         });
         head_state.refresh();
+
+        // An editor's badge is its file's kind rather than an agent's name -
+        // it is deliberately not an agent, and the extension is the one fact
+        // about a file its name in the strip might have ellipsized away.
+        let badge = gtk4::Label::builder()
+            .label(file_badge(path))
+            .css_classes(["pane-kind", "pane-kind-file"])
+            .valign(gtk4::Align::Center)
+            .ellipsize(gtk4::pango::EllipsizeMode::End)
+            .can_target(false)
+            .build();
+        head.insert_child_after(&badge, Some(&head_state.label));
 
         // The dot, driven by the buffer rather than by hooks: quiet grey while
         // the file matches the disk, the amber "waiting on you" while it
@@ -673,14 +762,19 @@ impl Pane {
         status.remove_css_class("starting");
         status.add_css_class("idle");
         status.set_tooltip_text(Some("Saved"));
+        set_frame_state(&frame, "idle");
         {
             let status = status.clone();
+            let frame = frame.downgrade();
             editor.buffer.connect_modified_changed(move |buffer| {
                 let modified = buffer.is_modified();
                 for class in STATUS_CLASSES {
                     status.remove_css_class(class);
                 }
-                status.add_css_class(if modified { "waiting" } else { "idle" });
+                status.add_css_class(if modified { "unsaved" } else { "idle" });
+                if let Some(frame) = frame.upgrade() {
+                    set_frame_state(&frame, if modified { "unsaved" } else { "idle" });
+                }
                 status.set_tooltip_text(Some(if modified {
                     "Unsaved changes (Ctrl+S)"
                 } else {
@@ -697,8 +791,11 @@ impl Pane {
             status,
             head: head_state,
             pid: Rc::new(Cell::new(None)),
+            hangups: Cell::new(0),
             focused: Cell::new(false),
             kind: None,
+            session: RefCell::new(None),
+            conversed: Cell::new(false),
         })
     }
 
@@ -777,10 +874,50 @@ impl Pane {
     /// `state`, so an open editor is never counted as an agent - it is a file,
     /// not something working on your behalf.
     pub fn agent_state(&self) -> Option<PaneState> {
+        // A terminal with no agent in it - the update script's pane - is not an
+        // agent either. Counting it put an extra dot in the rack, made the next
+        // project open with one more agent than you work with, and saved it into
+        // the session as a claude, which `restore_agents` then started.
+        self.kind?;
         match &self.body {
             Body::Terminal(_) => Some(self.state()),
             Body::Editor(_) => None,
         }
+    }
+
+    /// The conversation this pane's agent is in, if it has said.
+    pub fn session(&self) -> Option<String> {
+        self.session.borrow().clone()
+    }
+
+    /// Records the conversation, and says whether it is a new one to this pane.
+    ///
+    /// A different id is a different conversation - claude's `/clear` starts
+    /// one mid-pane - and a new conversation has nothing in it yet.
+    pub fn set_session(&self, session: &str) -> bool {
+        if self.session.borrow().as_deref() == Some(session) {
+            return false;
+        }
+        *self.session.borrow_mut() = Some(session.to_string());
+        self.conversed.set(false);
+        true
+    }
+
+    /// Notes that something has been said in this pane's conversation.
+    pub fn mark_conversed(&self) {
+        self.conversed.set(true);
+    }
+
+    /// The conversation to hand back on a resume - only once there is one.
+    ///
+    /// An agent names its conversation the moment it starts, and writes it to
+    /// disk only once something is said in it. So the id of an agent that was
+    /// opened and never spoken to names a conversation that doesn't exist, and
+    /// resuming it failed: the agent printed "no conversation found", exited,
+    /// and took its pane - and its place in the session - with it. Until then,
+    /// the pane comes back as a new conversation instead.
+    pub fn resumable_session(&self) -> Option<String> {
+        self.session().filter(|_| self.conversed.get())
     }
 
     /// VTE's font scale, for the bodies that have VTE in them. The editor's
@@ -810,16 +947,35 @@ impl Pane {
     /// installed for any reason the pane still gets a perfectly good agent -
     /// just a silent one, which is exactly what every pane was before any of
     /// this existed.
-    pub fn new(cwd: &str, kind: Kind) -> Self {
-        let configured = crate::config::get().command_for(kind);
+    ///
+    /// `launch` says which conversation: a new one, a saved one picked up again,
+    /// or a new one in a git worktree of its own - see `agent::Launch`.
+    pub fn new(cwd: &str, kind: Kind, launch: &Launch) -> Self {
+        // A new conversation is named here, where the agent allows it, so the
+        // pane can offer it back later even if no hook ever reaches the window.
+        // A resumed one already has its name.
+        let session = match launch {
+            Launch::Resume(id) => Some(id.clone()),
+            Launch::Fresh | Launch::Worktree if kind.names_its_session() => {
+                crate::agent::new_session_id()
+            }
+            Launch::Fresh | Launch::Worktree => None,
+        };
+        let mut configured = crate::config::get().command_for(kind);
+        // Claude's hooks ride on the command line, and they go on *before* the
+        // launch's own flags rather than after: `--worktree` takes an optional
+        // name, and an optional value followed by `--settings <path>` is a
+        // parse away from a worktree called `--settings` and a claude with no
+        // hooks at all. Last is the one place an optional value is never
+        // ambiguous.
+        if kind == Kind::Claude
+            && let Some(path) = claude_settings_file()
+        {
+            configured = format!("{configured} --settings {}", crate::update::sh_quote(&path));
+        }
+        let configured = kind.command_line(&configured, launch, session.as_deref());
         let (command, env) = match kind {
-            Kind::Claude => match claude_settings_file() {
-                Some(path) => (
-                    format!("{configured} --settings {}", crate::update::sh_quote(&path)),
-                    Vec::new(),
-                ),
-                None => (configured, Vec::new()),
-            },
+            Kind::Claude => (configured, Vec::new()),
             // Codex takes no flag for this. Its hooks come from its home, so
             // the home is what gets pointed somewhere else - see `codex_home`.
             //
@@ -828,7 +984,7 @@ impl Pane {
             // already going through VTE, and putting it there dodges a quoting
             // layer that has cost this file real bugs before.
             Kind::Codex => {
-                let env = crate::update::exe()
+                let env = crate::hooks::hook_bin()
                     .ok()
                     .and_then(|bin| crate::codex_home::prepare(&bin, BELL_HOOK))
                     .map(|home| vec![format!("CODEX_HOME={}", home.display())])
@@ -840,7 +996,7 @@ impl Pane {
             // user's auth, config, sessions and hooks without installing our
             // hook into every Grok process they launch elsewhere.
             Kind::Grok => {
-                let env = crate::update::exe()
+                let env = crate::hooks::hook_bin()
                     .ok()
                     .and_then(|bin| crate::grok_home::prepare(&bin, BELL_HOOK))
                     .map(|home| vec![format!("GROK_HOME={}", home.display())])
@@ -848,7 +1004,9 @@ impl Pane {
                 (configured, env)
             }
         };
-        Self::spawn(cwd, &command, true, Some(kind), env)
+        // A resumed conversation has been spoken in, by definition.
+        let conversed = matches!(launch, Launch::Resume(_));
+        Self::spawn(cwd, &command, true, Some(kind), env, session, conversed)
     }
 
     /// A pane running `command` instead of `claude` (via the same login
@@ -856,7 +1014,7 @@ impl Pane {
     /// button, which runs the pull-and-rebuild script in a pane so its
     /// output is visible rather than hidden behind a spinner.
     pub fn command(cwd: &str, command: &str) -> Self {
-        Self::spawn(cwd, command, false, None, Vec::new())
+        Self::spawn(cwd, command, false, None, Vec::new(), None, false)
     }
 
     /// The shared body of the two above. `reports` says whether an agent's
@@ -864,13 +1022,15 @@ impl Pane {
     /// allowed to claim - see `Head::reports`. `kind` is the agent the strip
     /// names, and `extra_env` whatever else that agent needs in its
     /// environment to be reachable - currently the private home used by Codex
-    /// or Grok.
+    /// or Grok. `session` is the conversation it starts in, when known.
     fn spawn(
         cwd: &str,
         command: &str,
         reports: bool,
         kind: Option<Kind>,
         extra_env: Vec<String>,
+        session: Option<String>,
+        conversed: bool,
     ) -> Self {
         let (frame, terminal, head, status, close_button) = Self::bare();
         let pid = Rc::new(Cell::new(None));
@@ -886,6 +1046,19 @@ impl Pane {
             .build();
         // After the dot, before the close button.
         head.insert_child_after(&head_label, Some(&status));
+        // The agent's name, as a badge at the strip's far end - see `head_base`
+        // for why it stopped being the tail of the sentence. A class per kind
+        // as well, so a stylesheet can tell them apart if it ever wants to.
+        if let Some(kind) = kind {
+            let badge = gtk4::Label::builder()
+                .label(badge_text(kind))
+                .css_classes(["pane-kind", &format!("pane-kind-{}", kind.label())])
+                .valign(gtk4::Align::Center)
+                .ellipsize(gtk4::pango::EllipsizeMode::End)
+                .can_target(false)
+                .build();
+            head.insert_child_after(&badge, Some(&head_label));
+        }
 
         let head_state = Rc::new(Head {
             label: head_label,
@@ -893,7 +1066,6 @@ impl Pane {
             cwd: RefCell::new(None),
             state: RefCell::new(PaneState::Starting),
             reports,
-            kind,
         });
         head_state.refresh();
 
@@ -908,6 +1080,7 @@ impl Pane {
             status.remove_css_class("starting");
             status.add_css_class("idle");
             status.set_tooltip_text(Some("Running"));
+            set_frame_state(&frame, "idle");
         }
 
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
@@ -923,7 +1096,7 @@ impl Pane {
         // inherited rather than replacing it, so a pane still gets the user's
         // PATH, their editor and everything else their shell profile sets up.
         let mut env = Vec::new();
-        if let (Some(socket), Ok(bin)) = (crate::ipc::socket(), crate::update::exe()) {
+        if let (Some(socket), Ok(bin)) = (crate::ipc::socket(), crate::hooks::hook_bin()) {
             env.push(format!("{}={id}", crate::ipc::ENV_PANE));
             env.push(format!("{}={socket}", crate::ipc::ENV_SOCKET));
             env.push(format!("{}={bin}", crate::ipc::ENV_BIN));
@@ -959,35 +1132,35 @@ impl Pane {
         let pid_slot = pid.clone();
         let failure_terminal = terminal.downgrade();
         if folder_is_there {
-        terminal.spawn_async(
-            PtyFlags::DEFAULT,
-            Some(cwd),
-            &argv,
-            &envv,
-            gtk4::glib::SpawnFlags::DEFAULT,
-            || {},
-            -1,
-            None::<&gtk4::gio::Cancellable>,
-            move |result| {
-                match result {
-                    Ok(spawned_pid) => pid_slot.set(Some(spawned_pid.0)),
-                    // The other silent pane. A spawn that fails records no pid, so
-                    // `hangup` has nothing to signal and `child-exited` never fires
-                    // - the pane cannot report, cannot be closed by its agent
-                    // ending, and holds its share of the tiling indefinitely with
-                    // nothing drawn in it. Whatever VTE refused to do, the reason
-                    // belongs on screen.
-                    Err(e) => {
-                        if let Some(terminal) = failure_terminal.upgrade() {
-                            report_in_pane(
-                                &terminal,
-                                &format!("This pane could not be started.\r\n\r\n{e}"),
-                            );
+            terminal.spawn_async(
+                PtyFlags::DEFAULT,
+                Some(cwd),
+                &argv,
+                &envv,
+                gtk4::glib::SpawnFlags::DEFAULT,
+                || {},
+                -1,
+                None::<&gtk4::gio::Cancellable>,
+                move |result| {
+                    match result {
+                        Ok(spawned_pid) => pid_slot.set(Some(spawned_pid.0)),
+                        // The other silent pane. A spawn that fails records no pid, so
+                        // `hangup` has nothing to signal and `child-exited` never fires
+                        // - the pane cannot report, cannot be closed by its agent
+                        // ending, and holds its share of the tiling indefinitely with
+                        // nothing drawn in it. Whatever VTE refused to do, the reason
+                        // belongs on screen.
+                        Err(e) => {
+                            if let Some(terminal) = failure_terminal.upgrade() {
+                                report_in_pane(
+                                    &terminal,
+                                    &format!("This pane could not be started.\r\n\r\n{e}"),
+                                );
+                            }
                         }
                     }
-                }
-            },
-        );
+                },
+            );
         }
 
         // Poll rather than rely on shell-side OSC7 "report my cwd" hooks
@@ -997,7 +1170,9 @@ impl Pane {
         // holds weak references.
         let head_weak = Rc::downgrade(&head_state);
         let terminal_weak = terminal.downgrade();
-        gtk4::glib::source::timeout_add_local(CWD_POLL_INTERVAL, move || {
+        // Whole seconds, through GLib's own coalescing timer, so every pane's
+        // poll lands in one wakeup a second rather than sixteen staggered ones.
+        gtk4::glib::source::timeout_add_seconds_local(CWD_POLL_SECONDS, move || {
             let (Some(head), Some(terminal)) = (head_weak.upgrade(), terminal_weak.upgrade())
             else {
                 return gtk4::glib::ControlFlow::Break;
@@ -1021,8 +1196,11 @@ impl Pane {
             status,
             head: head_state,
             pid,
+            hangups: Cell::new(0),
             focused: Cell::new(false),
             kind,
+            session: RefCell::new(session),
+            conversed: Cell::new(conversed),
         };
 
         // A pane with no folder to run in has already been told so above, in
@@ -1036,7 +1214,6 @@ impl Pane {
         pane
     }
 
-    /// Repaints the terminal in the focused or unfocused surface, to match the
     /// What this pane's agent is doing.
     pub fn state(&self) -> PaneState {
         // A pane with no agent behind it has no state to report and never will,
@@ -1064,6 +1241,7 @@ impl Pane {
             self.status.remove_css_class(class);
         }
         self.status.add_css_class(status_class(&state));
+        set_frame_state(&self.frame, status_class(&state));
         self.status
             .set_tooltip_text(Some(&status_tooltip(&state)));
         *self.head.state.borrow_mut() = state;
@@ -1073,6 +1251,7 @@ impl Pane {
         true
     }
 
+    /// Repaints the terminal in the focused or unfocused surface, to match the
     /// `.focused` CSS class `Tiler::update_focus_style` sets on the frame at
     /// the same moment.
     ///
@@ -1107,34 +1286,57 @@ impl Pane {
         }
     }
 
-    /// Politely ask the child (shell + claude) to exit, mirroring how a real
-    /// terminal emulator closes a tab. Actual removal from the layout happens
-    /// via the `child-exited` signal the caller wires up separately.
+    /// Asks the child (shell + agent) to exit, mirroring how a real terminal
+    /// emulator closes a tab - and asks harder each time it is asked again.
+    /// Actual removal from the layout happens via the `child-exited` signal the
+    /// caller wires up separately.
     ///
-    /// Clears the recorded pid immediately (rather than waiting for
-    /// `child-exited`) so the cwd-polling loop stops touching it right away.
-    /// Otherwise a pid the OS recycles for an unrelated process in the gap
-    /// before `child-exited` fires could get its cwd read and briefly
-    /// misattributed to this (closing) pane.
-    pub fn hangup(&self) {
-        if let Some(pid) = self.pid.take() {
-            // The child's whole process group, not just the child. VTE starts
-            // it as a session leader, so its pid doubles as the group id, and
-            // the processes that actually matter are its descendants: closing
-            // the update pane has to stop the `cargo build` underneath the
-            // update script, which would otherwise run to completion and
-            // replace the installed binary long after the user shut the pane
-            // to call the whole thing off.
-            //
-            // Falls back to signalling the child alone if there turns out to
-            // be no such group - better a leaked grandchild than a pane whose
-            // shell never gets told to go away.
-            unsafe {
-                if libc::killpg(pid, libc::SIGHUP) != 0 {
-                    libc::kill(pid, libc::SIGHUP);
-                }
-            }
+    /// Returns `false` when there is no process to ask: a pane whose folder had
+    /// gone, or whose spawn failed, never had one - and no `child-exited` will
+    /// ever come for it, so the caller has to take it down itself. Before this
+    /// said so, those panes could not be closed at all: the ✕ faded them to a
+    /// ghost that sat in the grid for the rest of the session, its own text
+    /// still saying "close this pane".
+    ///
+    /// The first time is SIGHUP, which is what a closing terminal sends and what
+    /// every agent treats as "you are done". An agent wedged badly enough to
+    /// ignore that used to be unclosable too, since the pid was forgotten after
+    /// the first try; now a second close is SIGTERM and a third SIGKILL, which
+    /// nothing ignores.
+    ///
+    /// The pid is kept until the child is reaped (see `forget_process`) rather
+    /// than dropped here. Until VTE reaps it, the kernel holds the pid as a
+    /// zombie, so it cannot have been handed to another process - and VTE
+    /// reaps and reports in one step, with no turn of the main loop between for
+    /// a click to land in.
+    pub fn hangup(&self) -> bool {
+        let Some(pid) = self.pid.get() else {
+            return false;
+        };
+        let signal = match self.hangups.replace(self.hangups.get().saturating_add(1)) {
+            0 => libc::SIGHUP,
+            1 => libc::SIGTERM,
+            _ => libc::SIGKILL,
+        };
+        // The child's whole process group, not just the child. VTE starts it as
+        // a session leader, so its pid doubles as the group id, and the
+        // processes that actually matter are its descendants: closing the update
+        // pane has to stop the `cargo build` underneath the update script, which
+        // would otherwise run to completion and replace the installed binary long
+        // after the user shut the pane to call the whole thing off.
+        //
+        // No fallback to signalling the pid alone. `killpg` failing means the
+        // group is already gone, and a pid whose group is gone is exactly the
+        // pid that may by now belong to somebody else.
+        unsafe {
+            libc::killpg(pid, signal);
         }
+        true
+    }
+
+    /// Forgets the child, once it has been reaped - see `hangup`.
+    pub fn forget_process(&self) {
+        self.pid.set(None);
     }
 }
 
@@ -1142,47 +1344,53 @@ impl Pane {
 mod head_tests {
     use super::*;
 
-    /// The head strip is the only place a mixed project says which tile is
-    /// which, and it has to say it without losing what it already said.
+    /// The strip says what the agent is doing, and nothing else competes for
+    /// its room: the agent's name is a badge now.
     #[test]
-    fn a_head_strip_names_its_agent_alongside_what_it_already_said() {
+    fn the_strip_says_what_the_agent_is_doing() {
+        let working = PaneState::Working { tool: Some("Edit".into()) };
+        assert_eq!(head_base(None, "webapp", true, &working), "working \u{b7} Edit");
         assert_eq!(
-            head_text_for("working", Some(Kind::Codex)),
-            "working \u{b7} codex",
+            head_base(Some("webapp"), "webapp", true, &PaneState::Idle),
+            "waiting for you",
+            "the project's own folder is not news",
         );
+    }
+
+    /// An agent that has wandered out of the project's folder is the one case
+    /// where naming a folder tells you something you didn't know.
+    #[test]
+    fn a_folder_is_named_only_when_it_is_news() {
         assert_eq!(
-            head_text_for("agenttilecli", Some(Kind::Claude)),
-            "agenttilecli \u{b7} claude",
+            head_base(Some("migrations"), "webapp", true, &PaneState::Idle),
+            "migrations",
         );
     }
 
-    /// The state is the more urgent fact and keeps the front of the strip,
-    /// where the eye already looks for it.
+    /// A pane nothing reports for - the update script's - names its folder
+    /// forever rather than claiming to be "starting" forever.
     #[test]
-    fn the_state_comes_first_and_the_agent_after() {
-        let text = head_text_for(&status_words(&PaneState::Waiting), Some(Kind::Codex));
-        assert!(
-            text.starts_with("asking permission"),
-            "the agent's name displaced the thing worth reading: {text}",
-        );
-        assert!(text.ends_with("codex"), "{text}");
+    fn a_pane_with_no_agent_names_its_folder() {
+        assert_eq!(head_base(None, "agenttilecli", false, &PaneState::Starting), "agenttilecli");
     }
 
-    /// A pane with no agent - the update script's, and the editor's - has
-    /// nothing to name, and a trailing separator would promise a word that
-    /// never comes.
     #[test]
-    fn a_pane_with_no_agent_says_only_what_it_said_before() {
-        assert_eq!(head_text_for("building", None), "building");
-        assert_eq!(head_text_for("", None), "");
+    fn every_agent_has_a_badge_and_every_file_a_kind() {
+        for kind in Kind::ALL {
+            assert_eq!(badge_text(kind), kind.label());
+        }
+        assert_eq!(file_badge(std::path::Path::new("src/main.RS")), "rs");
+        assert_eq!(file_badge(std::path::Path::new("Makefile")), "txt");
+        assert_eq!(file_badge(std::path::Path::new("x.averylongext")), "txt");
     }
 
-    /// Every pane has *something* to say before its first hook arrives, and a
-    /// strip that opened with a bare separator would look like a bug.
+    /// The asking tile names what it is asking about, first, where the eye
+    /// already looks.
     #[test]
-    fn an_agent_with_nothing_else_to_say_still_names_itself() {
-        assert_eq!(head_text_for("", Some(Kind::Claude)), "claude");
-        assert_eq!(head_text_for("", Some(Kind::Grok)), "grok");
+    fn an_asking_strip_leads_with_the_question() {
+        let text = head_base(None, "p", true, &PaneState::Waiting { tool: Some("Bash".into()) });
+        assert!(text.starts_with("asking permission"), "{text}");
+        assert!(text.ends_with("Bash"), "{text}");
     }
 }
 
@@ -1200,55 +1408,38 @@ mod theme_tests {
         )
     }
 
-    /// The head strip's tints have to land on the ramp rungs they replaced.
+    /// The head strip is ink, not paint: no fill of its own, only a gradient
+    /// and a rule in tints of @text.
     ///
-    /// `.pane-head` cannot carry a fill: it is a child of `.pane`, so any alpha
-    /// of its own composites to *more* opaque than the tile it recesses from, and
-    /// a glass pane would get an opaque bar across the top of it. It darkens the
-    /// tile instead - and the two numbers that does it with, 0.55 of @shadow and
-    /// 0.14 of @text, are derived from @rack and @hairline rather than chosen.
-    ///
-    /// Which means they are a duplication of the ramp that nothing else would
-    /// notice going stale: move @rack, and the strip quietly stops being one rung
-    /// below the tile at *every* opacity, including the fully opaque one that
-    /// every screenshot of this app is taken at. This is the only thing that says
-    /// so.
+    /// It used to be 0.55 of @shadow, a number derived to land on @rack over the
+    /// stock ramp - and over a light Omarchy theme, where @shadow is a mid-grey,
+    /// it laid a heavy grey bar across every tile. Tints of the ink are right in
+    /// both directions (lighter on dark, darker on light) and add nothing a glass
+    /// tile could turn into an opaque bar. This holds the rule to that shape, so
+    /// the next change can't quietly bring the paint back.
     #[test]
-    fn the_head_strip_still_reads_as_rack() {
+    fn a_head_strip_is_ink_not_paint() {
+        let css = include_str!("style.css");
+        let start = css.find("\n.pane-head {").expect("a .pane-head rule");
+        let body = &css[start..];
+        let body = &body[..body.find('}').expect("an unterminated rule")];
+        assert!(body.contains("background-color: transparent;"), "{body}");
+        assert!(body.contains("linear-gradient(to bottom, alpha(@text"), "{body}");
+        assert!(body.contains("border-bottom: 1px solid alpha(@text"), "{body}");
+        assert!(!body.contains("@shadow"), "the strip is painted in @shadow again: {body}");
+    }
+
+    /// The tint that stands in for the strip's old fill must still separate it
+    /// from the tile on the stock ramp: @text at the gradient's strongest is a
+    /// visible step, not a rounding error.
+    #[test]
+    fn the_strip_still_reads_as_a_strip() {
         let tile = palette::color("tile");
-        let rack = palette::color("rack");
-        let hairline = palette::color("hairline");
-
-        let strip = tinted(tile, palette::color("shadow"), 0.55);
-        for (got, want, channel) in [
-            (strip.0, i32::from(rack.r), "red"),
-            (strip.1, i32::from(rack.g), "green"),
-            (strip.2, i32::from(rack.b), "blue"),
-        ] {
-            assert!(
-                (got - want).abs() <= 1,
-                "the head strip's {channel} is {got}, @rack's is {want}: \
-                 `alpha(@shadow, 0.55)` over @tile no longer reads as @rack, so \
-                 the strip has stopped sitting one rung below the tile",
-            );
-        }
-
-        // Four rather than one: @hairline is bluer than any tint of @text can
-        // make @tile, so this one is a closest fit rather than an identity. It is
-        // still worth pinning - the point is that the rule stays *lighter* than
-        // the strip, which is what stops it inverting over a bright wallpaper.
-        let rule = tinted(tile, palette::color("text"), 0.14);
-        for (got, want, channel) in [
-            (rule.0, i32::from(hairline.r), "red"),
-            (rule.1, i32::from(hairline.g), "green"),
-            (rule.2, i32::from(hairline.b), "blue"),
-        ] {
-            assert!(
-                (got - want).abs() <= 4,
-                "the strip's rule is {got} in {channel} where @hairline is {want}: \
-                 `alpha(@text, 0.14)` over @tile no longer reads as @hairline",
-            );
-        }
+        let lifted = tinted(tile, palette::color("text"), 0.07);
+        assert!(
+            lifted.0 - i32::from(tile.r) >= 10,
+            "the strip's top is {lifted:?} over a tile of {tile:?} - no longer visibly a strip",
+        );
     }
 
     /// Builds both themes, which resolves every `@define-color` name the

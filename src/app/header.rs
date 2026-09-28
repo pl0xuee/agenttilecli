@@ -66,9 +66,16 @@ const UPDATE_CLASS: &str = "update-available";
 pub(super) struct HeaderTitle {
     /// The whole block, for packing into the bar.
     widget: gtk4::Box,
-    dot: gtk4::Box,
     name: gtk4::Label,
     subtitle: gtk4::Label,
+    /// One chip per state worth counting - asking, working, idle - each a dot
+    /// and a number, shown only while its number isn't zero.
+    ///
+    /// These replace a single dot and a sentence. The dot could only say the
+    /// most urgent thing ("someone is asking") and the sentence had to be read;
+    /// chips say all three at once and are read at a glance, which is the only
+    /// way anyone reads a header.
+    chips: Rc<[(gtk4::Box, gtk4::Label); 3]>,
     /// The subtitle as last set, kept because whether it is *shown* depends on
     /// something else that changes independently - see `set_compact`. Without
     /// this the two writers would have to be ordered, and the loser would blank
@@ -76,28 +83,51 @@ pub(super) struct HeaderTitle {
     text: Rc<RefCell<String>>,
     /// True on a window too narrow to carry both halves of the block.
     compact: Rc<Cell<bool>>,
+    /// The counts as last set, so a change of width can redraw the chips
+    /// without waiting for the next agent to report.
+    tally: Rc<Cell<crate::tiler::Tally>>,
 }
+
+/// The chips, in the order they are read: what needs you, then what is
+/// happening, then what is simply there.
+const CHIPS: [(&str, &str); 3] = [("waiting", "asking"), ("working", "working"), ("idle", "idle")];
 
 impl HeaderTitle {
     pub(super) fn new(app_name: &str) -> Self {
-        // Hidden until there is a state to report - a project with no agents
-        // running has nothing to say here, and a permanently grey dot beside
-        // every title is a light that means "the bulb works".
-        let dot = gtk4::Box::builder()
-            .css_classes(["pane-status"])
-            .valign(gtk4::Align::Center)
-            .visible(false)
-            .build();
-
         let name = gtk4::Label::builder()
             .label(app_name)
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .css_classes(["header-title-name"])
             .build();
 
+        let chip = |state: &str| {
+            let dot = gtk4::Box::builder()
+                .css_classes(["tally-chip-dot"])
+                .valign(gtk4::Align::Center)
+                .build();
+            let count = gtk4::Label::builder().css_classes(["tally-chip-label"]).build();
+            let chip = gtk4::Box::builder()
+                .orientation(gtk4::Orientation::Horizontal)
+                .css_classes(["tally-chip", state])
+                .valign(gtk4::Align::Center)
+                .visible(false)
+                .build();
+            chip.append(&dot);
+            chip.append(&count);
+            (chip, count)
+        };
+        let chips = Rc::new(CHIPS.map(|(state, _)| chip(state)));
+        let chip_row = gtk4::Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .css_classes(["tally-chips"])
+            .valign(gtk4::Align::Center)
+            .build();
+        for (chip, _) in chips.iter() {
+            chip_row.append(chip);
+        }
+
         // Ellipsized, and it is the half that gives way: on a narrow window the
-        // project's name is what you cannot afford to lose, and "3 agents · 1
-        // waiting for you" is a sentence the dot beside it already summarises.
+        // project's name is what you cannot afford to lose.
         let subtitle = gtk4::Label::builder()
             .ellipsize(gtk4::pango::EllipsizeMode::End)
             .css_classes(["header-title-sub"])
@@ -109,17 +139,18 @@ impl HeaderTitle {
             .valign(gtk4::Align::Center)
             .css_classes(["header-title"])
             .build();
-        widget.append(&dot);
         widget.append(&name);
+        widget.append(&chip_row);
         widget.append(&subtitle);
 
         HeaderTitle {
             widget,
-            dot,
             name,
             subtitle,
+            chips,
             text: Rc::new(RefCell::new(String::new())),
             compact: Rc::new(Cell::new(false)),
+            tally: Rc::new(Cell::new(crate::tiler::Tally::default())),
         }
     }
 
@@ -131,21 +162,21 @@ impl HeaderTitle {
         self.name.set_label(title);
     }
 
-    /// The line after the name. Prefixed with a separator here rather than by
-    /// each caller, so the two labels can be packed flush and the gap belongs
-    /// to whichever of them is actually present.
+    /// The line after the name and the chips: the focused agent's own title,
+    /// when it has set one. Prefixed with a separator here rather than by each
+    /// caller, so the labels can be packed flush and the gap belongs to
+    /// whichever of them is actually present.
     pub(super) fn set_subtitle(&self, subtitle: &str) {
         *self.text.borrow_mut() = subtitle.to_string();
         self.render_subtitle();
     }
 
-    /// Drops the subtitle on a window too narrow for both halves.
+    /// Drops the subtitle on a window too narrow for all of it.
     ///
-    /// Two ellipsized labels sharing a strip do not degrade gracefully - they
-    /// degrade *equally*, so at 380px the bar read "a… · …": the project's name
-    /// cut to its first letter so that a tally already summarised by the dot
-    /// beside it could keep three dots of its own. One of the two has to yield
-    /// outright, and it is not the name.
+    /// Several ellipsized labels sharing a strip do not degrade gracefully -
+    /// they degrade *equally*, so at 380px the bar read "a… · …": the project's
+    /// name cut to its first letter so that a subtitle could keep three dots of
+    /// its own. One of them has to yield outright, and it is not the name.
     ///
     /// Driven from the same breakpoint that sheds the mode switcher (see
     /// `install_breakpoint`), through its `apply`/`unapply` signals rather than
@@ -155,6 +186,7 @@ impl HeaderTitle {
     pub(super) fn set_compact(&self, compact: bool) {
         self.compact.set(compact);
         self.render_subtitle();
+        self.render_chips();
     }
 
     fn render_subtitle(&self) {
@@ -163,35 +195,47 @@ impl HeaderTitle {
             self.subtitle.set_visible(false);
             return;
         }
-        self.subtitle
-            .set_label(&format!("\u{2002}\u{b7}\u{2002}{text}"));
+        self.subtitle.set_label(&text);
         self.subtitle.set_visible(true);
     }
 
-    /// Points the dot at the most urgent thing any agent in this project is
-    /// doing, or hides it when nothing is running.
-    ///
-    /// Most urgent rather than most common, and the order is the app's existing
-    /// one: an agent waiting on you outranks an agent working, which outranks
-    /// an agent sitting idle. A summary that averaged would report "idle" for a
-    /// project with three idle agents and one that has been waiting ten minutes
-    /// for an answer, which is the single case this dot exists for.
+    /// Shows how many of this project's agents are asking, working and idle -
+    /// each as a chip that is there only while its number isn't zero.
     pub(super) fn set_tally(&self, tally: &crate::tiler::Tally) {
-        for class in ["waiting", "working", "idle"] {
-            self.dot.remove_css_class(class);
+        self.tally.set(*tally);
+        self.render_chips();
+    }
+
+    /// Draws the chips for the last tally at the current width.
+    ///
+    /// Narrow, only the most urgent chip survives, and as a dot and a number:
+    /// three worded chips need a hundred and fifty pixels a quarter-snapped
+    /// window doesn't have, and without this they took them from the project's
+    /// name - which went to "…" while "2 idle" kept every letter. The one chip
+    /// left is the one that decides whether you have to act.
+    fn render_chips(&self) {
+        let tally = self.tally.get();
+        let counts = [tally.waiting, tally.working, tally.other];
+        let compact = self.compact.get();
+        if let Some(row) = self.chips[0].0.parent() {
+            super::set_class(&row, "compact", compact);
         }
-        let class = if tally.waiting > 0 {
-            "waiting"
-        } else if tally.working > 0 {
-            "working"
-        } else if tally.total() > 0 {
-            "idle"
-        } else {
-            self.dot.set_visible(false);
-            return;
-        };
-        self.dot.add_css_class(class);
-        self.dot.set_visible(true);
+        let first = counts.iter().position(|count| *count > 0);
+        for (index, ((chip, label), (count, (_, word)))) in self
+            .chips
+            .iter()
+            .zip(counts.into_iter().zip(CHIPS))
+            .enumerate()
+        {
+            chip.set_visible(count > 0 && (!compact || Some(index) == first));
+            // Compact, the label is still there - and still says the count, for
+            // a screen reader - but drawn at no size (see `.tally-chips.compact`).
+            label.set_visible(!compact);
+            let text = format!("{count} {word}");
+            if label.label() != text {
+                label.set_label(&text);
+            }
+        }
     }
 }
 
@@ -326,12 +370,20 @@ impl App {
         // group remembers what the arrow was last used for, so it is rarer
         // still after the first time.
         let agent_menu = gio::Menu::new();
+        let kinds = gio::Menu::new();
         for kind in Kind::ALL {
-            agent_menu.append(
+            kinds.append(
                 Some(&format!("Spawn {}", kind.label())),
                 Some(&format!("win.spawn-{}", kind.label())),
             );
         }
+        agent_menu.append_section(None, &kinds);
+        // Its own section: not a fourth agent but a different *place* to start
+        // one - a git worktree of its own, for work that shouldn't share files
+        // with the agents already in this project.
+        let places = gio::Menu::new();
+        places.append(Some("Spawn in a new worktree"), Some("win.spawn-worktree"));
+        agent_menu.append_section(None, &places);
         let choose_agent = gtk4::MenuButton::builder()
             .can_focus(false)
             .valign(gtk4::Align::Center)
@@ -509,19 +561,45 @@ impl App {
     /// grid the app opens in, and the lamp is the one fact about it worth
     /// teaching before the first agent starts.
     fn build_empty_diagram(&self) -> gtk4::Box {
-        let tile = |lit: bool| {
-            let classes: &[&str] = if lit {
-                &["empty-tile", "lit"]
-            } else {
-                &["empty-tile"]
-            };
-            gtk4::Box::builder().css_classes(classes).build()
+        // Each tile is a tile in miniature: a head strip with a state dot, and
+        // an activity line under it - so the four of them teach, before the
+        // first agent starts, the only vocabulary this window speaks. Lit is
+        // where you are typing; green is working; amber is asking you; grey is
+        // simply there.
+        let tile = |state: &str| {
+            let dot = gtk4::Box::builder()
+                .css_classes(["empty-tile-dot"])
+                .valign(gtk4::Align::Center)
+                .build();
+            let bar = gtk4::Box::builder()
+                .css_classes(["empty-tile-bar"])
+                .hexpand(true)
+                .valign(gtk4::Align::Center)
+                .build();
+            let head = gtk4::Box::builder()
+                .orientation(gtk4::Orientation::Horizontal)
+                .spacing(5)
+                .css_classes(["empty-tile-head"])
+                .build();
+            head.append(&dot);
+            head.append(&bar);
+            let tile = gtk4::Box::builder()
+                .orientation(gtk4::Orientation::Vertical)
+                .css_classes(["empty-tile", state])
+                .build();
+            tile.append(&head);
+            tile.append(
+                &gtk4::Box::builder()
+                    .css_classes(["empty-tile-activity"])
+                    .build(),
+            );
+            tile
         };
 
         let row = |a: gtk4::Box, b: gtk4::Box| {
             let row = gtk4::Box::builder()
                 .orientation(gtk4::Orientation::Horizontal)
-                .spacing(5)
+                .spacing(8)
                 .build();
             row.append(&a);
             row.append(&b);
@@ -530,12 +608,12 @@ impl App {
 
         let grid = gtk4::Box::builder()
             .orientation(gtk4::Orientation::Vertical)
-            .spacing(5)
+            .spacing(8)
             .halign(gtk4::Align::Center)
             .css_classes(["empty-diagram"])
             .build();
-        grid.append(&row(tile(true), tile(false)));
-        grid.append(&row(tile(false), tile(false)));
+        grid.append(&row(tile("lit"), tile("working")));
+        grid.append(&row(tile("waiting"), tile("idle")));
         grid
     }
 
@@ -555,7 +633,7 @@ impl App {
     /// What the widget is still worth having for is the part that has nothing to
     /// do with looks: it centres a clamp in whatever space it is given, at every
     /// window size, which is the one piece of geometry here worth not writing.
-    pub(super) fn build_empty_state(&self) -> adw::StatusPage {
+    pub(super) fn build_empty_state(&self) -> super::EmptyState {
         // The action that answers the sentence above it. This page exists to
         // report "no agents running", and starting one is what stops that being
         // true - so it leads, and opening another project follows. That is the
@@ -582,6 +660,25 @@ impl App {
             }
         });
 
+        // Above it, and only when there is something to resume: the agents
+        // this project had when the window last closed, each handed back the
+        // conversation it was in. It takes the primary's place while it is
+        // there, because a project reopened with work in flight is one whose
+        // likeliest next step is to carry on with it - and starting over is the
+        // other button, one line down.
+        //
+        // Offered rather than done. An agent is a process with a token budget
+        // attached, and reopening a window is not asking for four of them (see
+        // `session`'s header); a click is. `restore_agents` in the config does
+        // it without asking, for anyone who would rather it did.
+        let resume = gtk4::Button::builder()
+            .halign(gtk4::Align::Center)
+            .css_classes(["pill", "empty-primary"])
+            .visible(false)
+            .build();
+        let this = self.clone();
+        resume.connect_clicked(move |_| this.resume_agents());
+
         let start = gtk4::Button::builder()
             .label("Open another project\u{2026}")
             .halign(gtk4::Align::Center)
@@ -594,9 +691,15 @@ impl App {
         // is. This is the only page in the app with nothing on it to read, so
         // it is the only place a pointer to the command palette costs nothing
         // and is certain to be seen.
+        // Wrapping, so a quarter-snapped window folds it onto two lines rather
+        // than being widened by it: a label that cannot wrap is exactly as wide
+        // as its longest line, and this one is the longest line on the page.
         let hint = gtk4::Label::builder()
-            .label("Super+Alt+P for everything else")
+            .label("Super+Alt+P for everything else \u{b7} Super+Alt+? for the keys")
             .halign(gtk4::Align::Center)
+            .justify(gtk4::Justification::Center)
+            .wrap(true)
+            .max_width_chars(64)
             .css_classes(["empty-hint"])
             .build();
 
@@ -651,6 +754,7 @@ impl App {
         buttons.append(&self.build_empty_diagram());
         buttons.append(&heading);
         buttons.append(&clamped);
+        buttons.append(&resume);
         buttons.append(&agent);
         buttons.append(&start);
         buttons.append(&hint);
@@ -660,10 +764,15 @@ impl App {
         // now painted per-region rather than by one fill behind everything (see
         // `appearance::content_css`). Without this the empty state is a window
         // with a desktop showing through it.
-        adw::StatusPage::builder()
+        let page = adw::StatusPage::builder()
             .css_classes(["workspace-floor", "empty-state"])
             .child(&buttons)
-            .build()
+            .build();
+        super::EmptyState {
+            page,
+            resume,
+            start: agent,
+        }
     }
 
     pub(super) fn install_window_actions(&self) {
@@ -692,6 +801,11 @@ impl App {
         about.connect_activate(move |_, _| this.show_about());
         self.0.window.add_action(&about);
 
+        let this = self.clone();
+        let worktree = gio::SimpleAction::new("spawn-worktree", None);
+        worktree.connect_activate(move |_, _| this.spawn_in_worktree());
+        self.0.window.add_action(&worktree);
+
         // One per agent, named after it: the split button's menu, the command
         // palette and any future keybinding all want the same verb, and an
         // action is the one place GTK lets three callers share one.
@@ -713,9 +827,12 @@ impl App {
     /// complaint, which is several lines and worth reading twice, and it ends in
     /// something only the user can go and fix.
     pub fn report_config_problem(&self, problem: &str) {
-        self.0
-            .updates
-            .alert("Your config file wasn't used", problem);
+        let heading = if crate::config::in_effect() {
+            "Part of your config file wasn't used"
+        } else {
+            "Your config file wasn't used"
+        };
+        self.0.updates.alert(heading, problem);
     }
 
     pub fn show_shortcuts(&self) {

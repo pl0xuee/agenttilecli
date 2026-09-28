@@ -42,10 +42,11 @@ pub fn present(parent: &impl IsA<gtk4::Widget>) {
         .css_classes(["atc-dialog"])
         .build();
 
+    let taken = crate::desktop_keys::taken_ids();
     for section in SECTIONS {
         let bound: Vec<_> = COMMANDS
             .iter()
-            .filter(|command| command.section == section.title && !command.accelerator.is_empty())
+            .filter(|command| command.section == section.title && !command.keys().is_empty())
             .collect();
         if bound.is_empty() {
             continue;
@@ -58,13 +59,23 @@ pub fn present(parent: &impl IsA<gtk4::Widget>) {
 
         for command in bound {
             let keys = gtk4::ShortcutLabel::builder()
-                .accelerator(command.accelerator)
+                .accelerator(command.keys())
                 .valign(gtk4::Align::Center)
                 .build();
             let row = adw::ActionRow::builder()
                 .title(command.title)
                 .activatable(false)
                 .build();
+            // A key the desktop has taken is a key this sheet would otherwise
+            // be promising works. It says so, and says how to move it - the
+            // row is the one place someone reading about the key is looking.
+            if taken.contains(&command.id) {
+                row.set_subtitle(&format!(
+                    "Taken by your desktop \u{2014} move it with `{} = \"\u{2026}\"` under [keys] in config.toml",
+                    command.id,
+                ));
+                row.add_css_class("shortcut-taken");
+            }
             row.add_suffix(&keys);
             group.add(&row);
         }

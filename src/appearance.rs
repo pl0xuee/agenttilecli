@@ -61,7 +61,7 @@ pub struct Appearance {
     pub pane_opacity: f64,
     /// Half the space between neighbouring tiles, in pixels.
     pub gap: i32,
-    /// The terminal font, as a Pango description ("Fira Mono 10"). Empty means
+    /// The terminal font, as a Pango description ("JetBrains Mono 10"). Empty means
     /// the desktop's own monospace, which is what every pane used before there
     /// was a way to say otherwise.
     pub font: String,
@@ -335,18 +335,49 @@ pub fn content_css(font_scale: f64) -> String {
     // sits on a surface that follows `pane_opacity`.
     let chrome_halo = text_halo(window_opacity);
     let pane_halo = text_halo(pane_opacity);
-    // The lift follows whichever surface the text is actually sitting on. The
-    // drawer, the rail and the header strip all thin with `window_opacity`; only
-    // the labels inside a tile ride `pane_opacity`.
-    let chrome_lift = text_lift(window_opacity);
-    let pane_lift = text_lift(pane_opacity);
     format!(
         ".scaled-content {{ font-size: {font_scale}em; }}\n\
          .sidebar, .rail {{ text-shadow: 0 0 3px alpha(@shadow, {chrome_halo:.3}), \
            0 1px 2px alpha(@shadow, {chrome_halo:.3}); }}\n\
          .scaled-content {{ text-shadow: 0 0 3px alpha(@shadow, {pane_halo:.3}), \
            0 1px 2px alpha(@shadow, {pane_halo:.3}); }}\n\
-         .sidebar-version, .sidebar-add, .sidebar-header-count, .sidebar-tree-note, \
+         .scaled-content .top-bar {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
+         .workspace-floor {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
+         .sidebar {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
+         .sidebar.overlay {{ background-color: alpha(@rack, {OVERLAY_ALPHA:.3}); }}\n\
+         .rail {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
+         .pane {{ background-color: alpha(@tile, {pane_opacity:.3}); }}\n\
+         .pane.focused {{ background-color: alpha(@tile-lit, {pane_opacity:.3}); }}"
+    )
+}
+
+/// The resting colour of the quiet type, lifted toward @text as the surface
+/// under it thins - see `text_lift`.
+///
+/// Its own stylesheet, loaded one priority *below* `style.css` rather than
+/// beside the glass rules above it, and the difference is the whole point. In
+/// GTK a higher-priority provider wins outright, whatever the specificity of
+/// the rule it is up against - measured, not assumed: `.a` from a provider one
+/// notch up beats `.a.b` from the one below. So these colours, loaded above the
+/// stylesheet, silently beat every hover and every state it had for the same
+/// widgets: header icons that never brightened under the pointer, a broadcast
+/// icon that was meant to go dark on its amber fill and never did, a focused
+/// tile whose strip was meant to read louder and didn't. Loaded below, they are
+/// the resting colour and nothing more, and every `:hover`, `:checked` and state
+/// class in the stylesheet speaks over them as it was written to.
+pub fn ink_css() -> String {
+    let Appearance {
+        window_opacity,
+        pane_opacity,
+        ..
+    } = get();
+    // The lift follows whichever surface the text is actually sitting on. The
+    // drawer, the rail and the header strip all thin with `window_opacity`; only
+    // the labels inside a tile ride `pane_opacity`.
+    let chrome_lift = text_lift(window_opacity);
+    let pane_lift = text_lift(pane_opacity);
+    format!(
+        ".sidebar-version, .sidebar-add, .sidebar-header-count, .sidebar-tree-note, \
          .empty-hint {{ color: mix(@faint, @text, {chrome_lift:.3}); }}\n\
          .sidebar-header-label, .header-title-sub, .header-action, .rack-overflow, \
          .sidebar-row-icon, button.sidebar-agent, button.sidebar-tree-file \
@@ -354,14 +385,7 @@ pub fn content_css(font_scale: f64) -> String {
          .sidebar-agent-label, button.sidebar-tree-dir, .empty-description \
          {{ color: mix(@dim, @text, {chrome_lift:.3}); }}\n\
          .pane-head-label {{ color: mix(@muted, @text, {pane_lift:.3}); }}\n\
-         .pane-close, .pane-editor-action {{ color: mix(@faint, @text, {pane_lift:.3}); }}\n\
-         .scaled-content .top-bar {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
-         .workspace-floor {{ background-color: alpha(@tile, {window_opacity:.3}); }}\n\
-         .sidebar {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
-         .sidebar.overlay {{ background-color: alpha(@rack, {OVERLAY_ALPHA:.3}); }}\n\
-         .rail {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
-         .pane {{ background-color: alpha(@tile, {pane_opacity:.3}); }}\n\
-         .pane.focused {{ background-color: alpha(@tile-lit, {pane_opacity:.3}); }}"
+         .pane-close, .pane-editor-action {{ color: mix(@faint, @text, {pane_lift:.3}); }}"
     )
 }
 
@@ -433,21 +457,23 @@ mod tests {
         }
     }
 
-    /// An empty workspace and a workspace with one agent in it have to be the
-    /// same colour.
+    /// The floor is one surface, whether or not tiles stand on it.
     ///
-    /// This is a bug that shipped and was reported from a screenshot: the empty
-    /// state took `@field` at `window_opacity` while a pane took `@tile-lit` at
-    /// `pane_opacity`, so starting a single agent swapped the entire right-hand
-    /// side of the window from (12,16,19) to (31,40,47). Twenty-one points, over
-    /// the whole workspace, with nothing in the interface to explain it - which
-    /// reads as the application changing its own background.
+    /// This used to be the opposite rule, and for a reason worth keeping: the
+    /// empty state was the floor while a lone pane was a flat slab filling the
+    /// workspace, so starting one agent swapped the whole right-hand side from
+    /// one colour to another with nothing to say why - the application seeming
+    /// to change its own background. The fix then was to paint the empty state
+    /// in the pane's colour.
     ///
-    /// Asserted on the emitted rule rather than on rendered pixels because that
-    /// is where the mistake was: both surfaces were correct about their own
-    /// colour and wrong about being different ones.
+    /// Since 4.0 a tile is an *object* on the floor - rounded, edged, shadowed,
+    /// arriving with a fade and standing in the lit floor's gutter - and the
+    /// floor has a horizon glow the empty state is the best view of. So the
+    /// invariant turns round: the empty state and the gutters around real tiles
+    /// are the same floor, at the same alpha as the header above both, and the
+    /// only thing starting an agent changes is that something now stands on it.
     #[test]
-    fn an_empty_workspace_is_the_same_surface_as_a_full_one() {
+    fn the_floor_is_one_surface_with_or_without_tiles() {
         set(Appearance {
             window_opacity: 0.8,
             pane_opacity: 0.95,
@@ -455,22 +481,14 @@ mod tests {
             font: String::new(),
         });
         let css = content_css(1.0);
-
-        // The empty state takes the pane's *colour* - which is where twenty of
-        // the twenty-one points lived - at the chrome's *alpha*, so it stays
-        // the one screen you can see the desktop through.
         assert!(
-            css.contains(".workspace-floor { background-color: alpha(@tile, 0.800); }"),
-            "the empty state must stand on the pane surface, and stay glass:\n{css}",
+            css.contains(".workspace-floor { background-color: alpha(@field, 0.800); }"),
+            "the empty state must be the same floor the tiles stand on:\n{css}",
         );
-        // ...and emphatically not the floor's, which is what the gutters
-        // between real tiles are for.
         assert!(
-            !css.contains(".workspace-floor { background-color: alpha(@field"),
-            "the empty state is back on the floor - see this test's doc:\n{css}",
+            css.contains(".top-bar { background-color: alpha(@field, 0.800); }"),
+            "and the header above it the same floor again:\n{css}",
         );
-        // The floor itself still exists, for the region that genuinely is one.
-        assert!(css.contains(".top-bar { background-color: alpha(@field, 0.800); }"), "{css}");
     }
 
     /// A session that has never seen the dialog must leave the config file

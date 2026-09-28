@@ -183,14 +183,28 @@ struct ProjectView {
     id: ProjectId,
     tiler: Tiler,
     row: gtk4::ListBoxRow,
-    /// One dot per agent this project is running, coloured by what each is
+    /// One row per agent this project is running, coloured by what each is
     /// doing - see `refresh_row_tally`.
     agents: gtk4::Box,
+    /// Those rows as last built, for updating in place.
+    agent_rows: RefCell<sidebar::AgentRows>,
     /// Switches between the tiler and the empty state. A project with no panes
     /// used to be impossible (the app opened straight into a help pane), and
     /// now it's the *first* thing a new user sees - so it has to say what to do
     /// rather than show a blank rectangle.
     view: gtk4::Stack,
+    /// The empty state's two ways to start: carrying on with the agents this
+    /// project had last time, and starting a new one - see `refresh_resume`.
+    resume: gtk4::Button,
+    start: gtk4::Button,
+}
+
+/// What `build_empty_state` hands back: the page, and the two buttons whose
+/// roles swap depending on whether there is anything to resume.
+pub(super) struct EmptyState {
+    pub(super) page: adw::StatusPage,
+    pub(super) resume: gtk4::Button,
+    pub(super) start: gtk4::Button,
 }
 
 struct Inner {
@@ -203,6 +217,10 @@ struct Inner {
     /// The rail's column of project glyph buttons, rebuilt whole by
     /// `refresh_rail` - see `rail`'s module comment for why whole.
     rail_glyphs: gtk4::Box,
+    /// The rail's glyph buttons as last built, with the project and face each
+    /// was built for - so `refresh_rail` can tell a change it can make in place
+    /// from one that needs the buttons rebuilt.
+    rail_buttons: RefCell<Vec<rail::RailGlyph>>,
     /// How many projects are open, engraved beside the drawer's heading.
     /// Written by `refresh_rail`, which is already the one call every change to
     /// the project list ends with - so the count cannot drift from the list the
@@ -276,6 +294,9 @@ struct Inner {
     /// change rather than recreated, so it keeps sitting at the priority it was
     /// added with.
     css_provider: gtk4::CssProvider,
+    /// The quiet type's resting colours, one priority below the stylesheet -
+    /// see `appearance::ink_css` for why below.
+    ink_provider: gtk4::CssProvider,
     /// Keeps the watch on the desktop's current theme alive.
     ///
     /// A `FileMonitor` stops reporting the moment it is dropped, and every other
@@ -283,6 +304,17 @@ struct Inner {
     /// that isn't held here is a monitor that fires exactly never, silently and
     /// without failing to start. `None` on a machine with no Omarchy.
     theme_monitor: RefCell<Option<gtk4::gio::FileMonitor>>,
+    /// Which panes currently have a desktop notification out, and in which
+    /// project - so going to a project can take back exactly the ones it
+    /// answers (see `notify`). Keyed by pane id, one notification per pane.
+    notified: RefCell<std::collections::HashMap<String, ProjectId>>,
+    /// The session as it was last written, so a save that would write the same
+    /// bytes again doesn't. Most of what schedules a save - a focus change, a
+    /// project switch - changes nothing the file records.
+    last_saved: RefCell<String>,
+    /// Set once leaving has been agreed to, so the close request it re-issues
+    /// goes through instead of asking again.
+    leaving: Cell<bool>,
 }
 
 /// The application window and everything in it.
@@ -387,6 +419,18 @@ impl App {
             );
         }
 
+        let ink_provider = gtk4::CssProvider::new();
+        ink_provider.connect_parsing_error(|_, section, error| {
+            eprintln!("ink css dropped a declaration at {section}: {error}");
+        });
+        if let Some(display) = gdk::Display::default() {
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &ink_provider,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION - 1,
+            );
+        }
+
         let this = App(Rc::new(Inner {
             window,
             store: RefCell::new(ProjectStore::new()),
@@ -395,6 +439,7 @@ impl App {
             list: list.clone(),
             split: split.clone(),
             rail_glyphs,
+            rail_buttons: RefCell::new(Vec::new()),
             sidebar_count: sidebar_count.clone(),
             toasts,
             updates: updates.clone(),
@@ -413,8 +458,12 @@ impl App {
             socket: RefCell::new(None),
             base_title: title.to_string(),
             css_provider,
+            ink_provider,
             search: RefCell::new(None),
             theme_monitor: RefCell::new(None),
+            notified: RefCell::new(std::collections::HashMap::new()),
+            last_saved: RefCell::new(String::new()),
+            leaving: Cell::new(false),
         }));
 
         // Start listening before the first pane is spawned, so its agent finds a
@@ -500,7 +549,9 @@ impl App {
         // painted at all and the desktop showing through the gutters.
         this.refresh_appearance_css();
         this.watch_desktop_theme();
+        this.install_notification_actions(application);
         this.save_on_close();
+        this.save_on_arrangement();
         // A staged window for taking the README's screenshots: sidebar open, a
         // couple of extra projects, some panes to tile. `debug_assertions`
         // rather than a plain env check so it exists only in a `cargo build`,
@@ -680,6 +731,12 @@ impl App {
     /// is a process with a token budget attached, and starting one nobody asked
     /// for is the single thing this app must not do by itself.
     fn restore_session(&self, saved: &crate::session::Session) {
+        // What the file said, so the first save - which comes 1.5s after
+        // startup, from the projects being added - is recognised as a no-op
+        // rather than rewriting a file this run has not yet changed.
+        if let Ok(text) = saved.to_text() {
+            *self.0.last_saved.borrow_mut() = text;
+        }
         // Ids collected as they are handed out, rather than looked up
         // afterwards. Two projects can perfectly well share a path - the
         // first-run project is named for what it holds and opens on whatever
@@ -697,18 +754,23 @@ impl App {
                     focus: 0,
                 },
             );
-            // Off unless asked for. See this method's doc comment, and
-            // `session`'s header, for why the default is not to.
+            // Each one comes back as the agent it was, in the conversation it
+            // was having, rather than as this project's current default and a
+            // blank slate: a restore is meant to reproduce what was there, and a
+            // codex that reopened as a claude would be a quiet substitution of
+            // one agent's context for another's.
+            //
+            // Offered, not started, unless the config asks - see this method's
+            // doc comment, and `session`'s header, for why the default is not to.
+            tiler.set_saved(project.agents());
+            let id = self.0.store.borrow().active();
             if crate::config::get().restore_agents {
-                // Each one comes back as the agent it was, rather than as this
-                // project's current default: a restore is meant to reproduce
-                // what was there, and a codex that reopened as a claude would
-                // be a quiet substitution of one agent's context for another's.
-                for kind in project.kinds() {
-                    tiler.restore_pane_of(kind);
-                }
+                tiler.resume_saved();
             }
-            restored.push(self.0.store.borrow().active());
+            if let Some(id) = id {
+                self.refresh_resume(id);
+            }
+            restored.push(id);
         }
 
         // Selecting it is what makes it visible, and it repaints the header bar
@@ -729,6 +791,21 @@ impl App {
         let store = self.0.store.borrow();
         let views = self.0.views.borrow();
         let active = store.active();
+        let agents_of = |id: ProjectId| -> Vec<(crate::agent::Kind, Option<String>)> {
+            let Some(view) = views.iter().find(|v| v.id == id) else {
+                return Vec::new();
+            };
+            let kinds = view.tiler.agent_kinds();
+            if kinds.is_empty() {
+                return view.tiler.saved();
+            }
+            let sessions = view.tiler.agent_sessions();
+            kinds
+                .into_iter()
+                .zip(sessions)
+                .map(|(kind, session)| (kind, Some(session).filter(|s| !s.is_empty())))
+                .collect()
+        };
 
         let projects = store
             .iter()
@@ -739,27 +816,23 @@ impl App {
                 mode: project.mode,
                 master_ratio: project.master_ratio,
                 master_count: project.master_count,
-                // The agent tally, not the pane count: this number is what a
-                // restore with `restore_agents` on will *spawn agents from*,
-                // and an open editor pane counted here would come back as an
-                // extra agent nobody started.
-                agents: views
+                // The agents, as a restore would bring them back: the live
+                // ones, or - for a project whose saved agents have not been
+                // resumed yet - those, so that opening the window and closing
+                // it again does not quietly forget work that was never taken up.
+                //
+                // The agent tally, not the pane count: this is what a restore
+                // will *spawn agents from*, and an open editor pane counted here
+                // would come back as an extra agent nobody started.
+                agents: agents_of(project.id).len(),
+                agent_kinds: agents_of(project.id)
                     .iter()
-                    .find(|v| v.id == project.id)
-                    .map_or(0, |v| v.tiler.agent_tally().total()),
-                // Filtered by the same test the count above uses, so the two
-                // cannot come apart - see `Tiler::agent_kinds`.
-                agent_kinds: views
-                    .iter()
-                    .find(|v| v.id == project.id)
-                    .map(|v| {
-                        v.tiler
-                            .agent_kinds()
-                            .iter()
-                            .map(|k| k.label().to_string())
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                    .map(|(kind, _)| kind.label().to_string())
+                    .collect(),
+                agent_sessions: agents_of(project.id)
+                    .into_iter()
+                    .map(|(_, session)| session.unwrap_or_default())
+                    .collect(),
                 active: active == Some(project.id),
             })
             .collect();
@@ -793,8 +866,21 @@ impl App {
             let Some(inner) = weak.upgrade() else { return };
             let app = App(inner);
             app.0.save_queued.set(false);
-            let _ = app.snapshot_session().save();
+            app.write_session();
         });
+    }
+
+    /// Writes the session now, unless it would write what is already there.
+    fn write_session(&self) {
+        let Ok(text) = self.snapshot_session().to_text() else {
+            return;
+        };
+        if *self.0.last_saved.borrow() == text {
+            return;
+        }
+        if crate::session::Session::write_text(&text).is_ok() {
+            *self.0.last_saved.borrow_mut() = text;
+        }
     }
 
     /// The last save, taken while there is still a window to ask - and the one
@@ -811,25 +897,177 @@ impl App {
     fn save_on_close(&self) {
         let this = self.clone();
         self.0.window.connect_close_request(move |_| {
-            let _ = this.snapshot_session().save();
-            // The socket goes with the window, in the same handler and for the
-            // same reason: this is the last moment anything still knows the
-            // window existed. Nothing else will remove the file - the listener
-            // holding the socket open is leaked on purpose (see `ipc::listen`) -
-            // so without this every run leaves one behind in the runtime
-            // directory.
-            if let Some(path) = this.0.socket.borrow().as_deref() {
-                crate::ipc::remove_socket(path);
+            // Closing the window stops every agent in it and drops every
+            // unsaved file, so if there is either, it asks first - and the
+            // window stays until it has an answer.
+            if !this.0.leaving.get() {
+                let then = this.clone();
+                if this.confirm_leaving(Leaving::Quit, move || {
+                    then.0.window.close();
+                }) {
+                    return glib::Propagation::Stop;
+                }
             }
+            this.tidy_up();
             glib::Propagation::Proceed
         });
     }
 
-    // ── Projects ─────────────────────────────────────────────────────────
+    /// Schedules a save when the window's own arrangement changes - its size,
+    /// and whether the drawer is open.
+    ///
+    /// Both are in the session and neither used to be saved as it changed, only
+    /// caught by the save on close - which a window that is killed, or that
+    /// crashes, never reaches. The debounce folds a drag-resize's hundred
+    /// notifications into one write.
+    fn save_on_arrangement(&self) {
+        let weak = Rc::downgrade(&self.0);
+        let save = move || {
+            if let Some(inner) = weak.upgrade() {
+                App(inner).schedule_save();
+            }
+        };
+        let on_width = save.clone();
+        self.0
+            .window
+            .connect_default_width_notify(move |_| on_width());
+        let on_height = save.clone();
+        self.0
+            .window
+            .connect_default_height_notify(move |_| on_height());
+        self.0.split.connect_show_sidebar_notify(move |_| save());
+    }
 
-    // ── Attention ────────────────────────────────────────────────────────
+    /// What this process does on its way out, however it is leaving: the last
+    /// save, and the socket file taken away.
+    ///
+    /// The socket goes because nothing else will remove it - the listener
+    /// holding it open is leaked on purpose (see `ipc::listen`) - so without
+    /// this every run leaves one behind in the runtime directory.
+    ///
+    /// Both halves are best-effort and neither may hold the window open. A user
+    /// who has asked to close is not interested in whether a file write
+    /// succeeded, and refusing to close because it didn't would turn a full disk
+    /// into an application that cannot be quit.
+    fn tidy_up(&self) {
+        let _ = self.snapshot_session().save();
+        if let Some(path) = self.0.socket.borrow().as_deref() {
+            crate::ipc::remove_socket(path);
+        }
+    }
 
-    // ── Lookups ──────────────────────────────────────────────────────────
+    /// Asks before leaving, if leaving would cost anything - and returns whether
+    /// it asked. `then` runs once the answer is "go ahead" (and any files the
+    /// answer said to save have been saved).
+    ///
+    /// Two things are lost by leaving, and only two are asked about: a file with
+    /// unsaved edits, which is gone for good, and an agent in the middle of a
+    /// turn, whose turn is. An idle agent is not asked about - its conversation
+    /// is saved with the session, and the empty state offers it back next time.
+    fn confirm_leaving(&self, leaving: Leaving, then: impl Fn() + 'static) -> bool {
+        let mut dirty = Vec::new();
+        let mut busy = 0;
+        for view in self.0.views.borrow().iter() {
+            dirty.extend(view.tiler.dirty_editors());
+            let tally = view.tiler.agent_tally();
+            busy += tally.working + tally.waiting;
+        }
+        if dirty.is_empty() && busy == 0 {
+            return false;
+        }
+
+        let mut lines = Vec::new();
+        match dirty.as_slice() {
+            [] => {}
+            [one] => lines.push(format!("{} has unsaved changes.", one.name())),
+            many => lines.push(format!("{} files have unsaved changes.", many.len())),
+        }
+        if busy > 0 {
+            lines.push(format!(
+                "{} still working \u{2014} {} can pick up the conversation next time, but not the turn in progress.",
+                if busy == 1 { "1 agent is".to_string() } else { format!("{busy} agents are") },
+                if busy == 1 { "it" } else { "they" },
+            ));
+        }
+        let (heading, go) = match leaving {
+            Leaving::Quit => ("Quit AgentTileCLI?", "Quit"),
+            Leaving::Restart => ("Restart into the update?", "Restart"),
+        };
+        let ask = adw::AlertDialog::new(Some(heading), Some(&lines.join("\n\n")));
+        ask.add_response("cancel", "Keep working");
+        if dirty.is_empty() {
+            ask.add_response("go", go);
+            ask.set_response_appearance("go", adw::ResponseAppearance::Destructive);
+        } else {
+            ask.add_response("go", &format!("Discard and {}", go.to_lowercase()));
+            ask.add_response("save", &format!("Save and {}", go.to_lowercase()));
+            ask.set_response_appearance("go", adw::ResponseAppearance::Destructive);
+            ask.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+        }
+        ask.set_default_response(Some("cancel"));
+        ask.set_close_response("cancel");
+        let this = self.clone();
+        ask.connect_response(None, move |_, response| {
+            match response {
+                "save" => {
+                    for editor in &dirty {
+                        editor.save();
+                    }
+                    // A save that didn't land - a full disk, a file that moved
+                    // under it and is now asking its own question - holds the
+                    // door: leaving would lose exactly what it was told to keep.
+                    if dirty.iter().any(|editor| editor.is_modified()) {
+                        return;
+                    }
+                }
+                "go" => {}
+                _ => return,
+            }
+            this.0.leaving.set(true);
+            then();
+        });
+        ask.present(Some(&self.0.window));
+        true
+    }
+
+    /// The action a desktop notification's click runs, and the rule that takes
+    /// notifications back once you are looking again.
+    ///
+    /// On the *application* rather than the window, because that is where the
+    /// desktop sends a notification's click: it names `app.go-to-agent`, and
+    /// it can arrive while the window is buried under six others.
+    fn install_notification_actions(&self, application: &adw::Application) {
+        let go = gtk4::gio::SimpleAction::new(
+            crate::notify::GO_TO_AGENT,
+            Some(&crate::notify::target_type()),
+        );
+        let weak = Rc::downgrade(&self.0);
+        go.connect_activate(move |_, target| {
+            let (Some(inner), Some((project, pane))) = (
+                weak.upgrade(),
+                target.and_then(crate::notify::parse_target),
+            ) else {
+                return;
+            };
+            App(inner).go_to_agent(project, &pane);
+        });
+        application.add_action(&go);
+
+        // Coming back to the window is looking at whichever project it shows,
+        // and that project's notifications have now been answered by the dots.
+        let weak = Rc::downgrade(&self.0);
+        self.0.window.connect_is_active_notify(move |window| {
+            if !window.is_active() {
+                return;
+            }
+            let Some(inner) = weak.upgrade() else { return };
+            let app = App(inner);
+            let active = app.0.store.borrow().active();
+            if let Some(id) = active {
+                app.withdraw_notifications_for(id);
+            }
+        });
+    }
 
     // ── Public actions, driven by the keybindings ────────────────────────
 
@@ -906,26 +1144,21 @@ impl App {
         let tally = self.active_tiler().map(|t| t.agent_tally()).unwrap_or_default();
         self.0.title.set_tally(&tally);
 
+        // The chips carry the tally now, so the words only have to speak when
+        // the chips can't: when there is nothing running to count.
         if !pane_title.is_empty() {
             self.0.title.set_subtitle(&pane_title);
-            return;
-        }
-        self.0.title.set_subtitle(&self.agent_summary());
-    }
-
-    /// The active project's agents, in words.
-    fn agent_summary(&self) -> String {
-        match self.active_tiler() {
-            Some(tiler) => self.agent_words(&tiler.agent_tally()),
-            None => String::new(),
+        } else if tally.total() == 0 {
+            self.0.title.set_subtitle("no agents running");
+        } else {
+            self.0.title.set_subtitle("");
         }
     }
 
     /// "3 agents \u{b7} 1 waiting for you", or as much of it as is true.
     ///
-    /// One function for two readers - the header's subtitle and the tooltip on
-    /// a rack row's dots - because they are the same sentence about the same
-    /// fact at two scales, and two copies of a sentence drift.
+    /// The tooltip on a rail glyph: the header's chips, said in a sentence,
+    /// for a project whose header you can't see.
     pub(super) fn agent_words(&self, tally: &crate::tiler::Tally) -> String {
         let total = tally.total();
         if total == 0 {
@@ -1028,11 +1261,26 @@ impl App {
 
         // Weak, because the monitor is owned by the struct whose closure this
         // is: a strong clone here would be a window that can never be dropped.
+        //
+        // And folded: one `omarchy theme set` is two or three events, and each
+        // used to be a full repaint - every stylesheet reloaded, every terminal
+        // re-coloured - so a theme change arrived as a visible stutter of
+        // repaints. A short wait after the first event lets the rest land, and
+        // the repaint happens once, from whatever the files say by then.
         let weak = Rc::downgrade(&self.0);
+        let pending = Rc::new(Cell::new(false));
         monitor.connect_changed(move |_, _, _, _| {
-            if let Some(inner) = weak.upgrade() {
-                App(inner).refresh_theme();
+            if pending.replace(true) {
+                return;
             }
+            let weak = weak.clone();
+            let pending = pending.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
+                pending.set(false);
+                if let Some(inner) = weak.upgrade() {
+                    App(inner).refresh_theme();
+                }
+            });
         });
         self.0.theme_monitor.replace(Some(monitor));
     }
@@ -1043,6 +1291,19 @@ impl App {
     /// PNG" is a speed bump where a sentence would do.
     pub fn toast(&self, message: &str) {
         self.0.toasts.add_toast(adw::Toast::new(message));
+    }
+
+    /// A toast with a button on it, which runs `action` - a detailed action
+    /// name like `win.shortcuts`, so the button does exactly what the menu
+    /// item of the same name does.
+    pub fn toast_with_action(&self, message: &str, button: &str, action: &str) {
+        let toast = adw::Toast::builder()
+            .title(message)
+            .button_label(button)
+            .action_name(action)
+            .timeout(8)
+            .build();
+        self.0.toasts.add_toast(toast);
     }
 
     pub fn copy_focused_output(&self) {
@@ -1103,6 +1364,7 @@ impl App {
     pub(super) fn refresh_appearance_css(&self) {
         let css = crate::appearance::content_css(self.0.font_scale.get());
         self.0.css_provider.load_from_string(&css);
+        self.0.ink_provider.load_from_string(&crate::appearance::ink_css());
     }
 
     // ── Header bar ───────────────────────────────────────────────────────
@@ -1118,6 +1380,15 @@ impl App {
     /// overwritten, so it's the one to run again. Asking for it *now* would get
     /// the wrong answer; `update::remember_exe` explains why.
     fn restart(&self) {
+        // The update is installed either way; what is asked is only whether now
+        // is the moment, when now would cost unsaved work or a turn in flight.
+        let this = self.clone();
+        if !self.confirm_leaving(Leaving::Restart, move || this.relaunch()) {
+            self.relaunch();
+        }
+    }
+
+    fn relaunch(&self) {
         let relaunch = update::exe().and_then(|exe| {
             update::spawn_relaunch(&update::relaunch_command(std::process::id(), &exe))
         });
@@ -1125,7 +1396,16 @@ impl App {
         match relaunch {
             // Quitting is what actually hands over: the watcher is sitting on
             // this pid, and starts the new build the moment it's gone.
+            //
+            // `quit` goes straight to shutdown without a close request, so the
+            // last save and the socket's removal happen here or not at all -
+            // and a restart that forgot the session would reopen into
+            // yesterday's. After the relaunch is under way, not before: a
+            // window that tidied up and then failed to restart would go on
+            // running with its socket gone and every agent's hooks talking to
+            // nobody.
             Ok(()) => {
+                self.tidy_up();
                 if let Some(app) = self.0.window.application() {
                     app.quit();
                 }
@@ -1134,12 +1414,26 @@ impl App {
             // so, and (pointedly) don't quit. A shutdown the user has to undo by
             // hand is a poor outcome; a silent one they don't see coming is
             // worse.
-            Err(reason) => self.0.updates.alert(
-                "Update installed, but couldn't restart",
-                &format!("Quit and relaunch AgentTileCLI to run the new version.\n\n{reason}"),
-            ),
+            //
+            // And the agreement to leave is taken back with it, or the next
+            // close would skip its question on the strength of an answer given
+            // to a restart that never happened.
+            Err(reason) => {
+                self.0.leaving.set(false);
+                self.0.updates.alert(
+                    "Update installed, but couldn't restart",
+                    &format!("Quit and relaunch AgentTileCLI to run the new version.\n\n{reason}"),
+                );
+            }
         }
     }
+}
+
+/// Why the window is going away, for the one question it may ask first.
+#[derive(Clone, Copy)]
+enum Leaving {
+    Quit,
+    Restart,
 }
 
 fn set_class(widget: &impl IsA<gtk4::Widget>, class: &str, on: bool) {

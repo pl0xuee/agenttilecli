@@ -2,6 +2,9 @@
 name = "agenttilecli"
 version = "3.2.0"
 edition = "2024"
+# Two binaries: the window, and `agenttilecli-hook` (src/bin/), the small one
+# agents run at every moment of their turn. `cargo run` means the window.
+default-run = "agenttilecli"
 
 [dependencies]
 # `v4_16` buys CSS custom properties and `:root` - which the accent colours

@@ -18,7 +18,7 @@ use gtk4::{gdk, GestureClick, PropagationPhase};
 use vte4::prelude::*;
 
 use super::Tiler;
-use crate::agent::Kind;
+use crate::agent::{Kind, Launch};
 use crate::hooks;
 use crate::ipc;
 use crate::model::PaneState;
@@ -66,33 +66,57 @@ impl Tiler {
 
     /// Applies an agent's report to whichever of this group's panes sent it.
     ///
-    /// Returns whether it landed *and* changed something - the caller uses that
-    /// to decide whether the sidebar needs repainting, and a turn produces far
-    /// more events than it does state changes.
+    /// Returns `None` if the pane isn't one of this group's, and otherwise what
+    /// the report did - the caller uses that to decide whether the sidebar needs
+    /// repainting (a turn produces far more events than it does state changes)
+    /// and whether the moment is worth a desktop notification.
     ///
     /// Every group is asked in turn until one claims the message, because a pane
     /// id is unique across the window rather than within a group, and a message
     /// naming a pane that has since been closed is simply claimed by nobody.
-    pub fn apply_agent_event(&self, message: &ipc::Message) -> bool {
+    pub fn apply_agent_event(&self, message: &ipc::Message) -> Option<Report> {
         let panes = self.imp().panes.borrow();
-        let Some(pane) = panes.iter().find(|p| p.id == message.pane) else {
-            return false;
-        };
-        let next = hooks::advance(&pane.state(), message.event, message.tool.as_deref());
-        let changed = pane.set_state(next);
+        let index = panes.iter().position(|p| p.id == message.pane)?;
+        let pane = panes[index].clone();
         drop(panes);
-        if changed {
-            // An agent that wants you is worth saying so about, exactly as the
-            // bell already does - this is the same news arriving by a route that
-            // knows which pane it came from.
-            if message.event == crate::hooks::Event::Notification {
-                self.notify_attention();
-            }
+
+
+        // Whatever the event, the conversation it came from is the one this pane
+        // is now having - `/clear` in claude starts a new one mid-pane, and the
+        // newest id is the one a resume should ask for.
+        let session_changed = message
+            .session
+            .as_deref()
+            .is_some_and(|session| pane.set_session(session));
+        // A conversation exists to resume once something has been said in it.
+        if matches!(message.event, hooks::Event::UserPromptSubmit | hooks::Event::PreToolUse) {
+            pane.mark_conversed();
         }
-        changed
+
+        let from = pane.state();
+        let to = hooks::advance(
+            &from,
+            message.event,
+            message.tool.as_deref(),
+            message.reason.as_deref(),
+        );
+        let changed = pane.set_state(to.clone());
+        // An agent that has just started asking wants you, exactly as the bell
+        // already says - this is the same news arriving by a route that knows
+        // which pane it came from.
+        if changed && matches!(to, PaneState::Waiting { .. }) && !matches!(from, PaneState::Waiting { .. }) {
+            self.notify_attention();
+        }
+        Some(Report {
+            changed,
+            session_changed,
+            from,
+            to,
+            pane_id: pane.id.clone(),
+            kind: pane.kind(),
+        })
     }
 
-    /// How many of this group's panes are in each state worth counting.
     /// What each of this group's agents is doing, in pane order.
     ///
     /// The ordered form of `agent_tally`, for the rack: a tally can say "one of
@@ -122,7 +146,7 @@ impl Tiler {
     /// the same pane - so a row here and the head of the tile it points at
     /// always say the same words, and there is only one place that decides what
     /// an agent is currently called (see `pane::Head::refresh`).
-    pub fn agent_rows(&self) -> Vec<(usize, String, PaneState)> {
+    pub fn agent_rows(&self) -> Vec<AgentRowFacts> {
         self.imp()
             .panes
             .borrow()
@@ -130,7 +154,13 @@ impl Tiler {
             .enumerate()
             .filter_map(|(index, pane)| {
                 let state = pane.agent_state()?;
-                Some((index, pane.head_label(), state))
+                Some(AgentRowFacts {
+                    index,
+                    kind: pane.kind(),
+                    words: crate::pane::brief_words(&state),
+                    strip: pane.head_label(),
+                    state,
+                })
             })
             .collect()
     }
@@ -145,6 +175,51 @@ impl Tiler {
         if index < self.imp().panes.borrow().len() {
             self.set_focus(index);
         }
+    }
+
+    /// The editors in this group holding edits that aren't on disk yet.
+    pub fn dirty_editors(&self) -> Vec<crate::editor::Editor> {
+        self.imp()
+            .panes
+            .borrow()
+            .iter()
+            .filter_map(|pane| pane.editor().filter(|e| e.is_modified()).cloned())
+            .collect()
+    }
+
+    /// Gives the keyboard to the pane with this id, if it is one of this
+    /// group's. Returns whether it was.
+    pub fn focus_pane_id(&self, pane_id: &str) -> bool {
+        let index = self.imp().panes.borrow().iter().position(|p| p.id == pane_id);
+        match index {
+            Some(index) => {
+                self.set_focus(index);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The ids of every pane in this group.
+    pub fn pane_ids(&self) -> Vec<String> {
+        self.imp().panes.borrow().iter().map(|p| p.id.clone()).collect()
+    }
+
+    /// Where the keyboard is in this group.
+    pub fn focus_index(&self) -> usize {
+        self.imp().focus.get()
+    }
+
+    /// The panes whose agents have stopped to ask something, in pane order.
+    pub fn waiting_panes(&self) -> Vec<usize> {
+        self.imp()
+            .panes
+            .borrow()
+            .iter()
+            .enumerate()
+            .filter(|(_, pane)| matches!(pane.agent_state(), Some(PaneState::Waiting { .. })))
+            .map(|(index, _)| index)
+            .collect()
     }
 
     /// Which agent each of this group's agent panes is running, in pane order.
@@ -163,12 +238,55 @@ impl Tiler {
             .collect()
     }
 
+    /// The conversation each of this group's agents is in, in the same order
+    /// as `agent_kinds` - empty where an agent never said.
+    pub fn agent_sessions(&self) -> Vec<String> {
+        self.imp()
+            .panes
+            .borrow()
+            .iter()
+            .filter(|pane| pane.agent_state().is_some())
+            .map(|pane| pane.resumable_session().unwrap_or_default())
+            .collect()
+    }
+
+    /// Hands this group the agents it had last time, for `resume_saved` to
+    /// bring back when asked.
+    pub fn set_saved(&self, agents: Vec<(Kind, Option<String>)>) {
+        *self.imp().saved.borrow_mut() = agents;
+    }
+
+    /// The agents waiting to be brought back.
+    pub fn saved(&self) -> Vec<(Kind, Option<String>)> {
+        self.imp().saved.borrow().clone()
+    }
+
+    /// Brings back the agents this group had last time, each in the
+    /// conversation it was having - or a new one, for an agent that never said
+    /// which it was in. Returns how many were started.
+    ///
+    /// Taken rather than read: resuming the same conversation twice puts two
+    /// agents on one transcript, and neither of them would know about the
+    /// other.
+    pub fn resume_saved(&self) -> usize {
+        let saved = std::mem::take(&mut *self.imp().saved.borrow_mut());
+        for (kind, session) in &saved {
+            let launch = match session {
+                Some(id) => Launch::Resume(id.clone()),
+                None => Launch::Fresh,
+            };
+            self.launch_pane(*kind, &launch);
+        }
+        saved.len()
+    }
+
+    /// How many of this group's agents are in each state worth counting.
     pub fn agent_tally(&self) -> Tally {
         let mut tally = Tally::default();
         for pane in self.imp().panes.borrow().iter() {
             match pane.agent_state() {
                 Some(PaneState::Working { .. }) => tally.working += 1,
-                Some(PaneState::Waiting) => tally.waiting += 1,
+                Some(PaneState::Waiting { .. }) => tally.waiting += 1,
                 Some(_) => tally.other += 1,
                 None => {}
             }
@@ -187,6 +305,11 @@ impl Tiler {
     /// rather than mixing an unrelated project's panes into this grid.
     pub fn spawn_pane_here(&self) {
         self.spawn_pane_of(self.default_kind());
+    }
+
+    /// The folder this group's agents start in.
+    pub fn cwd(&self) -> String {
+        self.imp().cwd.borrow().clone()
     }
 
     /// Which agent the bare `+` starts in this group.
@@ -216,12 +339,17 @@ impl Tiler {
     /// to be restored last, which is a preference nobody expressed and an
     /// arbitrary one at that.
     pub fn restore_pane_of(&self, kind: Kind) {
-        let cwd = self.imp().cwd.borrow().clone();
-        self.spawn_pane_in(&cwd, kind);
+        self.launch_pane(kind, &Launch::Fresh);
     }
 
-    fn spawn_pane_in(&self, cwd: &str, kind: Kind) {
-        self.attach_process_pane(Pane::new(cwd, kind));
+    /// Starts an agent of `kind` in this group's folder, as `launch` says - a
+    /// new conversation, a saved one resumed, or a new one in a worktree.
+    ///
+    /// Doesn't touch the group's default agent: resuming a codex conversation
+    /// is not a statement that the `+` should start codexes from now on.
+    pub fn launch_pane(&self, kind: Kind, launch: &Launch) {
+        let cwd = self.imp().cwd.borrow().clone();
+        self.attach_process_pane(Pane::new(&cwd, kind, launch));
     }
 
     /// Spawns a pane running `command` rather than `claude` - the update
@@ -344,6 +472,7 @@ impl Tiler {
         let pane_weak = Rc::downgrade(&pane);
         terminal.connect_child_exited(move |_, _status| {
             if let (Some(this), Some(pane)) = (this_weak.upgrade(), pane_weak.upgrade()) {
+                pane.forget_process();
                 this.remove_pane(&pane);
                 // An agent quitting is news too, if it happened somewhere the
                 // user wasn't looking.
@@ -468,8 +597,11 @@ impl Tiler {
         if pane_count == 1 {
             // The first pane in an empty group has to take focus: nothing else
             // is holding it, and a group whose only terminal doesn't accept
-            // typing is just broken.
-            self.set_focus(0);
+            // typing is just broken. The keyboard itself only if the group is on
+            // screen - a background group's first agent arriving must not pull
+            // typing out of the project you're in; `on_shown` hands it over
+            // when you get there.
+            self.move_focus(0, self.is_mapped());
         } else {
             // After that, spawning is a background act. You start another agent
             // *while* working in one, and having the keyboard yank itself into
@@ -502,24 +634,34 @@ impl Tiler {
     }
 
     fn remove_pane(&self, pane: &Rc<Pane>) {
-        let removed = {
+        let removed_at = {
             let mut panes = self.imp().panes.borrow_mut();
-            if let Some(pos) = panes.iter().position(|p| Rc::ptr_eq(p, pane)) {
+            let position = panes.iter().position(|p| Rc::ptr_eq(p, pane));
+            if let Some(pos) = position {
                 panes.remove(pos);
-                true
-            } else {
-                false
             }
+            position
         };
-        if !removed {
+        let Some(removed_at) = removed_at else {
             return;
-        }
+        };
         settle_input_method(&pane.frame);
         pane.frame.unparent();
 
         let len = self.imp().panes.borrow().len();
         let focus = self.imp().focus.get();
-        self.set_focus(if len == 0 { 0 } else { focus.min(len - 1) });
+        let (next, had_focus) = focus_after_removal(focus, removed_at, len);
+        // The keyboard moves only if it was in the pane that just went, and only
+        // in the group on screen.
+        //
+        // It used to move unconditionally, and a pane exits whenever its agent
+        // does - not when you act. So: close a pane in project B, switch to A
+        // and start typing, and when B's agent finished exiting a moment later
+        // its sibling took the keyboard - in a project you couldn't see - and
+        // the rest of your sentence, Enter included, went to an agent you
+        // weren't talking to. A hidden group's focus is put right when it is
+        // shown (`on_shown`), which is the first moment it matters.
+        self.move_focus(next, had_focus && self.is_mapped());
         self.notify_pane_count();
     }
 
@@ -529,7 +671,7 @@ impl Tiler {
     /// away instead of waiting on each pane individually.
     pub fn close_all_panes(&self) {
         for pane in self.imp().panes.borrow().iter() {
-            pane.hangup();
+            let _ = pane.hangup();
         }
     }
 
@@ -547,7 +689,12 @@ impl Tiler {
 
     pub fn close_focused(&self) {
         let focus = self.imp().focus.get();
-        if let Some(pane) = self.imp().panes.borrow().get(focus).cloned() {
+        // Bound first, so the borrow ends here. In an `if let` the scrutinee's
+        // borrow lives through the body, and `close_pane` can reach
+        // `remove_pane`, which borrows the list mutably - a pane with no process
+        // behind it is removed on the spot.
+        let pane = self.imp().panes.borrow().get(focus).cloned();
+        if let Some(pane) = pane {
             self.close_pane(&pane);
         }
     }
@@ -587,7 +734,31 @@ impl Tiler {
             return;
         }
         fade_out(&pane.frame);
-        pane.hangup();
+        // No process to hang up means no `child-exited` to wait for: the pane
+        // goes now, or it never goes (see `Pane::hangup`).
+        if !pane.hangup() {
+            self.remove_pane(pane);
+        }
+    }
+}
+
+/// Where focus goes when the pane at `removed` leaves a group that had `focus`
+/// and now has `len` panes: the index of the pane that was focused, or its
+/// nearest neighbour if it was the one removed. And whether it was.
+///
+/// The index has to follow the *pane*, not the number. With [A, B, C, D] and
+/// focus on C, A exiting shifts C down to index 2's old neighbour - keeping
+/// "focus = 2" would hand the keyboard to D, a pane nobody chose.
+fn focus_after_removal(focus: usize, removed: usize, len: usize) -> (usize, bool) {
+    if len == 0 {
+        return (0, focus == removed);
+    }
+    if removed < focus {
+        (focus - 1, false)
+    } else if removed == focus {
+        (focus.min(len - 1), true)
+    } else {
+        (focus, false)
     }
 }
 
@@ -724,6 +895,36 @@ fn animate_opacity(frame: &gtk4::Frame, from: f64, to: f64, ms: u32) {
         .play();
 }
 
+/// What the drawer shows for one agent - see `Tiler::agent_rows`.
+#[derive(Clone, Debug)]
+pub struct AgentRowFacts {
+    /// Where its pane sits in the group, which is what going to it takes.
+    pub index: usize,
+    pub kind: Option<Kind>,
+    /// The state, briefly (see `pane::brief_words`).
+    pub words: String,
+    /// Its tile's head strip, word for word - for the row's tooltip, where
+    /// there is room for all of it.
+    pub strip: String,
+    pub state: PaneState,
+}
+
+/// What one agent report did to the pane it was about - see
+/// `Tiler::apply_agent_event`.
+#[derive(Clone, Debug)]
+pub struct Report {
+    /// Whether the pane's state actually moved.
+    pub changed: bool,
+    /// Whether the report named a conversation the pane didn't already know.
+    pub session_changed: bool,
+    pub from: PaneState,
+    pub to: PaneState,
+    /// Which pane, by the id its agent reports under - stable where an index
+    /// would not be, since panes come and go around it.
+    pub pane_id: String,
+    pub kind: Option<Kind>,
+}
+
 /// What a group's agents are up to, counted.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Tally {
@@ -744,6 +945,20 @@ impl Tally {
 mod tests {
     use super::*;
     use crate::testing::gtk_test;
+
+    #[test]
+    fn focus_follows_the_pane_not_the_number() {
+        // [A, B, C, D], focus on C; A leaves: C is now at 1.
+        assert_eq!(focus_after_removal(2, 0, 3), (1, false));
+        // D leaves: nothing moves.
+        assert_eq!(focus_after_removal(2, 3, 3), (2, false));
+        // C itself leaves: its neighbour takes over, and it was the focused one.
+        assert_eq!(focus_after_removal(2, 2, 3), (2, true));
+        // The last pane leaves, while focused.
+        assert_eq!(focus_after_removal(3, 3, 3), (2, true));
+        // The only pane leaves.
+        assert_eq!(focus_after_removal(0, 0, 0), (0, true));
+    }
 
     /// A new group starts on the config's agent, and takes whatever it is given
     /// instead - which is what `App::open_project` relies on to make the answer

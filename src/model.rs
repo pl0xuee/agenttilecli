@@ -19,8 +19,8 @@
 //! pane is a live PTY and a VTE widget rather than a value - and a second list
 //! of them here would be exactly the duplicated-order problem this module
 //! exists to remove. `PaneState` is defined here because it is a fact about an
-//! agent rather than about a widget, but it hangs off the pane itself until
-//! there is an IPC channel to drive it.
+//! agent rather than about a widget; it hangs off the pane itself, and the
+//! agent's own hooks drive it (see `hooks::advance`).
 
 use crate::layout::Mode;
 
@@ -49,21 +49,24 @@ impl ProjectId {
     pub fn from_widget_name(name: &str) -> Option<Self> {
         name.parse().ok().map(ProjectId)
     }
+
+    /// The number inside, for a channel that carries numbers rather than
+    /// strings - a desktop notification's action target (see `notify`).
+    pub fn raw(self) -> u32 {
+        self.0
+    }
+
+    /// The inverse of `raw`. A number that names no open project is not
+    /// refused here; it simply finds nothing when it is looked up, which is the
+    /// right answer for a notification clicked after its project was closed.
+    pub fn from_raw(raw: u32) -> Self {
+        ProjectId(raw)
+    }
 }
 
-/// What an agent is doing, as far as the app can tell.
-///
-/// Only `Starting`, `Idle` and `Exited` are reachable today - the bell an agent
-/// rings says "something happened" and no more, so there is nothing yet that
-/// can tell working from waiting. The full set is spelled out now because it is
-/// what the pane chrome and the sidebar counts will both be written against,
-/// and because a two-state enum would have to be replaced rather than extended.
+/// What an agent is doing, as far as the app can tell - which, since every
+/// agent reports each moment of its turn through its hooks, is quite far.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
-// Nothing constructs this yet - it is phase 2's vocabulary, written down in
-// phase 1 for the reason the doc comment gives. The alternative to this `allow`
-// is a warning that stays in every build until then, which is how a build stops
-// being read at all.
-#[allow(dead_code)]
 pub enum PaneState {
     /// Spawned, nothing heard from it yet.
     #[default]
@@ -73,8 +76,10 @@ pub enum PaneState {
     /// Finished its turn and waiting on you to say something.
     Idle,
     /// Stopped to ask permission. Distinct from `Idle` because this one is
-    /// blocking on an answer rather than merely resting.
-    Waiting,
+    /// blocking on an answer rather than merely resting. `tool` is what it
+    /// asked to run, when it said - which is also what says the answer came:
+    /// that tool finishing is the agent getting its yes.
+    Waiting { tool: Option<String> },
     /// The process is gone.
     Exited,
 }
@@ -312,6 +317,24 @@ impl ProjectStore {
     }
 }
 
+/// The next agent to go to, among those waiting on you.
+///
+/// `projects` is every project in rack order *starting from the one you are
+/// in*, each with its focused pane and the panes in it that are waiting. "Next"
+/// means after where you are: later panes in this project, then the other
+/// projects in order, then round to the earlier panes of this one - so pressing
+/// the key again visits the next asker rather than the same one, and four
+/// presses answer four questions.
+pub fn next_waiting(projects: &[(ProjectId, usize, Vec<usize>)]) -> Option<(ProjectId, usize)> {
+    let (here, focus, _) = projects.first()?;
+    let after_here = projects[0].2.iter().find(|index| *index > focus).map(|i| (*here, *i));
+    let elsewhere = projects[1..]
+        .iter()
+        .find_map(|(id, _, waiting)| waiting.first().map(|i| (*id, *i)));
+    let before_here = projects[0].2.iter().find(|index| *index <= focus).map(|i| (*here, *i));
+    after_here.or(elsewhere).or(before_here)
+}
+
 /// What `ProjectStore::remove` did.
 #[derive(PartialEq, Eq, Debug)]
 pub enum Removal {
@@ -468,6 +491,27 @@ mod tests {
         // And the last one standing can't be closed.
         assert_eq!(store.remove(beta), Removal::Refused);
         assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn the_next_asker_is_found_after_where_you_are() {
+        let [a, b, c] = [ProjectId(0), ProjectId(1), ProjectId(2)];
+        // In `a` at pane 1; `a` has askers at 0 and 3, `c` at 2.
+        let projects = vec![(a, 1, vec![0, 3]), (b, 0, vec![]), (c, 0, vec![2])];
+        assert_eq!(next_waiting(&projects), Some((a, 3)), "later in this project first");
+
+        // Having gone there, the next press moves on to the next project.
+        let projects = vec![(a, 3, vec![0, 3]), (b, 0, vec![]), (c, 0, vec![2])];
+        assert_eq!(next_waiting(&projects), Some((c, 2)));
+
+        // And with nobody else asking, round to the start of this project.
+        let projects = vec![(a, 3, vec![0, 3]), (b, 0, vec![])];
+        assert_eq!(next_waiting(&projects), Some((a, 0)));
+
+        // The pane you are on counts, last - it is still asking.
+        assert_eq!(next_waiting(&[(a, 2, vec![2])]), Some((a, 2)));
+        assert_eq!(next_waiting(&[(a, 0, vec![]), (b, 0, vec![])]), None);
+        assert_eq!(next_waiting(&[]), None);
     }
 
     /// Layout state belongs to the project, not to the layout manager. This is

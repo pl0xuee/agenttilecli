@@ -149,6 +149,14 @@
      1.12em  emphasis      project names, the palette's own query field
      1.55em  display       the empty state's heading, the only display type here
 
+   Two families, and both are the desktop's rather than this app's. The chrome is
+   set in Inter - installed as itself, or as the Adwaita Sans every GTK desktop
+   now ships, which is Inter under another name - and everything that is a
+   *value* rather than a word (a state, a count, a key, an agent's name) is set
+   in JetBrains Mono, which is Omarchy's own monospace. The stack used to open on
+   Fira Sans, which almost nobody has installed: every heading in the app had
+   been quietly falling back to whatever `sans-serif` resolved to.
+
    Written as a comment rather than as tokens because GTK's CSS has no `var()`
    and `@define-color` holds colours only - so, like the radius scale below it,
    this is a convention the rules are expected to quote rather than a mechanism
@@ -308,19 +316,14 @@ overlay-split-view .background {
    and roundness is most of what says which of the two something is. */
 .pane {
   background-color: @tile;
-  /* Below @edge, which is where this sat when the ring was carrying the
-     separation by itself. It isn't any more - the shadow is - and an @edge ring
-     on top of a shadow draws the same boundary twice, which is what turns a
-     grid of tiles into a grid of outlined boxes. The two chamfers still reach
-     for @edge and past it; it is only the sides that step back. */
-  border: 1px solid mix(@hairline, @edge, 0.5);
-  border-top-color: mix(@edge, @filament, 0.28);
-  border-bottom-color: mix(@edge, @shadow, 0.45);
-  border-radius: 0.5em;
-  box-shadow: 0 1px 2px alpha(@shadow, 0.45), 0 6px 16px alpha(@shadow, 0.3);
-  transition: border-color 140ms cubic-bezier(0.2, 0, 0, 1),
-    box-shadow 140ms cubic-bezier(0.2, 0, 0, 1),
-    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+  border: 1px solid alpha(@text, 0.09);
+  border-top-color: alpha(@text, 0.17);
+  border-bottom-color: alpha(@shadow, 0.9);
+  border-radius: 0.85em;
+  box-shadow: 0 1px 2px alpha(@shadow, 0.5), 0 12px 30px -6px alpha(@shadow, 0.7);
+  transition: border-color 180ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 260ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 180ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* The lamp. Because it is the only glow anywhere in the app, it needs no
@@ -349,15 +352,61 @@ overlay-split-view .background {
    read. */
 .pane.focused {
   background-color: @tile-lit;
-  border-color: @filament;
-  border-top-color: @filament;
-  border-bottom-color: @filament;
-  /* The one bold thing in the window. With the rail and the drawer holding
-     themselves to quiet glass, the lit tile is where the boldness budget goes:
-     the ring a step brighter and the bloom a shade wider than they were, so
-     the pane the keyboard is in reads across a full grid at a glance. */
-  box-shadow: 0 0 0 2px alpha(@filament, 0.22), 0 0 2.4em alpha(@filament, 0.14),
-    0 2px 4px alpha(@shadow, 0.5), 0 10px 24px alpha(@shadow, 0.34);
+  border-color: alpha(@filament, 0.95);
+  border-top-color: alpha(@filament, 0.95);
+  border-bottom-color: alpha(@filament, 0.95);
+  box-shadow: 0 0 0 3px alpha(@filament, 0.15), 0 0 36px alpha(@filament, 0.2),
+    0 2px 4px alpha(@shadow, 0.5), 0 16px 38px -8px alpha(@shadow, 0.75);
+}
+
+/* ── A tile says its state with its whole body ────────────────────────────
+   The dot in the corner was the only thing that ever said what an agent was
+   doing, and a dot is something you *read*: it takes a look at the corner of
+   every tile, one at a time. The tile itself is the thing you *see*. So the
+   state now reaches the tile's edge - amber around one that is asking, the
+   brightest thing in the window after the lamp - and its head, and the thin
+   line under the head, which sweeps while the agent works.
+
+   Asking outranks focus. An agent waiting on you in the tile you are already
+   in is still waiting on you, and the amber is the one message here that is
+   worth more than "you are here". It breathes rather than blinks, for the
+   reason `.pane-status.waiting` gives, and it stops breathing - holding its
+   glow - once the window isn't the one you're looking at, since an animation
+   that never ends keeps the whole window redrawing. */
+@keyframes tile-asking {
+  from {
+    box-shadow: 0 0 0 3px alpha(@tally, 0.10), 0 0 20px alpha(@tally, 0.10),
+      0 12px 30px -6px alpha(@shadow, 0.7);
+  }
+  to {
+    box-shadow: 0 0 0 4px alpha(@tally, 0.24), 0 0 42px alpha(@tally, 0.30),
+      0 12px 30px -6px alpha(@shadow, 0.7);
+  }
+}
+
+.pane.state-waiting {
+  border-color: @tally;
+  border-top-color: @tally;
+  border-bottom-color: @tally;
+  animation: tile-asking 1.6s ease-in-out infinite alternate;
+}
+
+.pane.state-waiting:backdrop {
+  animation-name: none;
+  box-shadow: 0 0 0 3px alpha(@tally, 0.18), 0 0 30px alpha(@tally, 0.2),
+    0 12px 30px -6px alpha(@shadow, 0.7);
+}
+
+/* Gone: the process has exited and the tile is only still here to say why.
+   It recedes rather than alarms - the red is in its dot and its words. */
+.pane.state-exited {
+  border-color: alpha(@hangup, 0.45);
+  border-top-color: alpha(@hangup, 0.45);
+  border-bottom-color: alpha(@hangup, 0.45);
+}
+
+.pane.state-exited .pane-terminal {
+  opacity: 0.55;
 }
 
 /* ── The pane's head ───────────────────────────────────────────────────────
@@ -407,32 +456,31 @@ overlay-split-view .background {
    top of a window you can see through, getting worse the glassier the pane gets.
    And it cannot simply be handed p either: no positive alpha composites to p.
 
-   So it darkens what is already there instead of replacing it. 0.55 of @shadow
-   over @tile is #0e151a, which is @rack to within one unit in red - the strip is
-   pixel-for-pixel what it always was at full opacity, and stays exactly one rung
-   below the tile at every other opacity, over any wallpaper.
+   So it darkens what is already there instead of replacing it - or it did, by
+   0.55 of @shadow, a number derived to land on @rack over the stock ramp. It
+   was right for exactly that ramp. Over a light Omarchy theme @shadow is a
+   mid-grey, and 0.55 of it laid a heavy grey bar across the top of every tile
+   with its label and badge sunk into it.
 
-   The hairline gets the same treatment, and for a reason worth stating because a
-   1px line looks like it could not matter: an opaque rule keeps its own colour
-   while the tile around it lightens toward a bright wallpaper, so past a point the
-   separator that is meant to be *lighter* than the strip comes out darker than it
-   - the line inverts. 0.14 of @text over @tile is @hairline to within four units
-   per channel, which is as close as a tint of @text can get since @hairline
-   carries more blue than @text has to give.
-
-   The two numbers are therefore derived, not chosen, and they are derived from
-   the ramp above: change @rack or @hairline and these stop agreeing with them.
-   That is what `the_head_strip_still_reads_as_rack` in `pane.rs` is for. */
+   Since 4.0 the strip has no fill of its own at all. It is the tile, with a
+   gradient of the *ink* over its top - @text at a few percent, fading - and a
+   rule of the same ink under it. Ink is the one colour that is always the
+   opposite of the surface, so the same two lines lift the strip a shade on a
+   dark theme and settle it a shade on a light one, and on glass they add next
+   to nothing: there is no bar to go opaque. `a_head_strip_is_ink_not_paint`
+   in `pane.rs` holds it there. */
 .pane-head {
-  padding: 0.32em 0.4em 0.32em 0.7em;
-  background-color: alpha(@shadow, 0.55);
-  border-bottom: 1px solid alpha(@text, 0.14);
-  transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1),
-    border-color 140ms cubic-bezier(0.2, 0, 0, 1);
+  min-height: 1.95em;
+  padding: 0.26em 0.35em 0.26em 0.8em;
+  background-color: transparent;
+  background-image: linear-gradient(to bottom, alpha(@text, 0.07), alpha(@text, 0.02));
+  border-bottom: 1px solid alpha(@text, 0.10);
+  transition: background-color 180ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 180ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .pane-terminal {
-  padding: 0.5em 0.7em 0.45em 0.7em;
+  padding: 0.55em 0.8em 0.5em 0.8em;
 }
 
 /* The focused tile's strip picks up the same warmth its border does, so the
@@ -445,18 +493,102 @@ overlay-split-view .background {
    be. The border matches `mix(@hairline, @filament, 0.18)` at 0.27 of @filament
    over the same. See `.pane-head` above for why a fill is not an option here. */
 .pane.focused .pane-head {
-  background-color: alpha(mix(@shadow, @filament, 0.06), 0.55);
-  /* The underline is the head strip joining the lit-tile statement: the same
-     filament, drawn where the head meets the agent's own text. */
-  border-bottom-color: alpha(@filament, 0.45);
+  background-image: linear-gradient(to bottom, alpha(@filament, 0.14), alpha(@filament, 0.02));
+  border-bottom-color: alpha(@filament, 0.32);
+}
+
+.pane.state-waiting .pane-head {
+  background-image: linear-gradient(to bottom, alpha(@tally, 0.16), alpha(@tally, 0));
+  border-bottom-color: alpha(@tally, 0.45);
+}
+
+.pane.state-working .pane-head {
+  border-bottom-color: alpha(@fresh, 0.22);
+}
+
+/* ── The activity line ────────────────────────────────────────────────────
+   A hairline under the head that is nothing at rest, a light that sweeps along
+   it while the agent works, and a steady amber bar while it asks. Four tiles
+   holding still look alike whether their agents are thinking or finished; a
+   moving line is the one thing in a grid you notice without looking for it.
+
+   The sweep is a gradient slid along the line by `background-position`, which
+   GTK animates without re-laying anything out. It stops - parked in the middle,
+   still lit - when the window loses focus, for the same reason the asking tile
+   stops breathing. */
+.pane-activity {
+  min-height: 2px;
+  background-color: transparent;
+  background-image: none;
+  transition: background-color 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* The light is painted on an image twice the line's width and slid from one
+   end to the other. Twice, because GTK animates `background-position` only
+   within 0-100% - measured: a sweep written from -60% to 160% never moved - and
+   at 0-100% an image the line's own width can only slide between its two
+   ends, never off them. At 200% the light at the image's centre travels the
+   line's whole length and leaves by its far end. */
+@keyframes activity-sweep {
+  from { background-position: 100% 0; }
+  to   { background-position: 0% 0; }
+}
+
+.pane.state-working .pane-activity {
+  background-color: alpha(@fresh, 0.14);
+  background-image: linear-gradient(to right, alpha(@fresh, 0) 36%, @fresh 50%, alpha(@fresh, 0) 64%);
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: activity-sweep 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.pane.state-working .pane-activity:backdrop {
+  animation-name: none;
+  background-position: 50% 0;
+}
+
+.pane.state-waiting .pane-activity {
+  background-color: @tally;
+}
+
+.pane.state-unsaved .pane-activity {
+  background-color: alpha(@tally, 0.55);
+}
+
+/* ── The agent's badge ────────────────────────────────────────────────────
+   Which agent a tile holds, as a tag at the far end of its strip: a value, so
+   it is set in the monospace and in capitals. It lights with the tile.
+
+   It ellipsizes, and so it is not letter-spaced. A badge that could not shrink
+   set a floor under every tile's width, and two columns of those floors pushed
+   a quarter-snapped window past its own edge; letting it give way to "CL…"
+   costs a letter or two in a tile too narrow to read an agent's output anyway.
+   The spacing goes for the reason `an_ellipsizing_label_is_never_letter_spaced`
+   gives - GTK sizes the label as if it had none. */
+.pane-kind {
+  margin: 0 0.45em 0 0.35em;
+  padding: 0.08em 0.55em;
+  border-radius: 999px;
+  background-color: alpha(@text, 0.07);
+  border: 1px solid alpha(@text, 0.10);
+  color: @muted;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
+  font-size: 0.66em;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.pane.focused .pane-kind {
+  color: @filament;
+  background-color: alpha(@filament, 0.12);
+  border-color: alpha(@filament, 0.35);
 }
 
 .pane-close {
-  min-width: 1.5em;
-  min-height: 1.5em;
+  min-width: 1.55em;
+  min-height: 1.55em;
   padding: 0;
-  border-radius: 0.3em;
-  color: @faint;
+  border-radius: 0.45em;
   transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1),
     color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
@@ -523,8 +655,7 @@ menubutton.header-action > button {
   min-width: 1.95em;
   min-height: 1.95em;
   padding: 0;
-  border-radius: 50%;
-  color: @muted;
+  border-radius: 0.7em;
   background-color: transparent;
   transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
     background-color 140ms cubic-bezier(0.2, 0, 0, 1);
@@ -576,13 +707,15 @@ menubutton.header-action > button:checked:hover {
    to pick out of a row of bare icons without becoming a second lamp. */
 .header-primary,
 .header-primary:hover {
-  color: @text;
-  box-shadow: inset 0 0 0 1px alpha(@filament, 0.30);
+  color: @field;
+  background-color: @filament;
+  background-image: linear-gradient(to bottom, alpha(@text, 0.18), alpha(@text, 0));
+  box-shadow: 0 0 0 1px alpha(@filament, 0.6), 0 0 18px alpha(@filament, 0.35);
 }
 
 .header-primary:hover {
-  background-color: @lit-wash;
-  box-shadow: inset 0 0 0 1px alpha(@filament, 0.55);
+  background-color: mix(@filament, @text, 0.2);
+  box-shadow: 0 0 0 1px @filament, 0 0 26px alpha(@filament, 0.5);
 }
 
 /* ── The spawn split ───────────────────────────────────────────────────────
@@ -601,17 +734,28 @@ menubutton.header-action > button:checked:hover {
    at @muted like the rest of the row until you approach it. The tightened gap
    is what says they are one control rather than two neighbours. */
 .header-split-arrow {
-  /* Pulled in against the `+`. At the bar's natural spacing the two read as
-     two controls that happen to be adjacent, which is the reading the split
-     exists to avoid: the chevron is a modifier on the button beside it, not a
-     sibling of the four other glyphs in the strip. */
-  margin-left: -0.3em;
+  /* Tight against the `+`, and joined to it: the chevron is a modifier on the
+     button beside it, not a sibling of the other glyphs in the strip, so the
+     pair is drawn as one lit pill with two halves - the + solid, the chevron
+     tinted - rather than as a button and a stray arrow. */
+  margin-left: 1px;
+}
+
+.header-split .header-primary {
+  border-radius: 0.7em 0.2em 0.2em 0.7em;
 }
 
 .header-split-arrow > button {
   min-width: 1.05em;
-  /* No ring: one filament outline per control, and it belongs to the `+`. */
-  box-shadow: none;
+  border-radius: 0.2em 0.7em 0.7em 0.2em;
+  color: @filament;
+  background-color: alpha(@filament, 0.18);
+  box-shadow: inset 0 0 0 1px alpha(@filament, 0.35);
+}
+
+.header-split-arrow > button:hover {
+  color: @filament;
+  background-color: alpha(@filament, 0.28);
 }
 
 /* ── The header's title block ──────────────────────────────────────────────
@@ -630,8 +774,9 @@ menubutton.header-action > button:checked:hover {
    the same string as the row it corresponds to and the two should not look
    like two different kinds of fact. */
 .header-title-name {
-  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
-  font-weight: 600;
+  font-family: "Inter", "Adwaita Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-size: 1.14em;
+  font-weight: 800;
   color: @text;
 }
 
@@ -640,15 +785,96 @@ menubutton.header-action > button:checked:hover {
    block that needs vertical room and a centred axis to read as one thing,
    which is exactly what this stopped having when it moved to the left edge. */
 .header-title-sub {
-  color: @muted;
+  margin-left: 0.75em;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
+  font-size: 0.8em;
 }
 
 /* The state dot leads the block, so it is the first thing in the bar rather
    than a decoration hung off the end of the sentence. Slightly wider spacing
    than the pane heads give theirs, since here it is separating an icon from
    proportional text instead of from a monospace label. */
-.header-title .pane-status {
-  margin-right: 0.5em;
+/* ── The tally chips ──────────────────────────────────────────────────────
+   How many of this project's agents are asking, working and idle, as three
+   chips beside its name - each there only while its number isn't zero. They
+   replace a dot and a sentence: the dot could say only the most urgent thing,
+   and the sentence had to be read. Chips are read the way a header is, which
+   is at a glance. Each wears its state's colour, and the asking chip breathes
+   with the tiles it counts. */
+.tally-chips {
+  margin-left: 0.6em;
+}
+
+/* Narrow, the one chip left is a dot and nothing else - the same footprint
+   the header's single state dot had before there were chips, which is what
+   keeps a quarter-snapped window from overflowing (see `render_chips`). */
+.tally-chips.compact .tally-chip {
+  padding: 0.35em;
+}
+
+.tally-chips.compact .tally-chip-dot {
+  margin-right: 0;
+}
+
+.tally-chips.compact .tally-chip-label {
+  font-size: 0;
+}
+
+.tally-chip {
+  margin-right: 0.35em;
+  padding: 0.12em 0.6em 0.12em 0.5em;
+  border-radius: 999px;
+  background-color: alpha(@text, 0.06);
+  border: 1px solid alpha(@text, 0.10);
+}
+
+.tally-chip-dot {
+  min-width: 0.45em;
+  min-height: 0.45em;
+  margin-right: 0.4em;
+  border-radius: 50%;
+  background-color: @faint;
+}
+
+.tally-chip-label {
+  color: @dim;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
+  font-size: 0.74em;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+
+.tally-chip.working {
+  background-color: alpha(@fresh, 0.10);
+  border-color: alpha(@fresh, 0.30);
+}
+
+.tally-chip.working .tally-chip-dot {
+  background-color: @fresh;
+  box-shadow: 0 0 6px alpha(@fresh, 0.8);
+}
+
+.tally-chip.working .tally-chip-label {
+  color: mix(@fresh, @text, 0.35);
+}
+
+.tally-chip.waiting {
+  background-color: alpha(@tally, 0.16);
+  border-color: alpha(@tally, 0.55);
+}
+
+.tally-chip.waiting .tally-chip-dot {
+  background-color: @tally;
+  box-shadow: 0 0 8px @tally;
+  animation: status-breathing 1.6s ease-in-out infinite alternate;
+}
+
+.tally-chip.waiting .tally-chip-dot:backdrop {
+  animation-name: none;
+}
+
+.tally-chip.waiting .tally-chip-label {
+  color: @tally;
 }
 
 /* ── The mode switcher ─────────────────────────────────────────────────────
@@ -670,23 +896,25 @@ menubutton.header-action > button:checked:hover {
    and without it the three toggles would read as three more header buttons of
    which one is inexplicably lit. */
 .mode-switcher {
-  padding: 0.14em;
-  border-radius: 0.62em;
-  background-color: @wash;
-  box-shadow: none;
+  padding: 0.16em;
+  border-radius: 0.8em;
+  background-color: alpha(@text, 0.05);
+  border: 1px solid alpha(@text, 0.08);
+  box-shadow: inset 0 1px 2px alpha(@shadow, 0.35);
 }
 
 .mode-switcher > toggle {
-  min-width: 2em;
-  min-height: 1.65em;
+  min-width: 2.1em;
+  min-height: 1.7em;
   padding: 0;
   border: none;
-  border-radius: 0.48em;
+  border-radius: 0.62em;
   box-shadow: none;
   color: @muted;
   background-color: transparent;
-  transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
-    background-color 140ms cubic-bezier(0.2, 0, 0, 1);
+  transition: color 160ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .mode-switcher > toggle:hover {
@@ -696,8 +924,8 @@ menubutton.header-action > button:checked:hover {
 
 .mode-switcher > toggle:checked {
   color: @filament;
-  background-color: @lit-wash;
-  box-shadow: none;
+  background-color: alpha(@filament, 0.16);
+  box-shadow: inset 0 0 0 1px alpha(@filament, 0.45), 0 0 12px alpha(@filament, 0.18);
 }
 
 .mode-switcher > toggle:checked:hover {
@@ -738,9 +966,9 @@ menubutton.header-action > button:checked:hover {
    and @muted is one rung up from @faint: still the quietest type in the app,
    and now actually readable at arm's length. */
 .pane-head-label {
-  color: @muted;
-  font-family: monospace;
-  font-size: 0.78em;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
+  font-size: 0.74em;
+  font-weight: 600;
   text-transform: uppercase;
 }
 
@@ -748,7 +976,20 @@ menubutton.header-action > button:checked:hover {
    but because on a screen of four identical strips the one you're typing into
    is the one whose folder you actually want to be able to read. */
 .pane.focused .pane-head-label {
-  color: @dim;
+  color: @text;
+}
+
+.pane.state-working .pane-head-label {
+  color: mix(@fresh, @text, 0.3);
+}
+
+.pane.state-waiting .pane-head-label {
+  color: @tally;
+  font-weight: 800;
+}
+
+.pane.state-exited .pane-head-label {
+  color: @hangup;
 }
 
 /* ── The empty state ───────────────────────────────────────────────────────
@@ -762,23 +1003,27 @@ menubutton.header-action > button:checked:hover {
    the sidebar's lit strip and the checked toggles use, and the secondary is an
    outline. The hierarchy is still obvious and neither of them is a lamp. */
 .empty-primary {
-  color: @filament;
-  background-color: @lit-wash;
-  background-image: none;
-  border: 1px solid alpha(@filament, 0.22);
-  box-shadow: none;
-  transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1),
-    border-color 140ms cubic-bezier(0.2, 0, 0, 1);
+  padding: 0.55em 1.3em;
+  color: @field;
+  font-weight: 800;
+  background-color: @filament;
+  background-image: linear-gradient(to bottom, alpha(@text, 0.2), alpha(@text, 0));
+  border: none;
+  box-shadow: 0 0 0 1px alpha(@filament, 0.6), 0 6px 28px alpha(@filament, 0.35);
+  transition: background-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .empty-primary:hover {
-  background-color: alpha(@filament, 0.24);
-  border-color: alpha(@filament, 0.34);
+  background-color: mix(@filament, @text, 0.2);
+  box-shadow: 0 0 0 1px @filament, 0 8px 36px alpha(@filament, 0.5);
 }
 
 .empty-secondary {
+  padding: 0.5em 1.1em;
   color: @dim;
-  background-color: transparent;
+  font-weight: 600;
+  background-color: alpha(@text, 0.04);
   background-image: none;
   border: 1px solid alpha(@text, 0.14);
   box-shadow: none;
@@ -807,16 +1052,95 @@ menubutton.header-action > button:checked:hover {
    The fill carries alpha because the workspace behind it may be glass, and a
    diagram of translucent panes painted opaque would be the one place in the
    window where the app misrepresents itself. */
+/* The empty workspace is the floor at its most visible, so it wears the
+   floor's horizon: the lamp's colour rising from below the bottom edge, the
+   same glow the tiler paints into the gutters between tiles (see
+   `Tiler::paint_floor`). Its tone comes from `appearance::content_css`; this is
+   only the light on it. */
+/* Over the glow, a grid of fine dots - the floor as a surface with a scale to
+   it, which is what makes an empty screen read as a place things will be put
+   rather than as an absence. Faint enough to vanish behind the first tile, and
+   only drawn here: in the gutters between tiles it would be a pattern broken
+   into slivers. */
+.workspace-floor {
+  background-image:
+    radial-gradient(ellipse 70% 78% at 50% 110%,
+      alpha(@filament, 0.20), alpha(@filament, 0.07) 45%, alpha(@filament, 0)),
+    radial-gradient(circle 1.6px at 50% 50%, alpha(@text, 0.13) 45%, alpha(@text, 0));
+  background-size: auto, 24px 24px;
+  background-repeat: no-repeat, repeat;
+}
+
 .empty-diagram {
-  margin-bottom: 1.5em;
+  margin-bottom: 1.9em;
 }
 
 .empty-tile {
-  min-width: 4.2em;
-  min-height: 2.6em;
-  border-radius: 0.35em;
-  background-color: alpha(@tile, 0.75);
-  border: 1px solid alpha(@edge, 0.55);
+  min-width: 5.2em;
+  min-height: 3.3em;
+  border-radius: 0.6em;
+  background-color: @tile;
+  border: 1px solid alpha(@text, 0.10);
+  border-top-color: alpha(@text, 0.18);
+  box-shadow: 0 8px 22px -6px alpha(@shadow, 0.8);
+}
+
+.empty-tile-head {
+  padding: 0.4em 0.5em;
+  background-color: alpha(@text, 0.05);
+  border-bottom: 1px solid alpha(@text, 0.08);
+  border-radius: 0.6em 0.6em 0 0;
+}
+
+.empty-tile-dot {
+  min-width: 0.42em;
+  min-height: 0.42em;
+  border-radius: 50%;
+  background-color: @faint;
+}
+
+.empty-tile-bar {
+  min-height: 0.22em;
+  margin-right: 1.4em;
+  border-radius: 999px;
+  background-color: alpha(@text, 0.12);
+}
+
+.empty-tile-activity {
+  min-height: 2px;
+}
+
+.empty-tile.working .empty-tile-dot {
+  background-color: @fresh;
+  box-shadow: 0 0 6px alpha(@fresh, 0.8);
+}
+
+.empty-tile.working .empty-tile-activity {
+  background-color: alpha(@fresh, 0.14);
+  background-image: linear-gradient(to right, alpha(@fresh, 0) 36%, @fresh 50%, alpha(@fresh, 0) 64%);
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: activity-sweep 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.empty-tile.working .empty-tile-activity:backdrop {
+  animation-name: none;
+  background-position: 50% 0;
+}
+
+.empty-tile.waiting {
+  border-color: @tally;
+  box-shadow: 0 0 0 3px alpha(@tally, 0.15), 0 0 24px alpha(@tally, 0.22),
+    0 8px 22px -6px alpha(@shadow, 0.8);
+}
+
+.empty-tile.waiting .empty-tile-dot {
+  background-color: @tally;
+  box-shadow: 0 0 8px @tally;
+}
+
+.empty-tile.waiting .empty-tile-activity {
+  background-color: @tally;
 }
 
 /* The one lit tile, and the reason the diagram is worth its space: it says
@@ -824,8 +1148,14 @@ menubutton.header-action > button:checked:hover {
    pane the keyboard is in, and that the app will tell you which. */
 .empty-tile.lit {
   background-color: @tile-lit;
-  border-color: alpha(@filament, 0.8);
-  box-shadow: 0 0 0 1px alpha(@filament, 0.18), 0 0 1.6em alpha(@filament, 0.13);
+  border-color: alpha(@filament, 0.95);
+  box-shadow: 0 0 0 3px alpha(@filament, 0.15), 0 0 30px alpha(@filament, 0.22),
+    0 8px 22px -6px alpha(@shadow, 0.8);
+}
+
+.empty-tile.lit .empty-tile-dot {
+  background-color: @filament;
+  box-shadow: 0 0 6px @filament;
 }
 
 /* The page's own heading, in place of the StatusPage's - which arrives at a
@@ -834,9 +1164,9 @@ menubutton.header-action > button:checked:hover {
    step of the scale at the top of this file, and it is the only thing in the
    window that uses it. */
 .empty-heading {
-  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
-  font-size: 1.55em;
-  font-weight: 600;
+  font-family: "Inter", "Adwaita Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-size: 2.1em;
+  font-weight: 800;
   color: @text;
 }
 
@@ -844,19 +1174,18 @@ menubutton.header-action > button:checked:hover {
    `build_empty_state` for why it is ours rather than the widget's. The margins
    restate the gaps the StatusPage put around it. */
 .empty-description {
-  margin-top: 0.5em;
-  margin-bottom: 1.5em;
-  color: @dim;
+  margin-top: 0.55em;
+  margin-bottom: 1.7em;
+  font-size: 1.04em;
 }
 
 /* Quieter than the description above it and set in the engraved monospace the
    rest of the app's footnotes use, so it reads as a note rather than a third
    button. */
 .empty-hint {
-  margin-top: 0.9em;
-  font-family: monospace;
-  font-size: 0.78em;
-  color: @faint;
+  margin-top: 1.1em;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
+  font-size: 0.76em;
 }
 
 /* ── The find bar ──────────────────────────────────────────────────────────
@@ -883,12 +1212,13 @@ searchbar > revealer > box {
 }
 
 .search-row {
-  margin: 0.4em 0 0.55em;
-  padding: 0.3em 0.35em 0.3em 0.6em;
-  border-radius: 0.85em;
-  background-color: alpha(@chip, 0.92);
-  border: 1px solid alpha(@filament, 0.07);
-  box-shadow: 0 2px 6px alpha(@shadow, 0.5), 0 16px 40px alpha(@shadow, 0.45);
+  margin: 0.45em 0 0.6em;
+  padding: 0.3em 0.35em 0.3em 0.7em;
+  border-radius: 999px;
+  background-color: alpha(@chip, 0.94);
+  border: 1px solid alpha(@filament, 0.28);
+  box-shadow: 0 0 22px alpha(@filament, 0.14), 0 2px 6px alpha(@shadow, 0.5),
+    0 16px 40px alpha(@shadow, 0.45);
 }
 
 /* The entry gives up its own box. Inside a pill that is already a container,
@@ -933,8 +1263,7 @@ searchbar > revealer > box {
   min-width: 1.5em;
   min-height: 1.5em;
   padding: 0;
-  border-radius: 0.3em;
-  color: @faint;
+  border-radius: 0.45em;
   background-color: transparent;
   background-image: none;
   box-shadow: none;
@@ -965,7 +1294,7 @@ searchbar > revealer > box {
   padding: 0.3em 0.7em;
   color: @tally;
   background-color: alpha(@tally, 0.08);
-  font-family: monospace;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
   font-size: 0.78em;
 }
 
@@ -988,11 +1317,13 @@ searchbar > revealer > box {
    `background-image: none` because the property being overridden is the
    `background` shorthand, and a shorthand sets the image too. */
 toast {
-  background-color: alpha(@tile, 0.94);
+  background-color: alpha(@chip, 0.96);
   background-image: none;
   color: @text;
-  border-radius: 0.85em;
-  box-shadow: 0 2px 6px alpha(@shadow, 0.5), 0 12px 28px alpha(@shadow, 0.34);
+  border-radius: 999px;
+  border: 1px solid alpha(@filament, 0.3);
+  box-shadow: 0 0 22px alpha(@filament, 0.14), 0 2px 6px alpha(@shadow, 0.5),
+    0 12px 28px alpha(@shadow, 0.34);
 }
 
 /* ── The command palette ───────────────────────────────────────────────────
@@ -1036,6 +1367,7 @@ toast {
 
 .palette-list row:selected {
   background-color: @lit-wash;
+  box-shadow: inset 3px 0 0 0 @filament;
   color: @text;
 }
 
@@ -1050,7 +1382,7 @@ toast {
 }
 
 .palette-title {
-  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-family: "Inter", "Adwaita Sans", "Cantarell", "Noto Sans", sans-serif;
 }
 
 /* Which group the command came from, or which project the row switches to.
@@ -1116,7 +1448,7 @@ toast {
    real prose - both dialogs use it to say what the settings below are for - so
    it gets @dim rather than the @muted a caption would take. */
 .atc-dialog .title {
-  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-family: "Inter", "Adwaita Sans", "Cantarell", "Noto Sans", sans-serif;
 }
 
 .atc-dialog .description,
@@ -1145,7 +1477,7 @@ toast {
    read digit by digit and compared against the one above it, which is the one
    job a typewriter face is unambiguously better at. */
 .atc-dialog spinbutton text {
-  font-family: monospace;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
   color: @text;
 }
 
@@ -1169,7 +1501,7 @@ toast {
   background-image: none;
   box-shadow: none;
   color: @dim;
-  font-family: monospace;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
   font-size: 0.78em;
   font-weight: 600;
 }
@@ -1185,7 +1517,8 @@ toast {
    the floor: one glass, three surfaces, one law. */
 .rail {
   min-width: 3.6em;
-  padding: 0.5em 0.5em 0.4em;
+  padding: 0.6em 0.5em 0.45em;
+  border-right: 1px solid alpha(@text, 0.06);
 }
 
 /* ── The glyph, and why it has no colour ───────────────────────────────────
@@ -1215,16 +1548,17 @@ toast {
   min-width: 2.6em;
   min-height: 2.6em;
   padding: 0;
-  border: none;
-  border-radius: 0.72em;
-  background-color: @wash;
-  background-image: none;
-  box-shadow: none;
+  border: 1px solid alpha(@text, 0.08);
+  border-radius: 0.85em;
+  background-color: alpha(@text, 0.04);
+  background-image: linear-gradient(160deg, alpha(@text, 0.08), alpha(@text, 0));
+  box-shadow: 0 4px 10px -4px alpha(@shadow, 0.8);
   color: @dim;
   transition:
-    background-color 140ms cubic-bezier(0.2, 0, 0, 1),
-    box-shadow 140ms cubic-bezier(0.2, 0, 0, 1),
-    color 140ms cubic-bezier(0.2, 0, 0, 1);
+    background-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 200ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    color 160ms cubic-bezier(0.2, 0, 0, 1);
 }
 .rail-glyph:hover {
   background-color: @wash-hi;
@@ -1236,9 +1570,9 @@ toast {
    to 1.05em because the chip is now a field of colour and the letter has to
    hold its own inside it rather than sit on grey. */
 .rail-glyph .rail-glyph-face {
-  font-family: monospace;
-  font-weight: 700;
-  font-size: 1.05em;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
+  font-weight: 800;
+  font-size: 1.1em;
 }
 
 /* Lit: the project on screen. The wash the whole app uses for "this one", and
@@ -1248,9 +1582,10 @@ toast {
    drop-target rules use one: a border would change the chip's size the moment
    it became the active one, and the whole column below it would step sideways. */
 .rail-glyph.lit {
-  color: @text;
-  background-color: @lit-wash;
-  box-shadow: inset 0 0 0 2px alpha(@filament, 0.8);
+  color: @filament;
+  background-color: alpha(@filament, 0.14);
+  border-color: alpha(@filament, 0.9);
+  box-shadow: 0 0 0 2px alpha(@filament, 0.18), 0 0 20px alpha(@filament, 0.35);
 }
 
 .rail-glyph.lit:hover {
@@ -1269,11 +1604,41 @@ toast {
 .rail-glyph.needs-attention {
   color: mix(@tally, @text, 0.4);
   background-color: alpha(@tally, 0.18);
-  box-shadow: inset 0 0 0 2px @tally;
+  border-color: @tally;
+  box-shadow: 0 0 0 2px alpha(@tally, 0.2), 0 0 18px alpha(@tally, 0.35);
   animation-name: sidebar-attention;
   animation-duration: 900ms;
   animation-iteration-count: 3;
   animation-timing-function: ease-in-out;
+}
+
+/* ── The glyph's badges ───────────────────────────────────────────────────
+   A count of the agents asking, pinned to the glyph's top corner in the amber
+   they are asking in, and a pip in the other corner while any is working - so
+   a project you are not in can be read from the rail alone: how many want you,
+   and whether anything is happening. The count is the loud one; the pip only
+   says "alive". */
+.rail-badge {
+  min-width: 1.15em;
+  min-height: 1.15em;
+  margin: 0.12em;
+  padding: 0 0.22em;
+  border-radius: 999px;
+  background-color: @tally;
+  color: @field;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
+  font-size: 0.62em;
+  font-weight: 800;
+  box-shadow: 0 0 0 2px @rack, 0 0 10px alpha(@tally, 0.7);
+}
+
+.rail-pip {
+  min-width: 0.46em;
+  min-height: 0.46em;
+  margin: 0.32em;
+  border-radius: 50%;
+  background-color: @fresh;
+  box-shadow: 0 0 0 2px @rack, 0 0 8px alpha(@fresh, 0.8);
 }
 
 /* Fences the two controls at the foot of the rail off from the column of
@@ -1356,11 +1721,10 @@ toast {
    starts where its column starts is a heading; one floating in the middle of a
    narrow rack is a caption for the whole sidebar, which is not what it is. */
 .sidebar-header-label {
-  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
-  font-size: 0.78em;
-  font-weight: 700;
-  color: @dim;
-  letter-spacing: 0.16em;
+  font-family: "Inter", "Adwaita Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-size: 0.74em;
+  font-weight: 800;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
 }
 
@@ -1374,8 +1738,7 @@ toast {
    the loudest thing in a panel whose whole argument is that only the lit strip
    gets to shine. */
 .sidebar-header-count {
-  color: @faint;
-  font-family: monospace;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
   font-size: 0.78em;
 }
 
@@ -1414,19 +1777,16 @@ toast {
    read down rather than click along wants to be, and still leaves the tally
    dots room they were never short of. */
 row.sidebar-row {
-  padding: 0.55em 0.6em 0.55em 0.95em;
-  margin: 0.1em 0;
-  border-radius: 0.6em;
-  /* A whisper of surface, and it is the rail that needs it. The rail is an
-     inset shadow, so it takes the strip's rounded corners with it - and with
-     nothing behind it, a 3px bar with curved ends floating on the rack reads as
-     a detached sliver rather than as the edge of anything. Sat on even this
-     much fill it becomes what it is: a coloured edge on a strip. */
-  background-color: @wash;
+  padding: 0.6em 0.6em 0.6em 0.95em;
+  margin: 0.14em 0;
+  border-radius: 0.75em;
+  background-color: alpha(@text, 0.035);
+  border: 1px solid alpha(@text, 0.06);
   color: @dim;
-  transition: background-color 140ms cubic-bezier(0.2, 0, 0, 1),
-    color 140ms cubic-bezier(0.2, 0, 0, 1),
-    box-shadow 140ms cubic-bezier(0.2, 0, 0, 1);
+  transition: background-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    color 160ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 row.sidebar-row:hover {
@@ -1448,7 +1808,10 @@ row.sidebar-row:hover {
    flash also does, leaving three states separated only by how bright the same
    rectangle is. */
 row.sidebar-row:selected {
-  background-color: @lit-wash;
+  background-color: alpha(@filament, 0.06);
+  background-image: linear-gradient(to right, alpha(@filament, 0.16), alpha(@filament, 0.02));
+  border-color: alpha(@filament, 0.3);
+  box-shadow: inset 3px 0 0 0 @filament, 0 0 18px alpha(@filament, 0.1);
   color: @text;
 }
 
@@ -1457,7 +1820,6 @@ row.sidebar-row:selected:hover {
 }
 
 .sidebar-row-icon {
-  color: @muted;
   opacity: 0.85;
   transition: color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
@@ -1486,9 +1848,9 @@ row.sidebar-row:selected:hover {
    names wants, and 600 keeps each name a shape you can recognise without the
    column shouting. */
 .sidebar-row-label {
-  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
-  font-size: 1.12em;
-  font-weight: 600;
+  font-family: "Inter", "Adwaita Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-size: 1.1em;
+  font-weight: 700;
 }
 
 /* The ghost row at the end of the rack - see `build_sidebar`. It carries the
@@ -1523,7 +1885,7 @@ row.sidebar-row:selected:hover {
 }
 
 .sidebar-add label {
-  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-family: "Inter", "Adwaita Sans", "Cantarell", "Noto Sans", sans-serif;
   font-size: 1em;
 }
 
@@ -1540,9 +1902,6 @@ row.sidebar-row:selected:hover {
    other: a name at rest, a wash under the pointer, the filament wash for the
    project you are in, and amber for one whose agent is waiting. Colour in this
    panel now means only the last of those. */
-.sidebar-row-icon {
-  color: @muted;
-}
 
 row.sidebar-row:selected .sidebar-row-icon {
   color: @text;
@@ -1590,17 +1949,16 @@ row.sidebar-row:hover .sidebar-row-close {
    list of projects with detail under them and becomes one flat list of
    everything. */
 .sidebar-agents {
-  margin: 0.15em 0 0.1em 1.9em;
+  margin: 0.3em 0 0.05em 1.75em;
 }
 
 button.sidebar-agent {
-  padding: 0.2em 0.35em;
+  padding: 0.22em 0.4em;
   border: none;
-  border-radius: 0.35em;
+  border-radius: 0.45em;
   background-color: transparent;
   background-image: none;
   box-shadow: none;
-  color: @muted;
   transition: color 140ms cubic-bezier(0.2, 0, 0, 1),
     background-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
@@ -1614,8 +1972,21 @@ button.sidebar-agent:hover {
    the tree below gets the same treatment, and for the same reason: these are
    subordinate rows in the same column, not a second voice. */
 .sidebar-agent-label {
-  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
-  font-size: 0.92em;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
+  font-size: 0.8em;
+}
+
+/* The agent's name in a drawer row: the same badge its tile wears, smaller. */
+.sidebar-agent-kind {
+  padding: 0 0.45em;
+  border-radius: 999px;
+  background-color: alpha(@text, 0.07);
+  color: @dim;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
+  font-size: 0.64em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 /* ── The strip's folder tree ───────────────────────────────────────────────
@@ -1715,7 +2086,7 @@ button.sidebar-tree-file:hover {
    The icons inherit each row's own colour rather than taking one of their own,
    so a hovered folder brightens whole. */
 .sidebar-tree-label {
-  font-family: "Fira Sans", "Cantarell", "Noto Sans", sans-serif;
+  font-family: "Inter", "Adwaita Sans", "Cantarell", "Noto Sans", sans-serif;
   font-size: 0.92em;
 }
 
@@ -1725,7 +2096,7 @@ button.sidebar-tree-file:hover {
 .sidebar-tree-note {
   padding: 0.18em 0.3em;
   color: @faint;
-  font-family: monospace;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
   font-size: 0.78em;
 }
 
@@ -1825,12 +2196,13 @@ row.sidebar-row.needs-attention .sidebar-row-label {
    are idle, and a rack of tiles each carrying a lit dot is a rack that has
    stopped distinguishing anything. */
 .pane-status {
-  min-width: 0.55em;
-  min-height: 0.55em;
-  margin-right: 0.55em;
+  min-width: 0.56em;
+  min-height: 0.56em;
+  margin-right: 0.6em;
   border-radius: 50%;
   background-color: @faint;
-  transition: background-color 160ms cubic-bezier(0.2, 0, 0, 1);
+  transition: background-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* Not yet heard from - it has been up for a fraction of a second. Hollow
@@ -1845,6 +2217,7 @@ row.sidebar-row.needs-attention .sidebar-row-label {
    strip in the rack. Two selectors, one value - a state whose colour existed in
    two rules would be a state that could end up meaning two things. */
 .pane-status.working, .rack-dot.working { background-color: @fresh; }
+.pane-status.working { box-shadow: 0 0 0 3px alpha(@fresh, 0.16), 0 0 8px alpha(@fresh, 0.7); }
 .pane-status.idle,    .rack-dot.idle    { background-color: @faint; }
 .pane-status.exited,  .rack-dot.exited  { background-color: @hangup; }
 
@@ -1858,11 +2231,12 @@ row.sidebar-row.needs-attention .sidebar-row-label {
    Smaller than the pane's own dot, because these are a summary of that one and
    a summary should not be as loud as the thing it summarises. */
 .rack-dot {
-  min-width: 0.42em;
-  min-height: 0.42em;
+  min-width: 0.46em;
+  min-height: 0.46em;
   border-radius: 50%;
   background-color: @faint;
-  transition: background-color 160ms cubic-bezier(0.2, 0, 0, 1);
+  transition: background-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .rack-dot.starting {
@@ -1872,6 +2246,11 @@ row.sidebar-row.needs-attention .sidebar-row-label {
 
 .rack-dot.waiting {
   background-color: @tally;
+  box-shadow: 0 0 8px @tally;
+}
+
+.rack-dot.working {
+  box-shadow: 0 0 6px alpha(@fresh, 0.8);
 }
 
 /* The overflow count, for a project running more agents than there is room to
@@ -1880,7 +2259,7 @@ row.sidebar-row.needs-attention .sidebar-row-label {
 .rack-overflow {
   margin-left: 0.15em;
   color: @muted;
-  font-family: monospace;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
   font-size: 0.78em;
 }
 
@@ -1906,11 +2285,29 @@ row.sidebar-row.needs-attention .sidebar-row-label {
 
 .pane-status.waiting {
   background-color: @tally;
+  box-shadow: 0 0 0 3px alpha(@tally, 0.2), 0 0 10px @tally;
   animation-name: status-breathing;
   animation-duration: 2s;
   animation-iteration-count: infinite;
   animation-direction: alternate;
   animation-timing-function: ease-in-out;
+}
+
+/* Still, once the window isn't the one you're looking at. The breathing is for
+   the corner of your eye, and an unfocused window is not in it - while an
+   animation that never ends keeps the whole window redrawing at the display's
+   rate for as long as it runs, which for an agent left waiting overnight is all
+   night. The desktop notification is what reaches you there (see `notify`),
+   and the dot is still amber when you come back. */
+.pane-status.waiting:backdrop {
+  animation-name: none;
+}
+
+/* An editor with unsaved changes is waiting on you too, in the same amber - but
+   it is not *asking* anything, and an edit left open for an afternoon has no
+   business breathing on screen the whole time. */
+.pane-status.unsaved {
+  background-color: @tally;
 }
 
 /* The tally used to collapse a group to its single most urgent state, because a
@@ -2046,9 +2443,8 @@ row.sidebar-row.drop-below:selected {
    quietest colour, because it's a fact to look up rather than a control. */
 .sidebar-version {
   padding: 0.2em 0.7em;
-  font-family: monospace;
+  font-family: "JetBrains Mono", "JetBrainsMono Nerd Font", "Adwaita Mono", "Fira Mono", monospace;
   font-size: 0.72em;
-  color: @faint;
 }
 
 /* Selectable text draws a selection highlight; keep it in the app's own light

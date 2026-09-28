@@ -77,6 +77,8 @@ pub struct Project {
     pub path: String,
     pub name: String,
     pub icon: String,
+    /// Read leniently - see `lenient`.
+    #[serde(deserialize_with = "lenient")]
     pub mode: Mode,
     pub master_ratio: f64,
     pub master_count: usize,
@@ -86,9 +88,14 @@ pub struct Project {
     /// Which agent each of those was, in pane order.
     ///
     /// Absent from every file written before agents had kinds, which is
-    /// why it is read through `kinds` and never directly: an empty list means
+    /// why it is read through `agents` and never directly: an empty list means
     /// claude, because claude is the only thing it could have been.
     pub agent_kinds: Vec<String>,
+    /// The conversation each of those was having, in the same order, as the
+    /// agent itself named it - empty where it never said. What a reopened
+    /// project hands back to each agent so it picks up where it left off,
+    /// rather than starting over (see `agent::Launch::Resume`).
+    pub agent_sessions: Vec<String>,
     /// Whether this was the project on screen.
     pub active: bool,
 }
@@ -117,29 +124,81 @@ impl Default for Project {
             master_count: 1,
             agents: 0,
             agent_kinds: Vec::new(),
+            agent_sessions: Vec::new(),
             active: false,
         }
     }
 }
 
+/// The most agents one project will bring back.
+///
+/// `agents` is a number from a file, and with `restore_agents` on it is a
+/// number of processes this app will start, each with a token budget attached,
+/// without anybody pressing anything. A file that says ten thousand is not a
+/// preference, and a window that opens with ten thousand claudes in it is not
+/// one anyone can close fast enough.
+const MOST_AGENTS: usize = 16;
+
 impl Project {
-    /// The agents to restore, one per pane.
+    /// The agents to restore, one per pane, with the conversation each was in
+    /// where it is known.
     ///
-    /// `agents` decides how many; the kinds only decide which. A list that
-    /// disagrees with the count is a state file that has been hand-edited or
-    /// half-written, and this module tolerates that quietly rather than
-    /// reporting it - it is not the user's mistake, and there is nothing they
-    /// could do about it. See the header.
-    pub fn kinds(&self) -> Vec<Kind> {
-        (0..self.agents)
+    /// `agents` decides how many; the kinds and sessions only decide which. A
+    /// list that disagrees with the count is a state file that has been
+    /// hand-edited or half-written, and this module tolerates that quietly
+    /// rather than reporting it - it is not the user's mistake, and there is
+    /// nothing they could do about it. See the header.
+    pub fn agents(&self) -> Vec<(Kind, Option<String>)> {
+        (0..self.agents.min(MOST_AGENTS))
             .map(|i| {
-                self.agent_kinds
+                let kind = self
+                    .agent_kinds
                     .get(i)
                     .and_then(|k| Kind::parse(k))
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                let session = self
+                    .agent_sessions
+                    .get(i)
+                    .filter(|s| is_session_id(s))
+                    .cloned();
+                (kind, session)
             })
             .collect()
     }
+
+    #[cfg(test)]
+    pub fn kinds(&self) -> Vec<Kind> {
+        self.agents().into_iter().map(|(kind, _)| kind).collect()
+    }
+}
+
+/// Whether a saved string could be a conversation id at all.
+///
+/// Every agent this app knows names its conversations with UUIDs or with short
+/// words and dashes, and an id goes onto a command line - quoted, but a file
+/// that says `$(rm -rf ~)` is not one this app wrote, and there is no reason to
+/// find out how well the quoting holds.
+fn is_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// A field that falls back to its default when the file holds something this
+/// build doesn't know, rather than failing the whole file.
+///
+/// The session is shared by every build on the machine - a dev branch writes
+/// the same file the installed app reads - so a value from a newer build is not
+/// a corrupt file, it is an ordinary Tuesday. A strict read turned one
+/// unrecognised layout mode into *every* project forgotten, and then the next
+/// save wrote the forgetting down.
+fn lenient<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de> + Default,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(T::deserialize(value).unwrap_or_default())
 }
 
 /// What the font-scale keybindings will let a person reach: `FONT_SCALE_MIN` and
@@ -295,18 +354,32 @@ impl Session {
     /// project the user had open. A rename is the one filesystem operation that
     /// cannot leave a reader looking at half of anything.
     pub fn save(&self) -> std::io::Result<()> {
+        Session::write_text(&self.to_text()?)
+    }
+
+    /// The session as the file holds it.
+    pub fn to_text(&self) -> std::io::Result<String> {
+        serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+
+    /// Writes already-serialised session text, atomically - see `save`.
+    ///
+    /// The temporary file is named for this process. Two windows can be open at
+    /// once - a dev build beside an installed one, say - and a shared temporary
+    /// name let one's write be renamed into place by the other, half-finished.
+    pub fn write_text(text: &str) -> std::io::Result<()> {
         let Some(path) = state_path() else {
             return Ok(());
         };
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let text = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-        let temporary = path.with_extension("json.new");
+        let temporary = path.with_extension(format!("json.{}.new", std::process::id()));
         std::fs::write(&temporary, text)?;
-        std::fs::rename(&temporary, &path)
+        std::fs::rename(&temporary, &path).inspect_err(|_| {
+            let _ = std::fs::remove_file(&temporary);
+        })
     }
 }
 
@@ -426,6 +499,11 @@ mod tests {
                     master_count: 2,
                     agents: 3,
                     agent_kinds: vec!["claude".into(), "grok".into(), "codex".into()],
+                    agent_sessions: vec![
+                        "0b5c2c1e-6f4e-4f52-9d8b-2f0c9c4c8e11".into(),
+                        String::new(),
+                        "thr_123".into(),
+                    ],
                     active: true,
                 },
                 Project {
@@ -479,6 +557,20 @@ mod tests {
                 "accepted {text:?}"
             );
         }
+    }
+
+    /// One value from a build that knows more layouts than this one is one
+    /// project on its default layout - not every project forgotten.
+    #[test]
+    fn a_layout_this_build_doesnt_know_costs_only_that_layout() {
+        let text = r#"{"projects":[
+            {"path":"/a","name":"a","mode":"Spiral"},
+            {"path":"/b","name":"b","mode":"Monocle"}
+        ]}"#;
+        let session = Session::parse(text);
+        assert_eq!(session.projects.len(), 2, "both projects survive");
+        assert_eq!(session.projects[0].mode, Mode::default());
+        assert_eq!(session.projects[1].mode, Mode::Monocle);
     }
 
     /// Anything the app itself wrote must come back untouched. A clamp that moved
@@ -604,6 +696,45 @@ mod tests {
         );
         assert_eq!(session.window, Window::default());
     }
+    /// Each agent comes back with the conversation it was in, where it said
+    /// which - and as a fresh one where it didn't.
+    #[test]
+    fn a_project_remembers_each_agents_conversation() {
+        let session = a_session();
+        let agents = session.projects[0].agents();
+        assert_eq!(
+            agents,
+            vec![
+                (Kind::Claude, Some("0b5c2c1e-6f4e-4f52-9d8b-2f0c9c4c8e11".into())),
+                (Kind::Grok, None),
+                (Kind::Codex, Some("thr_123".into())),
+            ],
+        );
+    }
+
+    /// An id goes onto a command line. A file that says otherwise was not
+    /// written by this app, and its "id" is not handed to a shell.
+    #[test]
+    fn a_session_id_that_is_not_one_is_dropped() {
+        let project = Project {
+            agents: 2,
+            agent_sessions: vec!["$(touch /tmp/pwned)".into(), "x".repeat(500)],
+            ..Project::default()
+        };
+        assert_eq!(project.agents(), vec![(Kind::Claude, None), (Kind::Claude, None)]);
+    }
+
+    /// A count from a file is a number of processes that may be started without
+    /// anyone pressing anything, so it has a ceiling.
+    #[test]
+    fn an_absurd_agent_count_brings_back_a_bounded_number() {
+        let project = Project {
+            agents: 10_000,
+            ..Project::default()
+        };
+        assert_eq!(project.agents().len(), MOST_AGENTS);
+    }
+
     /// The two numbers a project hands the tiler, from a file that means harm.
     ///
     /// NaN is the one worth spelling out: `Tiler::restore_layout` already clamps

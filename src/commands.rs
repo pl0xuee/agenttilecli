@@ -37,7 +37,7 @@ struct Entry {
     /// per open project. Shown beside the title, because "Grid" and "agenttilecli"
     /// are not self-describing in a flat list of thirty things.
     context: String,
-    accelerator: &'static str,
+    accelerator: String,
     run: Box<dyn Fn(&App)>,
 }
 
@@ -61,7 +61,7 @@ fn entries(app: &App) -> Vec<Entry> {
         entries.push(Entry {
             title: format!("Switch to {name}"),
             context: context.to_string(),
-            accelerator: "",
+            accelerator: String::new(),
             run: Box::new(move |app: &App| app.switch_to_project(id)),
         });
     }
@@ -73,7 +73,7 @@ fn entries(app: &App) -> Vec<Entry> {
         entries.push(Entry {
             title: command.title.to_string(),
             context: command.section.to_string(),
-            accelerator: command.accelerator,
+            accelerator: command.keys(),
             run: Box::new(move |app: &App| run_action(app, action)),
         });
     }
@@ -356,7 +356,7 @@ fn build_row(entry: &Entry, index: usize) -> gtk4::ListBoxRow {
     if !entry.accelerator.is_empty() {
         row_box.append(
             &gtk4::ShortcutLabel::builder()
-                .accelerator(entry.accelerator)
+                .accelerator(entry.accelerator.as_str())
                 .valign(gtk4::Align::Center)
                 .build(),
         );

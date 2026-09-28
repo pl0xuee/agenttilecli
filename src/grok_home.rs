@@ -59,16 +59,14 @@ pub fn build(real: &Path, into: &Path, hooks_json: &str) -> std::io::Result<()> 
     // The filename is ours, but preserve a same-named user hook if one exists;
     // a harmless name collision must not make somebody's automation vanish.
     let merged = match std::fs::read_to_string(real_hooks.join(HOOKS_FILE)) {
-        Ok(theirs) => merge(&theirs, hooks_json),
+        Ok(theirs) => crate::hooks::merge_hook_files(&theirs, hooks_json),
         Err(_) => hooks_json.to_string(),
     };
-    std::fs::write(private_hooks.join(HOOKS_FILE), merged)
+    crate::hooks::write_if_changed(&private_hooks.join(HOOKS_FILE), &merged)
 }
 
 fn link_if_absent(source: &Path, link: &Path) {
-    if std::fs::symlink_metadata(link).is_err() {
-        let _ = std::os::unix::fs::symlink(source, link);
-    }
+    crate::codex_home::mirror(source, link);
 }
 
 fn prune_broken_links(dir: &Path) -> std::io::Result<()> {
@@ -82,34 +80,6 @@ fn prune_broken_links(dir: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
-}
-
-fn merge(theirs: &str, ours: &str) -> String {
-    let (Ok(mut theirs), Ok(ours)) = (
-        serde_json::from_str::<serde_json::Value>(theirs),
-        serde_json::from_str::<serde_json::Value>(ours),
-    ) else {
-        return ours.to_string();
-    };
-    let Some(our_events) = ours["hooks"].as_object().cloned() else {
-        return ours.to_string();
-    };
-    if !theirs["hooks"].is_object() {
-        theirs["hooks"] = serde_json::json!({});
-    }
-    let their_events = theirs["hooks"]
-        .as_object_mut()
-        .expect("just replaced with an object");
-    for (event, entries) in our_events {
-        let slot = their_events
-            .entry(event)
-            .or_insert_with(|| serde_json::json!([]));
-        match (slot.as_array_mut(), entries.as_array()) {
-            (Some(slot), Some(entries)) => slot.extend(entries.iter().cloned()),
-            _ => *slot = entries,
-        }
-    }
-    theirs.to_string()
 }
 
 /// Prepares the private home used by a Grok pane. Failure is deliberately
@@ -126,7 +96,7 @@ pub fn prepare(hook_bin: &str, bell_hook: &str) -> Option<PathBuf> {
 
     // A GUI normally cannot inherit this value, but following it would turn
     // the private overlay into the user's configured home and write there.
-    if real == into {
+    if crate::codex_home::same_directory(&real, &into) {
         return None;
     }
     build(

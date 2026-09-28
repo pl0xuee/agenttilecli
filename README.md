@@ -9,18 +9,83 @@ you want to nudge it.
 
 ## Features
 
+- **A window you can read from across the room** — every tile says its state
+  with its whole body, not just a dot in its corner: an agent that's asking
+  you something gets an amber edge that slowly breathes, a working one has a
+  light sweeping along the line under its head, a finished one goes quiet, and
+  each tile wears its agent — `CLAUDE`, `CODEX`, `GROK` — as a badge. The header
+  counts them in chips (*1 asking · 2 working · 1 idle*), the rail glyphs carry
+  a badge with how many agents in that project are asking, and the floor has a
+  soft horizon of your theme's accent rising behind the tiles. Set in Inter and
+  JetBrains Mono (Omarchy's own), drawn entirely from your theme's palette — so
+  it holds up on light themes as well as dark — and every animation stops the
+  moment the window isn't the one you're looking at.
+- **Agents that pick up where they left off** — quit with four agents running,
+  reopen, and the project's empty state offers **Resume 4 agents**: one click
+  and each comes back in its own tile, *in the conversation it was having* —
+  claude via `--resume`, codex via `codex resume`, grok via `--resume`. Every
+  new claude and grok is handed its conversation id at launch
+  (`--session-id`), and every agent reports its id through its hooks as it
+  goes (including after a `/clear`), so the session file always knows which
+  conversation each tile holds. Offered rather than done, because an agent is
+  a process with a token budget attached; set `restore_agents = true` and it
+  resumes them without asking.
+- **Desktop notifications that say what, not just that** — when an agent stops
+  to ask you something, or finishes its turn, while you're not looking at it,
+  the desktop says so in the agent's own words: *"claude is asking · webapp —
+  Claude needs your permission to use Bash"*, or the first line of the answer
+  it finished with. Click it and you're there — window raised, project
+  switched, pane focused. One per pane, replaced as the pane moves on, and
+  taken back the moment you look, so the desktop's list reads as "who is still
+  waiting on me" rather than as a log. `notifications = false` turns them off.
+- **One key to whoever is waiting** — `Super+Alt+N` goes to the next agent that
+  has stopped to ask you something, across every project; press it again for
+  the next one. Four agents waiting is four presses.
+- **Worktrees on demand** — *Spawn in a new worktree* (the chevron beside the
+  **+**, or the palette) starts an agent in a git worktree of its own, so two
+  agents on one project stop editing the same files under each other. All three
+  agents create and name the worktree themselves; the app just asks for one.
+- **Status the instant it happens** — claude's permission prompts light the amber
+  dot the moment the dialog appears (`PermissionRequest`), not six seconds later
+  when its `Notification` fires; turns that end in an API error (`StopFailure`),
+  an interrupt (codex's `Interrupt`, grok's `StopCancelled`) or a failed tool
+  settle the dot instead of leaving it on "working". And claude's
+  minute-later "still here?" ping no longer turns every finished pane amber
+  and labels it "asking permission".
+- **Hooks that cost the agent nothing** — agents run a hook at every moment of
+  every turn, and wait for it. The hook is its own tiny binary,
+  `agenttilecli-hook`, linked against nothing but libc: **0.3 ms** a call,
+  down from 13 ms when it was the window's own GTK binary loading 138 shared
+  libraries to write one line to a socket. An agent running a hundred tools a
+  turn was spending over two seconds of it on status dots.
+- **Keys that work on your desktop** — every shortcut defaults to a key a stock
+  Omarchy desktop leaves free (Omarchy's Hyprland binds Super+Alt+Return, G,
+  Tab, K, F, `/`, `-`, `=`, `[` and `]`, and a compositor binding is taken
+  before any window sees it). On Hyprland the app also asks the compositor
+  what it holds, and if a binding of yours lands on one of its keys, a toast
+  says so and the shortcuts sheet marks which — with the config line that moves
+  it. Any key can be moved in `config.toml`'s `[keys]` table.
+- **The editor is safe beside agents** — a file open in the editor follows the
+  agents' edits live while you haven't touched it, and if an agent changes it
+  under your edits, saving asks *Overwrite / Reload theirs / Keep editing*
+  instead of silently undoing their change. Saves are atomic, keep the file's
+  permissions and write through symlinks.
+- **Nothing is lost by accident** — closing the window, a project, or restarting
+  into an update asks first when it would cost an unsaved file or an agent in
+  the middle of a turn. Idle agents don't ask: their conversations are saved,
+  and come back with **Resume**.
 - **Project groups on a rail, detailed in a drawer** — every project lives in
   its own group, each with its own independent tiling layout and set of agent
   panes. The rail on the window's left edge is always on screen: one glyph
   per project, wearing that project's identity colour, pulsing amber when a
   background agent wants you, lit for the group you're in. Click a glyph to
-  switch groups; click the lit one (or `Super+Alt+g`, or the header-bar
+  switch groups; click the lit one (or `Super+Alt+B`, or the header-bar
   button) to summon the drawer — the full rack, with names, per-agent tally
   dots, folder trees, and each group's ✕ (closing a group hangs up every
   agent in it). Background groups keep their agents running while hidden.
-  Drag a row to reorder it (or `Super+Alt+{` / `}`), and drag the seam on the
+  Drag a row to reorder it (or `Super+Alt+Shift+PgUp` / `PgDn`), and drag the seam on the
   drawer's right edge to make it wider or narrower. The dashed **+** at the
-  rail's foot (or `Super+Alt+Return`, or the drawer's "Open a project…" row)
+  rail's foot (or `Super+Alt+O`, or the drawer's "Open a project…" row)
   opens a new project as a new group via a native folder picker, then asks
   which agent it's for, and starts it with as many agents as the project you
   were last working in had running. *How many* is never asked — that one you
@@ -79,7 +144,10 @@ you want to nudge it.
   overlay. AgentTileCLI never installs hooks into `~/.codex` or `~/.grok`, and
   agents launched in other terminals remain untouched. If Codex hooks also
   live inline in `~/.codex/config.toml`, Codex may warn that it loaded both the
-  inline and JSON representations; that warning is harmless.
+  inline and JSON representations; that warning is harmless. Codex also asks you
+  to review any hook it hasn't seen before (`/hooks` in codex) and skips it until
+  you do — and since 4.0 moved the hook to its own binary, a codex pane will ask
+  once more after updating.
 - **Background agents tell you when they want you** — when an agent finishes a
   turn, or stops to ask permission, its group's sidebar row pulses and then
   stays quietly tinted until you open that group, so a finished agent in a
@@ -110,7 +178,7 @@ you want to nudge it.
 - **A header bar that tells you where you are** — the project you're in and
   the focused pane's title, and a three-way Grid / Master-stack / Monocle
   switch that both reports the current mode and changes it. Pressing
-  `Super+Alt+Tab` moves the switch, and clicking the switch is the same as
+  `Super+Alt+T` moves the switch, and clicking the switch is the same as
   pressing the key; the mode is no longer something you have to infer from
   the shape of the tiles.
 - **Mouse support** — click any pane to focus it, drag any seam between
@@ -122,7 +190,7 @@ you want to nudge it.
   the folder name it's running in. A new pane doesn't take your keyboard:
   you start a second agent *while* working in the first, and having focus
   jump mid-sentence sends the rest of that sentence somewhere you weren't
-  looking. Click it, or `Super+Alt+j`, when you actually want it.
+  looking. Click it, or `Super+Alt+J`, when you actually want it.
 - **Clickable links** — `Ctrl`-click a URL an agent printed and it opens in your
   browser. Both kinds work: OSC 8 hyperlinks, where the program says outright
   that some text is a link, and ordinary URLs found in plain output. `Ctrl`
@@ -142,7 +210,7 @@ you want to nudge it.
   the interrupt that stops a running agent, so clear the selection (one click)
   if a stale one is in the way.
 - **One-click updates** — **Check for Updates**, in the app menu (or
-  `Super+Alt+u`), checks `origin/master` for a newer version, shows you what's
+  `Super+Alt+U`), checks `origin/master` for a newer version, shows you what's
   new, and can pull and reinstall it for you in a pane so you can watch the
   build. It only touches your clone if it's a clean checkout of `master` — a
   dev branch, local commits, or uncommitted changes get reported, never
@@ -151,7 +219,7 @@ you want to nudge it.
   also dismiss the fact. The version and commit you're actually running sit at
   the bottom of the sidebar.
 - **Keyboard shortcuts, in a dialog** — every binding, drawn as real key caps,
-  on `Super+Alt+/` or from the menu. It's generated from the same table the
+  on `Super+Alt+?` or from the menu. It's generated from the same table the
   app matches keypresses against, so it can't drift out of date, and it costs
   you no pane to read.
 - **It reopens where you left it** — quit and relaunch and your projects come
@@ -159,9 +227,10 @@ you want to nudge it.
   one was using, at the window size and sidebar width you last set. Written to
   `$XDG_STATE_HOME/agenttilecli/session.json` a moment after anything changes,
   so a crash costs at most the last second or two. Agents are deliberately
-  *not* restarted: an agent is a process with a token budget attached, and "I
-  quit with four running" is not the same thing as "start four now" — each
-  project reopens with its layout and an empty state telling you what to press.
+  *not* restarted on their own: an agent is a process with a token budget
+  attached, and "I quit with four running" is not the same thing as "start four
+  now" — each project reopens with its layout and a **Resume** button that
+  brings them back, in their conversations, when you say so.
 - **Broadcast typing** — the broadcast button in the header bar (top-right)
   echoes whatever you type into the focused pane to every other agent in the
   project, so one instruction can go to all of them at once. It's a toggle, and
@@ -172,13 +241,14 @@ you want to nudge it.
 - **Copy a pane's output** — `Super+Alt+C` puts everything the focused agent
   has printed onto the clipboard, so you can paste a whole exchange somewhere
   else without selecting it by hand.
-- **Find in a pane** — `Super+Alt+F` opens a search bar over the focused pane
+- **Find in a pane** — `Super+Alt+R` opens a search bar over the focused pane
   and searches its scrollback, wrapping around, case-insensitively. Enter for
   the next match, `Shift+Enter` for the previous, `Escape` to close and hand the
   keyboard back. What you type is taken literally, so a path or an error message
   pasted straight in finds that line instead of failing to compile as a regex.
 - **Adjustable text size** — enlarge or shrink every pane's terminal text
-  together, independent of pane layout.
+  together, independent of pane layout: `Super+Alt+Z` / `Shift+Z`, or Ctrl and
+  the mouse wheel over any pane.
 - **A command palette** — `Super+Alt+P` opens a search box over everything the
   app can do, plus every open project. Type a few letters of what you want and
   press Enter; the match is by subsequence, so `nxp` finds "switch to the next
@@ -219,12 +289,13 @@ you make it:
 
 default_agent = "claude"  # which agent the + starts: claude, codex, or grok
 agents = 1                # agents a newly-opened project starts with
-restore_agents = false    # reopen a saved session's agents too?
-gap = 6                   # half the space between tiles, in pixels
+restore_agents = false    # resume a saved session's agents without asking?
+gap = 8                   # half the space between tiles, in pixels
 scrollback = 10000        # lines of scrollback per pane
-font = "Fira Mono 10"     # terminal font; "" for your desktop's monospace
+font = "JetBrains Mono 10" # terminal font; "" for your desktop's monospace
 window_opacity = 0.92     # the gutters, the header strip and the rack
 pane_opacity = 1.0        # the terminal surfaces themselves
+notifications = true      # desktop notifications when an agent wants you
 
 [agent.claude]
 command = "claude"        # what a claude pane runs
@@ -244,8 +315,10 @@ so an existing config file needs no editing. It says so on startup and points
 at `[agent.claude]`, which is where it lives now.
 
 `restore_agents` is off on purpose. An agent is a process with a token budget
-attached, so reopening a project restores its *layout* and leaves the panes to
-you; turn this on if you'd rather it started them.
+attached, so reopening a project restores its *layout* and offers its agents
+back — the empty state's **Resume** button — rather than starting them; turn
+this on if you'd rather it resumed them straight away. Either way each comes
+back in the conversation it was having.
 
 The two opacities are clamped to `0.5`–`1.0`, and the panes default to fully
 opaque deliberately: a terminal is the one surface here whose job is being read.
@@ -277,32 +350,59 @@ shouldn't need to touch it.
 ## Keybindings
 
 All bindings are held with **Super+Alt** together, so they never collide with
-your desktop environment's own `Super+key` shortcuts.
+what the shell, claude or readline inside a pane wants — and the letters are
+ones a stock [Omarchy](https://omarchy.org/) desktop leaves free, since a
+compositor binding is taken before any window sees the key. Where a pair would
+have needed two letters, **Shift reverses** the one: `J` goes to the next pane,
+`Shift+J` to the previous.
 
-| Keys | Action |
-|---|---|
-| `Return` | open a new project as a new group |
-| `g` | toggle the project sidebar |
-| `[` / `]` | switch to the previous / next group |
-| `{` / `}` | move this project up / down the sidebar |
-| `Shift+Return` | promote focused pane to master (zoom) |
-| `j` / `k` | focus next / previous pane |
-| `w` | close the focused pane |
-| `h` / `l` | shrink / grow the master column (MasterStack mode) |
-| `i` / `d` | more / fewer master panes (MasterStack mode) |
-| `m` | toggle monocle (focused pane fullscreen) |
-| `Tab` | cycle layout mode: grid → master-stack → monocle |
-| `=` / `-` | enlarge / shrink terminal text (all panes) |
-| `0` | reset terminal text size |
-| `f` | find in the focused pane |
-| `c` | copy the focused pane's output |
-| `p` | show all commands |
-| `/` | show the keyboard shortcuts |
-| `u` | check for updates |
+| Keys | Action | `[keys]` id |
+|---|---|---|
+| `O` | open a new project as a new group | `open-project` |
+| `B` | toggle the project drawer | `toggle-drawer` |
+| `PgUp` / `PgDn` | switch to the previous / next group | `previous-project` / `next-project` |
+| `Shift+PgUp` / `Shift+PgDn` | move this project up / down the rail | `move-project-up` / `move-project-down` |
+| `N` | go to the agent that wants you | `go-to-waiting` |
+| `A` | start another agent in this project | `new-agent` |
+| `Shift+Return` | promote focused pane to master (zoom) | `promote` |
+| `J` / `Shift+J` | focus next / previous pane | `focus-next` / `focus-previous` |
+| `W` | close the focused pane | `close-pane` |
+| `H` / `L` | shrink / grow the master column (MasterStack mode) | `shrink-master` / `grow-master` |
+| `I` / `D` | more / fewer master panes (MasterStack mode) | `more-masters` / `fewer-masters` |
+| `M` | toggle monocle (focused pane fullscreen) | `monocle` |
+| `T` | cycle layout mode: grid → master-stack → monocle | `cycle-layout` |
+| `Z` / `Shift+Z` | enlarge / shrink terminal text (all panes) — or Ctrl+wheel | `enlarge-text` / `shrink-text` |
+| `0` | reset terminal text size | `reset-text` |
+| `R` | find in the focused pane | `find` |
+| `C` | copy the focused pane's output | `copy-output` |
+| `P` | show all commands | `commands` |
+| `?` | show the keyboard shortcuts | `shortcuts` |
+| `U` | check for updates | `updates` |
 
-A few things have no key of their own and live in the command palette (`p`) and
-the app menu: starting another agent, toggling broadcast, choosing a layout mode
-by name, and Preferences.
+A few things have no key of their own and live in the command palette (`P`) and
+the app menu: starting a particular agent, starting one in a new worktree,
+resuming a project's agents, toggling broadcast, choosing a layout mode by name,
+and Preferences. Each has an id too (`new-claude`, `new-worktree-agent`,
+`resume-agents`, `broadcast`, `grid`, …), so any of them can be given a key.
+
+### Moving a key
+
+```toml
+# ~/.config/agenttilecli/config.toml
+[keys]
+find = "Super+Alt+F"          # the way people write keys...
+focus-previous = "<Super><Alt>k"  # ...or GTK's own spelling
+updates = "none"              # give a key up without giving it to anything
+```
+
+A key needs Super, Alt or Ctrl held — a bare key would be taken from every
+terminal in the window. An id that names no command, a key GTK can't parse, or
+two commands on one key are all reported when the app starts.
+
+Coming from 3.x: the keys that moved are the ones Omarchy's Hyprland takes —
+`Return`→`O`, `g`→`B`, `[`/`]`→`PgUp`/`PgDn`, `{`/`}`→`Shift+PgUp`/`PgDn`,
+`k`→`Shift+J`, `Tab`→`T`, `=`/`-`→`Z`/`Shift+Z`, `f`→`R`, `/`→`?`. On a desktop
+where the old ones worked, `[keys]` puts them back.
 
 ## Requirements
 
@@ -364,7 +464,7 @@ This builds a release binary and installs it to `~/.local/bin/agenttilecli`
 it shows up in your application launcher.
 
 To update later, open the sidebar (the button at the left of the header bar)
-and click **Check for updates** at the bottom of it — or press `Super+Alt+u`,
+and click **Check for updates** at the bottom of it — or press `Super+Alt+U`,
 or pick it from the app menu. It checks
 `origin/master`, shows you what's new, and runs the pull and reinstall in a
 pane. Or do it by hand: `git pull && ./install.sh`.
@@ -375,7 +475,7 @@ so deleting it means updating by re-cloning instead.
 ## Uninstall
 
 ```sh
-rm ~/.local/bin/agenttilecli \
+rm ~/.local/bin/agenttilecli ~/.local/bin/agenttilecli-hook \
    ~/.local/share/applications/dev.agenttilecli.AgentTileCli.desktop \
    ~/.local/share/icons/hicolor/scalable/apps/agenttilecli.svg
 ```
