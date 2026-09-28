@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     container: fedora:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the toolchain and the GTK stack
         run: |
@@ -42,7 +42,7 @@ jobs:
           git config --global user.email "ci@localhost"
           git config --global --add safe.directory '*'
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
