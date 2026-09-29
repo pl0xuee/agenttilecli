@@ -135,6 +135,11 @@ pub struct Config {
     /// The terminal font, as Pango describes one ("JetBrains Mono 10"). Empty means
     /// the desktop's own monospace.
     pub font: String,
+    /// Which palette the window wears: `"system"` to follow the desktop's
+    /// Omarchy theme, `"dark"` or `"light"` for the app's own two, or the name
+    /// of any installed Omarchy theme (`"tokyo-night"`) to wear that one
+    /// whatever the desktop does. See `omarchy::Choice`.
+    pub theme: String,
     /// Whether an agent that finishes, or stops to ask something, while you
     /// aren't looking says so with a desktop notification (see `notify`). On by
     /// default: it is the one signal that reaches you away from the window,
@@ -196,6 +201,7 @@ impl Default for Config {
             // then whatever `monospace` is on this machine. This used to name
             // Fira Mono alone, which is installed almost nowhere.
             font: "JetBrainsMono Nerd Font, JetBrains Mono, Fira Mono, monospace 10".to_string(),
+            theme: "system".to_string(),
             notifications: true,
             keys: BTreeMap::new(),
         }
@@ -242,7 +248,26 @@ impl Config {
                 };
             }
         };
-        Config::parse(&text, &path.display().to_string())
+        let mut loaded = Config::parse(&text, &path.display().to_string());
+        // Checked here rather than in `parse`, which is kept free of the
+        // filesystem: whether a theme is installed is a fact about this machine,
+        // not about the file.
+        if loaded.in_effect {
+            let choice = crate::omarchy::Choice::parse(&loaded.config.theme);
+            if !crate::omarchy::is_available(&choice) {
+                let note = format!(
+                    "`theme = \"{}\"` isn't an Omarchy theme installed on this machine, \
+                     so the window follows the desktop's instead. Use \"system\", \
+                     \"dark\", \"light\", or a name from `omarchy theme list`.",
+                    loaded.config.theme,
+                );
+                loaded.problem = Some(match loaded.problem.take() {
+                    Some(problem) => format!("{problem}\n\n{note}"),
+                    None => format!("{}:\n\n{note}", path.display()),
+                });
+            }
+        }
+        loaded
     }
 
     /// The command line a pane of `kind` runs, before that agent's hooks are
@@ -500,6 +525,7 @@ mod tests {
             window_opacity: 0.8,
             pane_opacity: 0.95,
             font: "JetBrains Mono 11".into(),
+            theme: "light".into(),
             notifications: false,
             keys: BTreeMap::from([("find".to_string(), "Super+Alt+F".to_string())]),
         };

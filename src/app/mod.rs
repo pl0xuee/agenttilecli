@@ -526,6 +526,12 @@ impl App {
         // opacity the last run was left at rather than at the config's and then
         // corrected.
         crate::appearance::restore(&saved.appearance);
+        // A theme chosen in an earlier run is a different palette from the one
+        // startup read out of the config, and it has to be in place before
+        // anything below paints from it.
+        if saved.appearance.theme.is_some() {
+            Self::reload_palette();
+        }
         // And then repaint whatever already exists, because `restore_session`
         // above may have built panes - `restore_agents` - and those were painted
         // from the config while the session's own opacity was still unread. That
@@ -1194,7 +1200,14 @@ impl App {
     /// moved a value without going through here would change one of the three
     /// and look like it had done nothing.
     pub fn set_appearance(&self, next: crate::appearance::Appearance) {
+        // The theme is the one setting that changes the palette under the other
+        // three rather than a value inside it, so it is re-read before they are
+        // repainted - otherwise the panes would be repainted in the old colours.
+        let theme_changed = crate::appearance::get().theme != next.theme;
         crate::appearance::set(next);
+        if theme_changed {
+            Self::reload_palette();
+        }
         self.refresh_appearance_css();
         for view in self.0.views.borrow().iter() {
             view.tiler.refresh_appearance();
@@ -1211,15 +1224,54 @@ impl App {
     /// theme's colours - which, since the terminals are most of the window,
     /// would read as the theme not having applied at all.
     ///
-    /// Not saved to the session. The theme is the desktop's state, not this
-    /// window's; the next launch reads it from Omarchy again.
+    /// Not saved to the session. The desktop's theme is the desktop's state,
+    /// not this window's; the next launch reads it from Omarchy again. What *is*
+    /// saved is the choice of whether to follow it - see `set_theme`.
     pub fn refresh_theme(&self) {
-        crate::omarchy::reload();
-        crate::refresh_theme_css();
-        crate::apply_color_scheme();
+        Self::reload_palette();
         self.refresh_appearance_css();
         for view in self.0.views.borrow().iter() {
             view.tiler.refresh_appearance();
+        }
+    }
+
+    /// Re-reads the palette the theme setting names, and repoints the stylesheet
+    /// and libadwaita at it. The panes and the dynamic CSS are the caller's to
+    /// repaint, since every caller is about to anyway.
+    fn reload_palette() {
+        crate::omarchy::reload(&crate::appearance::get().theme);
+        crate::refresh_theme_css();
+        crate::apply_color_scheme();
+    }
+
+    /// Puts the window in `choice`'s palette and remembers it in the session.
+    pub fn set_theme(&self, choice: crate::omarchy::Choice) {
+        let mut next = crate::appearance::get();
+        next.theme = choice;
+        self.set_appearance(next);
+    }
+
+    /// The command palette's four theme commands, as the `fn(&App)` its table
+    /// holds.
+    pub fn use_system_theme(&self) {
+        self.set_theme(crate::omarchy::Choice::System);
+    }
+
+    pub fn use_dark_theme(&self) {
+        self.set_theme(crate::omarchy::Choice::Dark);
+    }
+
+    pub fn use_light_theme(&self) {
+        self.set_theme(crate::omarchy::Choice::Light);
+    }
+
+    /// Light if the window is dark now, dark if it is light - read off what is
+    /// on screen rather than off the setting, so it flips a followed desktop
+    /// theme or a pinned Omarchy one as readily as the app's own two.
+    pub fn toggle_light_dark(&self) {
+        match crate::omarchy::mode() {
+            Some(crate::omarchy::Mode::Light) => self.use_dark_theme(),
+            _ => self.use_light_theme(),
         }
     }
 

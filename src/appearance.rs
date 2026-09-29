@@ -22,6 +22,7 @@
 use std::cell::RefCell;
 
 use crate::config;
+use crate::omarchy::{self, Choice};
 use crate::session;
 
 /// How see-through the app is allowed to get, either surface.
@@ -65,6 +66,10 @@ pub struct Appearance {
     /// the desktop's own monospace, which is what every pane used before there
     /// was a way to say otherwise.
     pub font: String,
+    /// Which palette the window wears - the desktop's, the app's own dark or
+    /// light, or a pinned Omarchy theme. Applied through `omarchy::reload`,
+    /// which is what `App::set_appearance` calls when this moves.
+    pub theme: Choice,
 }
 
 impl Appearance {
@@ -76,6 +81,7 @@ impl Appearance {
             pane_opacity: clamp_opacity(config.pane_opacity),
             gap: config.gap.clamp(0, 40),
             font: config.font.clone(),
+            theme: Choice::parse(&config.theme),
         }
     }
 
@@ -95,6 +101,7 @@ impl Appearance {
             pane_opacity: saved.pane_opacity.map_or(base.pane_opacity, clamp_opacity),
             gap: saved.gap.map_or(base.gap, |gap| gap.clamp(0, 40)),
             font: base.font,
+            theme: saved.theme.as_deref().map_or(base.theme, Choice::parse),
         }
     }
 
@@ -107,6 +114,7 @@ impl Appearance {
             window_opacity: (self.window_opacity != base.window_opacity).then_some(self.window_opacity),
             pane_opacity: (self.pane_opacity != base.pane_opacity).then_some(self.pane_opacity),
             gap: (self.gap != base.gap).then_some(self.gap),
+            theme: (self.theme != base.theme).then(|| self.theme.key().to_string()),
         }
     }
 }
@@ -159,6 +167,7 @@ pub fn set(next: Appearance) {
         pane_opacity: clamp_opacity(next.pane_opacity),
         gap: next.gap.clamp(0, 40),
         font: next.font,
+        theme: next.theme,
     };
     ACTIVE.with(|active| *active.borrow_mut() = Some(next));
 }
@@ -300,6 +309,20 @@ fn text_halo(opacity: f64) -> f64 {
     ((1.0 - opacity) * 1.7).clamp(0.0, 0.85)
 }
 
+/// The colour that halo is cast in: the ground the text was written for.
+///
+/// Everything above argues for a *dark* halo because the ink is light. On a
+/// light palette the ink is dark, and a dark halo under dark type is not
+/// ground, it is a smudge - the glyphs thicken instead of separating from the
+/// wallpaper. So a light palette's halo is its own paper, @field, which gives
+/// dark text back exactly what a dark halo gives light text.
+fn halo_ground(mode: Option<omarchy::Mode>) -> &'static str {
+    match mode {
+        Some(omarchy::Mode::Light) => "@field",
+        _ => "@shadow",
+    }
+}
+
 /// How far the quiet type is dragged toward @text as the surface thins.
 ///
 /// The halo above is half the answer and measurably the smaller half - it took
@@ -335,12 +358,13 @@ pub fn content_css(font_scale: f64) -> String {
     // sits on a surface that follows `pane_opacity`.
     let chrome_halo = text_halo(window_opacity);
     let pane_halo = text_halo(pane_opacity);
+    let ground = halo_ground(omarchy::mode());
     format!(
         ".scaled-content {{ font-size: {font_scale}em; }}\n\
-         .sidebar, .rail {{ text-shadow: 0 0 3px alpha(@shadow, {chrome_halo:.3}), \
-           0 1px 2px alpha(@shadow, {chrome_halo:.3}); }}\n\
-         .scaled-content {{ text-shadow: 0 0 3px alpha(@shadow, {pane_halo:.3}), \
-           0 1px 2px alpha(@shadow, {pane_halo:.3}); }}\n\
+         .sidebar, .rail {{ text-shadow: 0 0 3px alpha({ground}, {chrome_halo:.3}), \
+           0 1px 2px alpha({ground}, {chrome_halo:.3}); }}\n\
+         .scaled-content {{ text-shadow: 0 0 3px alpha({ground}, {pane_halo:.3}), \
+           0 1px 2px alpha({ground}, {pane_halo:.3}); }}\n\
          .scaled-content .top-bar {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
          .workspace-floor {{ background-color: alpha(@field, {window_opacity:.3}); }}\n\
          .sidebar {{ background-color: alpha(@rack, {window_opacity:.3}); }}\n\
@@ -420,6 +444,7 @@ mod tests {
             pane_opacity: 1.0,
             gap: 6,
             font: String::new(),
+            theme: Choice::System,
         });
         let css = content_css(1.25);
         assert!(css.contains("font-size: 1.25em"), "{css}");
@@ -457,6 +482,33 @@ mod tests {
         }
     }
 
+    /// Light type on a dark palette is haloed in shadow, dark type on a light
+    /// one in paper - the halo is ground for the ink, so it is always the
+    /// colour the ink is not.
+    #[test]
+    fn the_halo_is_cast_in_the_ground_the_ink_was_written_for() {
+        assert_eq!(halo_ground(None), "@shadow");
+        assert_eq!(halo_ground(Some(omarchy::Mode::Dark)), "@shadow");
+        assert_eq!(halo_ground(Some(omarchy::Mode::Light)), "@field");
+    }
+
+    /// A theme picked in the dialog is remembered by its key, and only when it
+    /// is not what the config file already says.
+    #[test]
+    fn a_chosen_theme_is_saved_only_when_it_differs_from_the_config() {
+        let mut appearance = Appearance::from_config();
+        assert_eq!(appearance.overrides().theme, None);
+
+        appearance.theme = Choice::Named("tokyo-night".into());
+        assert_eq!(appearance.overrides().theme.as_deref(), Some("tokyo-night"));
+
+        let resolved = Appearance::resolved(&session::Appearance {
+            theme: Some("light".into()),
+            ..session::Appearance::default()
+        });
+        assert_eq!(resolved.theme, Choice::Light);
+    }
+
     /// The floor is one surface, whether or not tiles stand on it.
     ///
     /// This used to be the opposite rule, and for a reason worth keeping: the
@@ -479,6 +531,7 @@ mod tests {
             pane_opacity: 0.95,
             gap: 6,
             font: String::new(),
+            theme: Choice::System,
         });
         let css = content_css(1.0);
         assert!(
@@ -510,6 +563,7 @@ mod tests {
             window_opacity: Some(0.7),
             pane_opacity: None,
             gap: None,
+            theme: None,
         });
         assert_eq!(resolved.window_opacity, 0.7);
         assert_eq!(resolved.pane_opacity, base.pane_opacity);
@@ -524,6 +578,7 @@ mod tests {
             window_opacity: Some(-1.0),
             pane_opacity: Some(9.0),
             gap: Some(4000),
+            theme: None,
         });
         assert_eq!(resolved.window_opacity, OPACITY_MIN);
         assert_eq!(resolved.pane_opacity, OPACITY_MAX);
@@ -569,6 +624,7 @@ mod tests {
             pane_opacity: 1.0,
             gap: 6,
             font: String::new(),
+            theme: Choice::System,
         });
         let css = content_css(1.0);
         assert!(
@@ -598,6 +654,7 @@ mod tests {
             pane_opacity: 0.6,
             gap: 6,
             font: String::new(),
+            theme: Choice::System,
         });
         let css = content_css(1.0);
         assert!(
@@ -619,6 +676,7 @@ mod tests {
             pane_opacity: 0.7,
             gap: 6,
             font: String::new(),
+            theme: Choice::System,
         });
         let css = content_css(1.0);
         assert!(css.contains("alpha(@tile, 0.700)"), "{css}");
@@ -638,6 +696,7 @@ mod tests {
             pane_opacity: 1.0,
             gap: 6,
             font: String::new(),
+            theme: Choice::System,
         });
         let css = content_css(1.0);
         assert!(css.contains("alpha(@field, 0.750)"), "{css}");
@@ -661,6 +720,7 @@ mod tests {
             pane_opacity: 1.0,
             gap: 6,
             font: String::new(),
+            theme: Choice::System,
         });
         let css = content_css(1.0);
         assert!(

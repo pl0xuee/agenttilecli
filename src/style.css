@@ -1248,7 +1248,8 @@ searchbar > revealer > box {
 /* ── The editor pane ───────────────────────────────────────────────────────
    A tile holding a file instead of an agent - same frame, same head strip,
    same close button; see `Pane::editor`. The code itself is painted by
-   GtkSourceView's Adwaita-dark scheme rather than by this sheet: a scheme is
+   GtkSourceView's Adwaita-dark scheme (plain Adwaita under a light palette -
+   see `editor::apply_scheme`) rather than by this sheet: a scheme is
    a palette for *languages*, and restating one here would be a second copy of
    two hundred files' worth of colour rules. The seam between the scheme's
    near-black and the ramp's gunmetal is real and accepted; a scheme of our

@@ -1280,9 +1280,12 @@ impl Pane {
     /// wrong one here: nothing about the pane has changed, the settings have,
     /// and every pane needs the new ones whatever it was doing.
     pub fn refresh_appearance(&self) {
-        if let Body::Terminal(terminal) = &self.body {
-            apply_theme(terminal, self.focused.get());
-            apply_font(terminal);
+        match &self.body {
+            Body::Terminal(terminal) => {
+                apply_theme(terminal, self.focused.get());
+                apply_font(terminal);
+            }
+            Body::Editor(editor) => editor.refresh_scheme(),
         }
     }
 

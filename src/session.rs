@@ -57,6 +57,8 @@ pub struct Appearance {
     pub window_opacity: Option<f64>,
     pub pane_opacity: Option<f64>,
     pub gap: Option<i32>,
+    /// The theme, as `omarchy::Choice::key` spells it.
+    pub theme: Option<String>,
 }
 
 /// The window's own shape, which is the part people notice missing first.
@@ -488,6 +490,7 @@ mod tests {
                 window_opacity: Some(0.85),
                 pane_opacity: None,
                 gap: Some(10),
+                theme: Some("light".into()),
             },
             projects: vec![
                 Project {

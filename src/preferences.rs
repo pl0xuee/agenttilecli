@@ -27,6 +27,7 @@ use adw::prelude::*;
 
 use crate::app::App;
 use crate::appearance::{self, Appearance};
+use crate::omarchy::{self, Choice};
 
 /// Opens the preferences dialog over `app`'s window.
 pub fn present(app: &App) {
@@ -40,6 +41,8 @@ pub fn present(app: &App) {
         .icon_name("preferences-system-symbolic")
         .css_classes(["atc-dialog"])
         .build();
+
+    page.add(&theme_group(app));
 
     let group = adw::PreferencesGroup::builder()
         .title("Appearance")
@@ -105,10 +108,87 @@ pub fn present(app: &App) {
     let dialog = adw::PreferencesDialog::builder()
         .title("Preferences")
         .content_width(560)
-        .content_height(520)
+        .content_height(580)
         .build();
     dialog.add(&page);
     dialog.present(Some(app.window()));
+}
+
+/// The theme: follow the desktop, the app's own dark or light, or any installed
+/// Omarchy theme pinned regardless of what the desktop wears.
+///
+/// One dropdown rather than a mode switch beside a theme picker. The two would
+/// have to explain to each other what "light" means while a theme is picked -
+/// and a theme already knows whether it is light, so the only thing a separate
+/// switch could ever add is a way to contradict it.
+///
+/// A group of its own with no heading, because the row is its own heading - a
+/// "Theme" title over a row called "Theme" says the word twice and nothing else.
+fn theme_group(app: &App) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::new();
+
+    let current = appearance::get().theme;
+    let mut choices = vec![Choice::System, Choice::Dark, Choice::Light];
+    choices.extend(omarchy::installed().into_iter().map(Choice::Named));
+    // A pinned theme that has since been uninstalled is still what the setting
+    // says, and the dialog shows the setting rather than silently re-pointing
+    // it at the first row.
+    if !choices.contains(&current) {
+        choices.push(current.clone());
+    }
+
+    let labels: Vec<String> = choices.iter().map(Choice::label).collect();
+    let model = gtk4::StringList::new(&labels.iter().map(String::as_str).collect::<Vec<_>>());
+    let row = adw::ComboRow::builder()
+        .title("Theme")
+        .subtitle(describe(&current))
+        .model(&model)
+        .expression(gtk4::PropertyExpression::new(
+            gtk4::StringObject::static_type(),
+            None::<&gtk4::Expression>,
+            "string",
+        ))
+        // Two dozen stock themes is a list to type into rather than scroll.
+        .enable_search(choices.len() > 8)
+        .build();
+    // Before the handler is connected, so opening the dialog doesn't count as
+    // choosing what was already chosen.
+    if let Some(index) = choices.iter().position(|choice| *choice == current) {
+        row.set_selected(index as u32);
+    }
+
+    let app = app.clone();
+    row.connect_selected_notify(move |row| {
+        let Some(choice) = choices.get(row.selected() as usize) else {
+            return;
+        };
+        row.set_subtitle(&describe(choice));
+        app.set_theme(choice.clone());
+    });
+    group.add(&row);
+    group
+}
+
+/// The line under the dropdown, saying what the selected choice will actually
+/// paint - which for "Follow desktop" depends on the desktop.
+fn describe(choice: &Choice) -> String {
+    match choice {
+        Choice::System => match omarchy::desktop_name() {
+            Some(name) => format!(
+                "Your desktop's Omarchy theme, currently {}",
+                omarchy::title_case(&name)
+            ),
+            None => "No Omarchy theme on this desktop, so the app's own dark".to_string(),
+        },
+        Choice::Dark => "The app's own gunmetal, whatever the desktop wears".to_string(),
+        Choice::Light => "The app's own light palette, whatever the desktop wears".to_string(),
+        Choice::Named(_) if omarchy::is_available(choice) => {
+            format!("{} here, whatever the desktop wears", choice.label())
+        }
+        Choice::Named(_) => {
+            "Not installed on this machine, so the desktop's theme is used".to_string()
+        }
+    }
 }
 
 /// One opacity control, as a spin row over the 0.5..=1.0 the appearance clamps

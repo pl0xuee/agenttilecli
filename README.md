@@ -256,8 +256,8 @@ you want to nudge it.
   cheatsheet come from, so nothing the app can do is missing from it. It's on
   `Super+Alt+P` rather than the usual `Ctrl+Shift+P` because that combination
   belongs to whatever is running inside a pane.
-- **Preferences you can see while you set them** — window and pane opacity and
-  the space around tiles, applied as you move them, with the window behind the
+- **Preferences you can see while you set them** — the theme, window and pane
+  opacity and the space around tiles, applied as you move them, with the window behind the
   dialog as the preview. They're remembered in your session; `config.toml` still
   says what the app opens as.
 - **Glass chrome, solid panes by default** — the gutters, the header strip and the
@@ -278,6 +278,17 @@ you want to nudge it.
   theme while the app is running and it repaints in place. No Omarchy, no
   change: the app's own gunmetal palette is still there, and still the
   fallback.
+- **Dark, light, or any theme you have** — the **Theme** dropdown in
+  Preferences (or `theme` in `config.toml`) picks what the window wears:
+  *Follow desktop*, which is everything above; *Dark*, the app's own gunmetal;
+  *Light*, its counterpart on paper; or any Omarchy theme installed on the
+  machine, pinned there whatever the desktop changes to. It applies live —
+  chrome, terminals, the editor's syntax colours and libadwaita's own widgets
+  all move together. Claude panes are launched knowing whether they're in a
+  light or a dark window; one already running keeps the variant it started
+  with until it's restarted, though its colours still follow the terminal's.
+  *Switch between light and dark* is in the command palette too, for giving
+  a key of its own.
 
 ## Configuration
 
@@ -296,6 +307,7 @@ font = "JetBrains Mono 10" # terminal font; "" for your desktop's monospace
 window_opacity = 0.92     # the gutters, the header strip and the rack
 pane_opacity = 1.0        # the terminal surfaces themselves
 notifications = true      # desktop notifications when an agent wants you
+theme = "system"          # system (follow the desktop), dark, light, or an Omarchy theme name
 
 [agent.claude]
 command = "claude"        # what a claude pane runs
@@ -337,10 +349,11 @@ desktop it stays above 6.8:1 the whole way. Which is to say: how low you can go 
 a fact about your wallpaper, not about the app — so the slider applies live, and
 your own eyes are the guard.
 
-The three appearance settings are also in Preferences, and what you set there is
-remembered in your session rather than written back here — this file is meant to
-be commented, and saving over it would delete what you'd written. Only values
-you actually change are remembered, so editing this file keeps working.
+The theme and the three appearance settings are also in Preferences, and what
+you set there is remembered in your session rather than written back here — this
+file is meant to be commented, and saving over it would delete what you'd
+written. Only values you actually change are remembered, so editing this file
+keeps working.
 
 Your session (which projects are open, their order, each one's layout mode and
 ratios, the window size) is remembered separately in
@@ -382,8 +395,10 @@ have needed two letters, **Shift reverses** the one: `J` goes to the next pane,
 A few things have no key of their own and live in the command palette (`P`) and
 the app menu: starting a particular agent, starting one in a new worktree,
 resuming a project's agents, toggling broadcast, choosing a layout mode by name,
-and Preferences. Each has an id too (`new-claude`, `new-worktree-agent`,
-`resume-agents`, `broadcast`, `grid`, …), so any of them can be given a key.
+switching theme, and Preferences. Each has an id too (`new-claude`,
+`new-worktree-agent`, `resume-agents`, `broadcast`, `grid`, `toggle-theme`,
+`theme-system`, `theme-dark`, `theme-light`, …), so any of them can be given a
+key.
 
 ### Moving a key
 

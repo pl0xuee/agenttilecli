@@ -13,11 +13,18 @@
 //! only ever restates those relationships in somebody else's colours. A machine
 //! with no Omarchy on it loads exactly the stylesheet it always did.
 //!
+//! Following the desktop is the default rather than the only answer, though -
+//! see `Choice`. Someone can pin the window dark or light whatever the desktop
+//! wears, or pin it to any other Omarchy theme installed on the machine. The
+//! built-in light palette is written in the same `colors.toml` shape and read
+//! through the same mapping, so there is one road from a palette to the window
+//! rather than one per mode.
+//!
 //! GTK-free on purpose, like `hooks` and `agent`: the mapping is the part worth
 //! testing and the tests should run on a machine with no display.
 
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::palette::Rgb;
 
@@ -27,6 +34,118 @@ pub enum Mode {
     Dark,
     Light,
 }
+
+/// Which palette the window wears - the `theme` setting.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub enum Choice {
+    /// The desktop's Omarchy theme, following it as it changes - or the
+    /// built-in dark ramp on a machine with no Omarchy, which is all this app
+    /// did before there was a choice to make.
+    #[default]
+    System,
+    /// The built-in gunmetal ramp exactly as `style.css` states it, whatever
+    /// the desktop wears.
+    Dark,
+    /// The built-in light ramp, `LIGHT` below.
+    Light,
+    /// An installed Omarchy theme, by its directory name ("tokyo-night"), worn
+    /// whatever the desktop wears.
+    Named(String),
+}
+
+impl Choice {
+    /// What a config file or a session says, read leniently: case and spaces
+    /// are folded the way `omarchy theme set` folds them, so `"Tokyo Night"`
+    /// and `"tokyo-night"` name the same theme here as they do there.
+    pub fn parse(text: &str) -> Choice {
+        let key = text.trim().to_lowercase().replace(' ', "-");
+        match key.as_str() {
+            "" | "system" => Choice::System,
+            "dark" => Choice::Dark,
+            "light" => Choice::Light,
+            _ => Choice::Named(key),
+        }
+    }
+
+    /// The spelling `parse` takes back - what `config.toml` and the session
+    /// store.
+    pub fn key(&self) -> &str {
+        match self {
+            Choice::System => "system",
+            Choice::Dark => "dark",
+            Choice::Light => "light",
+            Choice::Named(name) => name,
+        }
+    }
+
+    /// The wording the preferences dialog shows.
+    pub fn label(&self) -> String {
+        match self {
+            Choice::System => "Follow desktop".to_string(),
+            Choice::Dark => "Dark".to_string(),
+            Choice::Light => "Light".to_string(),
+            Choice::Named(name) => title_case(name),
+        }
+    }
+}
+
+/// "tokyo-night" as "Tokyo Night" - the same rewrite `omarchy theme list`
+/// applies, so a theme is called the same thing here as in the desktop's menu.
+pub fn title_case(name: &str) -> String {
+    name.split('-')
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().chain(chars).collect(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The built-in light ramp: the gunmetal turned over onto paper.
+///
+/// The surfaces keep the dark ramp's trace of teal - green a point above the
+/// midpoint of red and blue - so the two modes read as one material in two
+/// lights rather than two unrelated apps. The floor is the deepest grey and
+/// the focused pane the whitest, which is the same "lit means focused" the
+/// dark ramp says with its warm filament.
+///
+/// The accent cannot be that filament. A near-white lamp is invisible on
+/// paper, and every control that fills with @filament sets its label in
+/// @field, which here is a light grey. So focus is a deep steel teal, dark
+/// enough to carry that label, and drawn from the same cast as the surfaces
+/// so it reads as the material's own ink rather than a colour brought in.
+///
+/// The signal hues are the dark ramp's amber, green and red taken down until
+/// they hold up as text on white; `tally` in particular is a burnt amber,
+/// because the dark ramp's #f0a93c on paper is a highlighter.
+const LIGHT: &str = r##"
+mode = "light"
+accent = "#1a627d"
+background = "#eff2f4"
+dark_background = "#e2e7ea"
+darker_background = "#d6dde1"
+lighter_background = "#fafbfc"
+foreground = "#1b242a"
+dark_foreground = "#8a959c"
+light_foreground = "#3a454d"
+bright_foreground = "#0e1417"
+red = "#c0392f"
+yellow = "#b5700f"
+green = "#3d8a3a"
+cyan = "#177e85"
+blue = "#2566a8"
+magenta = "#8b4fa8"
+bright_red = "#d9483c"
+bright_yellow = "#c98512"
+bright_green = "#4a9c46"
+bright_cyan = "#1f949b"
+bright_blue = "#3479c0"
+bright_magenta = "#a060be"
+"##;
 
 /// Every colour `colors.toml` is allowed to carry, all of it optional.
 ///
@@ -271,15 +390,6 @@ impl Theme {
         css
     }
 
-    /// The claude theme that renders from the terminal's ANSI palette rather
-    /// than from its own hexes - which is what makes an Omarchy theme reach
-    /// inside a pane at all.
-    pub fn claude_theme(&self) -> &'static str {
-        match self.mode {
-            Mode::Dark => "dark-ansi",
-            Mode::Light => "light-ansi",
-        }
-    }
 }
 
 /// `~/.local/state/omarchy/current` under `home`.
@@ -336,63 +446,184 @@ pub fn load() -> Option<Theme> {
     Theme::parse(&name, &colors)
 }
 
+/// The name of the desktop's current theme ("nebula"), for the preferences
+/// dialog to say what "Follow desktop" would follow.
+pub fn desktop_name() -> Option<String> {
+    let name = std::fs::read_to_string(current_dir()?.join("theme.name")).ok()?;
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Where installed themes live, in the order `omarchy theme set` layers them:
+/// the user's own directory wins over the stock one for a name in both.
+///
+/// The stock directory is `$OMARCHY_PATH/themes`, which is what the desktop's
+/// own scripts read, with `/usr/share/omarchy` for a process that was launched
+/// without Omarchy's environment - from a `.desktop` file, say.
+fn theme_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(Path::new(&home).join(".config/omarchy/themes"));
+    }
+    let stock = std::env::var_os("OMARCHY_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/usr/share/omarchy"));
+    dirs.push(stock.join("themes"));
+    dirs
+}
+
+/// The `colors.toml` an installed theme called `name` carries, from the first
+/// directory in `dirs` that has one.
+fn named_colors(dirs: &[PathBuf], name: &str) -> Option<String> {
+    dirs.iter()
+        .find_map(|dir| std::fs::read_to_string(dir.join(name).join("colors.toml")).ok())
+}
+
+/// Every theme installed in `dirs` that this app can wear - one with a
+/// `colors.toml` - sorted and without duplicates.
+fn installed_in(dirs: &[PathBuf]) -> Vec<String> {
+    let mut names: Vec<String> = dirs
+        .iter()
+        .filter_map(|dir| std::fs::read_dir(dir).ok())
+        .flat_map(|entries| entries.flatten())
+        .filter(|entry| entry.path().join("colors.toml").is_file())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Every installed Omarchy theme, by directory name. Empty on a machine with
+/// no Omarchy, which leaves the choice at system, dark and light.
+pub fn installed() -> Vec<String> {
+    installed_in(&theme_dirs())
+}
+
+/// Whether `choice` can be worn as asked. Only a named theme can fail to: one
+/// that was typed wrong, or has since been removed.
+pub fn is_available(choice: &Choice) -> bool {
+    match choice {
+        Choice::Named(name) => named_colors(&theme_dirs(), name)
+            .and_then(|colors| Theme::parse(name, &colors))
+            .is_some(),
+        _ => true,
+    }
+}
+
+/// The built-in light ramp, as a theme.
+pub fn light() -> Theme {
+    Theme::parse("light", LIGHT).expect("the built-in light palette parses")
+}
+
+/// The palette `choice` asks for, and the mode it is drawn in.
+///
+/// Dark is the one choice with no palette: it is `style.css` exactly as
+/// written, so the themed provider is emptied rather than handed a copy of it.
+/// A named theme that cannot be read falls back to the desktop's, which is
+/// where the app would be had the setting never been written.
+fn resolve(choice: &Choice) -> (Option<Theme>, Option<Mode>) {
+    let theme = match choice {
+        Choice::System => load(),
+        Choice::Dark => return (None, Some(Mode::Dark)),
+        Choice::Light => Some(light()),
+        Choice::Named(name) => named_colors(&theme_dirs(), name)
+            .and_then(|colors| Theme::parse(name, &colors))
+            .or_else(load),
+    };
+    let mode = theme.as_ref().map(|t| t.mode);
+    (theme, mode)
+}
+
+/// The palette in force and the mode it was drawn for.
+///
+/// The mode is kept beside the theme rather than read off it, because pinned
+/// dark has a mode and no theme - and a mode is what tells claude and
+/// libadwaita which way round to paint. `None` for both is the desktop with no
+/// Omarchy on it, where the app has no opinion to press on claude at all.
+struct Active {
+    theme: Option<Theme>,
+    mode: Option<Mode>,
+}
+
 thread_local! {
-    /// The theme in force, or `None` on a machine with no Omarchy.
+    /// The theme in force, or `None` when the window wears the built-in dark
+    /// ramp.
     ///
     /// Process-wide for the same reason `appearance` is: it is read from the
     /// stylesheet loader, from `palette` on behalf of every widget, and from
     /// every pane's terminal, none of which have any business being handed a
     /// palette through a signature that never varies. A thread-local because
     /// GTK is single-threaded and every one of those readers is a GTK callback.
-    static ACTIVE: RefCell<Option<Theme>> = const { RefCell::new(None) };
+    static ACTIVE: RefCell<Active> = const {
+        RefCell::new(Active {
+            theme: None,
+            mode: None,
+        })
+    };
 }
 
-/// Reads the live theme and installs it. Returns what it found, so a caller can
-/// tell "the desktop is themed" from "the desktop is not" without asking twice.
+/// Reads the palette `choice` asks for and installs it. Returns whether there
+/// is one, so a caller can tell "themed" from "the built-in ramp" without
+/// asking twice.
 ///
-/// Called at startup and again on every `omarchy theme set`; a failure to read
-/// is a return to the built-in ramp rather than an error, because that ramp is
-/// a complete palette and always was.
-pub fn reload() -> bool {
-    let theme = load();
+/// Called at startup, on every `omarchy theme set`, and whenever the theme
+/// setting moves; a failure to read is a return to the built-in ramp rather
+/// than an error, because that ramp is a complete palette and always was.
+pub fn reload(choice: &Choice) -> bool {
+    let (theme, mode) = resolve(choice);
     let themed = theme.is_some();
-    ACTIVE.with(|active| *active.borrow_mut() = theme);
+    ACTIVE.with(|active| *active.borrow_mut() = Active { theme, mode });
     themed
 }
 
-/// Whether the desktop's palette is light, which is the one fact about a theme
+/// Whether the palette in force is light, which is the one fact about a theme
 /// that reaches past colour into how libadwaita paints its own widgets.
 pub fn mode() -> Option<Mode> {
-    ACTIVE.with(|active| active.borrow().as_ref().map(|t| t.mode))
+    ACTIVE.with(|active| active.borrow().mode)
 }
 
 /// This app's colour `name` in the live theme, or `None` when there isn't one -
 /// in which case `palette::color` answers from the stylesheet exactly as it
 /// always has.
 pub fn color(name: &str) -> Option<Rgb> {
-    ACTIVE.with(|active| active.borrow().as_ref().and_then(|t| t.color(name)))
+    ACTIVE.with(|active| active.borrow().theme.as_ref().and_then(|t| t.color(name)))
 }
 
 /// The live theme's sixteen terminal colours for a pane painted in `surface`.
 pub fn ansi(surface: Rgb) -> Option<[Rgb; 16]> {
-    ACTIVE.with(|active| active.borrow().as_ref().map(|t| t.ansi(surface)))
+    ACTIVE.with(|active| active.borrow().theme.as_ref().map(|t| t.ansi(surface)))
 }
 
 /// The live theme's selection highlight.
 pub fn selection() -> Option<Rgb> {
-    ACTIVE.with(|active| active.borrow().as_ref().map(|t| t.selection()))
+    ACTIVE.with(|active| active.borrow().theme.as_ref().map(|t| t.selection()))
 }
 
 /// The `@define-color` block for the live theme, for the stylesheet provider
 /// that repoints the ramp at it.
 pub fn css() -> Option<String> {
-    ACTIVE.with(|active| active.borrow().as_ref().map(|t| t.css()))
+    ACTIVE.with(|active| active.borrow().theme.as_ref().map(|t| t.css()))
 }
 
 /// The claude theme every pane should be launched with, or `None` to leave
 /// claude on whatever the user's own settings say.
+///
+/// Read off the mode rather than the theme, so pinned dark - which has no
+/// theme - still tells claude it is dark. Someone who chose dark in this
+/// window has said what they want claude to look like in it, and a claude left
+/// on a light theme of its own would be the one light thing on the screen.
 pub fn claude_theme() -> Option<&'static str> {
-    ACTIVE.with(|active| active.borrow().as_ref().map(|t| t.claude_theme()))
+    mode().map(claude_theme_for)
+}
+
+/// The claude theme that renders from the terminal's ANSI palette rather than
+/// from its own hexes - which is what makes a theme reach inside a pane at all.
+fn claude_theme_for(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Dark => "dark-ansi",
+        Mode::Light => "light-ansi",
+    }
 }
 
 #[cfg(test)]
@@ -431,7 +662,7 @@ bright_magenta = "#d99a9c"
     /// White, as shipped. The interesting one: its backgrounds climb the *other
     /// way*, because in a light theme "darker_background" means a deeper grey
     /// rather than a deeper black.
-    const LIGHT: &str = r##"
+    const WHITE: &str = r##"
 mode = "light"
 accent = "#6e6e6e"
 selection = "#c0c0c0"
@@ -456,8 +687,8 @@ magenta = "#2e2e2e"
         Theme::parse("nebula", DARK).expect("nebula parses")
     }
 
-    fn light() -> Theme {
-        Theme::parse("white", LIGHT).expect("white parses")
+    fn white() -> Theme {
+        Theme::parse("white", WHITE).expect("white parses")
     }
 
     /// Perceived brightness, for the ladder assertions below. Rec. 601, which
@@ -497,7 +728,7 @@ magenta = "#2e2e2e"
     /// white on the floor - a light theme rendered inside out.
     #[test]
     fn a_light_theme_puts_its_greyest_background_on_the_floor() {
-        let theme = light();
+        let theme = white();
         assert_eq!(theme.mode, Mode::Light);
         assert_eq!(surface(&theme, "field"), Rgb::from_hex("#c0c0c0").unwrap());
         assert_eq!(surface(&theme, "tile-lit"), Rgb::from_hex("#ffffff").unwrap());
@@ -509,7 +740,7 @@ magenta = "#2e2e2e"
     /// is not.
     #[test]
     fn the_chrome_pulls_away_from_the_lit_surface_in_both_modes() {
-        for theme in [dark(), light()] {
+        for theme in [dark(), white(), light()] {
             let lit = luminance(surface(&theme, "tile-lit"));
             let gap = |name: &str| (luminance(surface(&theme, name)) - lit).abs();
             assert!(
@@ -528,7 +759,7 @@ magenta = "#2e2e2e"
     /// louder than the label above it.
     #[test]
     fn the_ink_ladder_fades_toward_the_paper_in_both_modes() {
-        for theme in [dark(), light()] {
+        for theme in [dark(), white(), light()] {
             let paper = luminance(surface(&theme, "tile"));
             let gap = |name: &str| (luminance(surface(&theme, name)) - paper).abs();
             assert!(
@@ -617,8 +848,8 @@ magenta = "#2e2e2e"
     /// does. `dark-ansi` on a light desktop is white-on-white.
     #[test]
     fn mode_chooses_the_ansi_theme_claude_is_launched_with() {
-        assert_eq!(dark().claude_theme(), "dark-ansi");
-        assert_eq!(light().claude_theme(), "light-ansi");
+        assert_eq!(claude_theme_for(dark().mode), "dark-ansi");
+        assert_eq!(claude_theme_for(white().mode), "light-ansi");
     }
 
     /// A file that isn't a theme is not a theme. Both failures matter: garbage
@@ -628,6 +859,137 @@ magenta = "#2e2e2e"
     fn a_file_that_is_not_a_theme_is_refused() {
         assert!(Theme::parse("junk", "this is not toml {{{").is_none());
         assert!(Theme::parse("empty", "mode = \"dark\"").is_none());
+    }
+
+    /// WCAG contrast between two opaque colours - the measure the light ramp
+    /// is held to below, since "readable" on paper is a number, not a feeling.
+    fn contrast(a: Rgb, b: Rgb) -> f32 {
+        let lum = |c: Rgb| {
+            let channel = |v: u8| {
+                let v = f32::from(v) / 255.0;
+                if v <= 0.03928 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b)
+        };
+        let (hi, lo) = {
+            let (x, y) = (lum(a), lum(b));
+            if x > y { (x, y) } else { (y, x) }
+        };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
+    /// Every spelling a person might write lands on the choice they meant, and
+    /// every choice survives the trip through the key it is stored under.
+    #[test]
+    fn a_choice_round_trips_through_its_key() {
+        assert_eq!(Choice::parse(""), Choice::System);
+        assert_eq!(Choice::parse("System"), Choice::System);
+        assert_eq!(Choice::parse(" DARK "), Choice::Dark);
+        assert_eq!(Choice::parse("light"), Choice::Light);
+        assert_eq!(
+            Choice::parse("Tokyo Night"),
+            Choice::Named("tokyo-night".into()),
+            "a theme is named the way `omarchy theme set` accepts it",
+        );
+        for choice in [
+            Choice::System,
+            Choice::Dark,
+            Choice::Light,
+            Choice::Named("catppuccin-latte".into()),
+        ] {
+            assert_eq!(Choice::parse(choice.key()), choice);
+        }
+        assert_eq!(Choice::Named("catppuccin-latte".into()).label(), "Catppuccin Latte");
+        assert_eq!(title_case("rose-pine"), "Rose Pine");
+    }
+
+    /// The built-in light palette goes through the same mapping as any
+    /// desktop theme, and has to come out of it the right way up.
+    #[test]
+    fn the_built_in_light_palette_is_light_and_climbs() {
+        let theme = light();
+        assert_eq!(theme.mode, Mode::Light);
+        assert_eq!(claude_theme_for(theme.mode), "light-ansi");
+        let field = luminance(surface(&theme, "field"));
+        let rack = luminance(surface(&theme, "rack"));
+        let tile = luminance(surface(&theme, "tile"));
+        let lit = luminance(surface(&theme, "tile-lit"));
+        assert!(
+            field < rack && rack < tile && tile < lit,
+            "light ramp is not monotonic: field {field}, rack {rack}, tile {tile}, lit {lit}"
+        );
+    }
+
+    /// The light ramp's readability, as numbers. Each pair is something the
+    /// window actually draws: body text on both pane surfaces, the label a
+    /// filled @filament control sets in @field, the amber "asking" dot and
+    /// label on a pane, and the quietest ink the chrome uses.
+    #[test]
+    fn the_built_in_light_palette_is_readable() {
+        let theme = light();
+        let c = |name: &str| surface(&theme, name);
+        for (what, ink, paper, floor) in [
+            ("text on a pane", c("text"), c("tile"), 7.0),
+            ("text on the focused pane", c("text"), c("tile-lit"), 7.0),
+            ("a filled button's label", c("field"), c("filament"), 4.5),
+            ("the focus ring on a pane", c("filament"), c("tile"), 4.5),
+            ("an asking tile's amber", c("tally"), c("tile"), 3.0),
+            ("a hang-up's red", c("hangup"), c("tile"), 4.5),
+            ("a secondary label", c("dim"), c("tile"), 4.5),
+            ("an icon at rest", c("muted"), c("rack"), 3.0),
+        ] {
+            let ratio = contrast(ink, paper);
+            assert!(ratio >= floor, "{what}: {ratio:.2}:1, wants {floor}:1");
+        }
+    }
+
+    /// Pinned dark is the stylesheet's own ramp, so there is nothing to
+    /// install over it - but it is still dark, and claude is told so.
+    #[test]
+    fn pinned_dark_has_a_mode_and_no_palette() {
+        let (theme, mode) = resolve(&Choice::Dark);
+        assert!(theme.is_none(), "dark is style.css as written, not a copy of it");
+        assert_eq!(mode, Some(Mode::Dark));
+        assert_eq!(claude_theme_for(Mode::Dark), "dark-ansi");
+
+        let (theme, mode) = resolve(&Choice::Light);
+        assert_eq!(theme.map(|t| t.mode), Some(Mode::Light));
+        assert_eq!(mode, Some(Mode::Light));
+    }
+
+    /// Installed themes are found in both directories, a theme in the user's
+    /// own directory wins over a stock one of the same name, and a directory
+    /// with no `colors.toml` in it is not a theme this app can wear.
+    #[test]
+    fn installed_themes_are_found_and_the_users_own_wins() {
+        let root = std::env::temp_dir().join(format!("atc-themes-{}", std::process::id()));
+        let user = root.join("user");
+        let stock = root.join("stock");
+        for (dir, name, colors) in [
+            (&user, "nebula", DARK),
+            (&user, "white", "background = \"#000000\"\nforeground = \"#ffffff\""),
+            (&stock, "white", WHITE),
+            (&stock, "catppuccin", DARK),
+        ] {
+            std::fs::create_dir_all(dir.join(name)).unwrap();
+            std::fs::write(dir.join(name).join("colors.toml"), colors).unwrap();
+        }
+        std::fs::create_dir_all(stock.join("half-installed")).unwrap();
+
+        let dirs = [user.clone(), stock.clone()];
+        assert_eq!(installed_in(&dirs), ["catppuccin", "nebula", "white"]);
+        let white = named_colors(&dirs, "white").unwrap();
+        assert!(
+            white.contains("#000000"),
+            "the stock copy was read over the user's own: {white}"
+        );
+        assert!(named_colors(&dirs, "half-installed").is_none());
+
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// Omarchy states this path in terms of `$HOME` and never reads

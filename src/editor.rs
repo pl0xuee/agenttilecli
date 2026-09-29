@@ -118,7 +118,27 @@ impl std::ops::Deref for Editor {
     }
 }
 
+/// Paints `buffer` in the GtkSourceView scheme for the palette in force:
+/// Adwaita on a light one, Adwaita-dark otherwise. A scheme paints the text's
+/// background as well as its colours, so the dark one left in place under a
+/// light palette is a black slab in the middle of a white window.
+fn apply_scheme(buffer: &sourceview5::Buffer) {
+    let name = match crate::omarchy::mode() {
+        Some(crate::omarchy::Mode::Light) => "Adwaita",
+        _ => "Adwaita-dark",
+    };
+    if let Some(scheme) = sourceview5::StyleSchemeManager::default().scheme(name) {
+        buffer.set_style_scheme(Some(&scheme));
+    }
+}
+
 impl Editor {
+    /// Repaints the code in whichever scheme the palette now calls for - the
+    /// theme changed under an open file.
+    pub fn refresh_scheme(&self) {
+        apply_scheme(&self.0.buffer);
+    }
+
     fn downgrade(&self) -> Weak<Inner> {
         Rc::downgrade(&self.0)
     }
@@ -132,9 +152,7 @@ impl Editor {
         let content = load(path)?;
 
         let buffer = sourceview5::Buffer::new(None);
-        if let Some(scheme) = sourceview5::StyleSchemeManager::default().scheme("Adwaita-dark") {
-            buffer.set_style_scheme(Some(&scheme));
-        }
+        apply_scheme(&buffer);
         buffer.set_enable_undo(true);
 
         let view = sourceview5::View::with_buffer(&buffer);
