@@ -145,6 +145,10 @@ pub struct Config {
     /// default: it is the one signal that reaches you away from the window,
     /// which is where running agents in parallel leaves you most of the time.
     pub notifications: bool,
+    /// Whether those same two moments also play a quiet chime (see `sound`) -
+    /// a rising pair of notes for asking, one note for finished. Unlike the
+    /// notification it plays even while you are looking at the window.
+    pub sounds: bool,
     /// Keyboard shortcuts moved from their defaults, by command id:
     /// `find = "Super+Alt+F"`, or `"none"` to give one up. A map rather than
     /// named fields because there are forty commands and a person wants to
@@ -203,6 +207,7 @@ impl Default for Config {
             font: "JetBrainsMono Nerd Font, JetBrains Mono, Fira Mono, monospace 10".to_string(),
             theme: "system".to_string(),
             notifications: true,
+            sounds: true,
             keys: BTreeMap::new(),
         }
     }
@@ -527,6 +532,7 @@ mod tests {
             font: "JetBrains Mono 11".into(),
             theme: "light".into(),
             notifications: false,
+            sounds: false,
             keys: BTreeMap::from([("find".to_string(), "Super+Alt+F".to_string())]),
         };
         let text = toml::to_string(&config).expect("serialises");

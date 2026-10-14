@@ -438,7 +438,7 @@ impl App {
             }
             return;
         }
-        if !report.changed || !crate::config::get().notifications {
+        if !report.changed {
             return;
         }
         let moment = match (&report.from, &report.to, message.event) {
@@ -454,6 +454,15 @@ impl App {
             }
             _ => return,
         };
+        // The chime plays whether or not you are looking: with four tiles in
+        // view, which of them just asked is exactly what the eye misses.
+        let config = crate::config::get();
+        if config.sounds {
+            crate::sound::play(moment);
+        }
+        if !config.notifications {
+            return;
+        }
         let looking =
             self.0.window.is_active() && self.0.store.borrow().active() == Some(id);
         if looking {

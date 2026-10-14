@@ -38,6 +38,12 @@ you want to nudge it.
   switched, pane focused. One per pane, replaced as the pane moves on, and
   taken back the moment you look, so the desktop's list reads as "who is still
   waiting on me" rather than as a log. `notifications = false` turns them off.
+- **A quiet chime you hear without looking** — the same two moments play a
+  soft synthesised chime: a rising pair of notes when an agent asks, a single
+  note when one finishes, at under a third of full volume and gone in under
+  half a second. Played through `pw-play`, `paplay` or `aplay`, whichever is
+  installed; several agents at once make one chime. `sounds = false` turns it
+  off.
 - **One key to whoever is waiting** — `Super+Alt+N` goes to the next agent that
   has stopped to ask you something, across every project; press it again for
   the next one. Four agents waiting is four presses.
@@ -307,6 +313,7 @@ font = "JetBrains Mono 10" # terminal font; "" for your desktop's monospace
 window_opacity = 0.92     # the gutters, the header strip and the rack
 pane_opacity = 1.0        # the terminal surfaces themselves
 notifications = true      # desktop notifications when an agent wants you
+sounds = true             # a quiet chime when an agent asks or finishes
 theme = "system"          # system (follow the desktop), dark, light, or an Omarchy theme name
 
 [agent.claude]

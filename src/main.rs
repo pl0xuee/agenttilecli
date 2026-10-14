@@ -22,6 +22,7 @@ mod preferences;
 mod search;
 mod session;
 mod shortcuts;
+mod sound;
 #[cfg(test)]
 mod testing;
 mod tiler;
